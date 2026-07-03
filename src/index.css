@@ -1,0 +1,148 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Playfair Display", ui-serif, Georgia, serif;
+}
+
+/* Document — block stray horizontal overflow and respect the iOS safe areas
+   exposed via viewport-fit=cover. */
+html,
+body {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  min-height: 100svh;
+}
+
+/* Native iOS / Android tap flash — kill the grey overlay so tap feedback
+   stays on the framer-motion whileTap scale. */
+a,
+button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Keyboard focus — visible without affecting mouse users. */
+:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+a:focus-visible,
+button:focus-visible {
+  outline-color: rgba(255, 255, 255, 0.8);
+}
+
+/* Subtle text-shadow on copy so it stays readable when the background
+   video swings to a bright sunset frame. */
+.text-readable {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+/* ---------- Liquid glass system ---------- */
+/* Goal: real frosted glass — saturation boost so the wallpaper's color pops
+   through, a visible rim, soft top-edge highlight, and a slow diagonal sheen
+   that drifts to suggest "liquid" light. */
+
+/* Small glass — chips, tags, icon containers. Light blur for presence on
+   every browser; the small footprint keeps GPU cost negligible. */
+.liquid-glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(6px) saturate(170%);
+  -webkit-backdrop-filter: blur(6px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.22),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Strong glass — the project cards. Default: subtle blur fallback so it
+   reads as "real glass" on any browser. Chromium desktop replaces the
+   blur with refractive distortion via SVG. */
+.liquid-glass-strong {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px) saturate(180%);
+  -webkit-backdrop-filter: blur(10px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  box-shadow:
+    0 14px 40px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.28),
+    inset 0 0 24px rgba(255, 255, 255, 0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Chromium desktop: refractive distortion replaces the blur entirely. */
+@supports (backdrop-filter: url(#test)) {
+  @media (min-width: 769px) {
+    .liquid-glass-strong {
+      backdrop-filter: url(#liquid-glass-distortion) saturate(200%);
+      -webkit-backdrop-filter: saturate(200%);
+    }
+  }
+}
+
+/* Mobile tuning: a touch less blur + cheaper saturate so weaker GPUs stay
+   smooth while the cards still read as glass. */
+@media (max-width: 768px) {
+  .liquid-glass-strong {
+    backdrop-filter: blur(8px) saturate(160%);
+    -webkit-backdrop-filter: blur(8px) saturate(160%);
+    box-shadow:
+      0 10px 30px rgba(0, 0, 0, 0.32),
+      inset 0 1px 1px rgba(255, 255, 255, 0.24);
+  }
+  .liquid-glass {
+    backdrop-filter: blur(5px) saturate(160%);
+    -webkit-backdrop-filter: blur(5px) saturate(160%);
+  }
+}
+
+/* Diagonal "wet" sheen — drifts very slowly to mimic moving light through glass */
+.liquid-glass-strong::before {
+  content: "";
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(255, 255, 255, 0.05) 30%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(255, 255, 255, 0.05) 70%,
+    rgba(255, 255, 255, 0.16) 100%
+  );
+  transform: rotate(24deg);
+  pointer-events: none;
+  animation: liquid-glass-drift 16s ease-in-out infinite;
+}
+
+@keyframes liquid-glass-drift {
+  0%, 100% {
+    transform: rotate(22deg) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: rotate(28deg) translate3d(-2%, 2%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-glass-strong::before {
+    animation: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .liquid-glass-strong {
+    backdrop-filter: blur(8px) saturate(160%);
+    -webkit-backdrop-filter: blur(8px) saturate(160%);
+  }
+}

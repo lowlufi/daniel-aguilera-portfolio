@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a14"/>
+      <stop offset="50%" stop-color="#1a1530"/>
+      <stop offset="100%" stop-color="#080810"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="30%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="rgba(120,160,255,0.25)"/>
+      <stop offset="100%" stop-color="rgba(120,160,255,0)"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <text x="600" y="290" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-weight="300" font-size="78" fill="rgba(255,255,255,0.95)">Daniel Eduardo</text>
+  <text x="600" y="380" text-anchor="middle" font-family="Georgia, 'Playfair Display', serif" font-style="italic" font-weight="600" font-size="82" fill="rgba(255,255,255,0.9)">Aguilera Campusano</text>
+  <text x="600" y="450" text-anchor="middle" font-family="'Inter', sans-serif" font-weight="300" font-size="24" fill="rgba(255,255,255,0.55)" letter-spacing="2">Ingeniero en Informática · Portafolio</text>
+  <line x1="500" y1="500" x2="700" y2="500" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+</svg>
