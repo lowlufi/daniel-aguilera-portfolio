@@ -1,7 +1,7 @@
 // Synthesized sound kit + ambient mixer. Everything is generated with the
 // Web Audio API, so there are no audio files to download or license.
 
-export type AmbientId = 'lluvia' | 'truenos' | 'viento' | 'pajaritos' | 'olas' | 'grillos' | 'fogata' | 'arroyo' | 'musica';
+export type AmbientId = 'lluvia' | 'truenos' | 'viento' | 'pajaritos' | 'olas' | 'grillos' | 'fogata' | 'arroyo' | 'musica' | 'ruido';
 
 export const AMBIENTS: { id: AmbientId; label: string; emoji: string }[] = [
   { id: 'lluvia', label: 'Lluvia', emoji: '🌧️' },
@@ -13,6 +13,16 @@ export const AMBIENTS: { id: AmbientId; label: string; emoji: string }[] = [
   { id: 'fogata', label: 'Fogata', emoji: '🔥' },
   { id: 'arroyo', label: 'Arroyo', emoji: '💧' },
   { id: 'musica', label: 'Cajita musical', emoji: '🎶' },
+  { id: 'ruido', label: 'Ruido de color', emoji: '🎚️' },
+];
+
+// Noise colors from the darkest (most bass) to the brightest spectrum.
+export const NOISE_COLORS = [
+  { label: 'Café', hex: '#8a5a3b' },
+  { label: 'Rosa', hex: '#f08fb0' },
+  { label: 'Blanco', hex: '#f4f1ea' },
+  { label: 'Azul', hex: '#6fa8e8' },
+  { label: 'Morado', hex: '#a07ae0' },
 ];
 
 export type Mix = Partial<Record<AmbientId, number>>;
@@ -24,7 +34,9 @@ let ambBus: GainNode | null = null;
 let muted = false;
 let ambientVolume = 0.8;
 let scheduler = 0;
-const levels: Record<AmbientId, number> = { lluvia: 0, truenos: 0, viento: 0, pajaritos: 0, olas: 0, grillos: 0, fogata: 0, arroyo: 0, musica: 0 };
+const levels: Record<AmbientId, number> = { lluvia: 0, truenos: 0, viento: 0, pajaritos: 0, olas: 0, grillos: 0, fogata: 0, arroyo: 0, musica: 0, ruido: 0 };
+let noiseColor = 1;
+const noiseGains: GainNode[] = [];
 let white: AudioBuffer | null = null;
 let pink: AudioBuffer | null = null;
 let brown: AudioBuffer | null = null;
@@ -88,6 +100,22 @@ export function setAmbient(id: AmbientId, v: number) {
   applyLevel(id);
 }
 
+// 0 = café, 1 = rosa, 2 = blanco, 3 = azul, 4 = morado; values in between blend.
+export function setNoiseColor(c: number) {
+  noiseColor = Math.min(4, Math.max(0, c));
+  applyNoiseColor();
+}
+
+function applyNoiseColor() {
+  if (!ctx || !noiseGains.length) return;
+  noiseGains.forEach((g, i) => {
+    const d = Math.abs(noiseColor - i);
+    // Equal-power crossfade between the two nearest colors.
+    const v = d >= 1 ? 0 : Math.cos((d * Math.PI) / 2);
+    g.gain.setTargetAtTime(v, ctx!.currentTime, 0.12);
+  });
+}
+
 export function setMix(mix: Mix) {
   for (const id of Object.keys(levels) as AmbientId[]) setAmbient(id, mix[id] ?? 0);
 }
@@ -116,6 +144,25 @@ function makeNoise(kind: 'white' | 'pink' | 'brown', seconds: number) {
       d[i] = last * 3.5;
     }
   }
+  return buf;
+}
+
+// Blue and violet noise are the first difference of pink and white noise.
+function differentiate(src: AudioBuffer) {
+  const c = ctx!;
+  const buf = c.createBuffer(1, src.length, c.sampleRate);
+  const a = src.getChannelData(0);
+  const d = buf.getChannelData(0);
+  for (let i = 1; i < a.length; i++) d[i] = a[i] - a[i - 1];
+  return buf;
+}
+
+function normalize(buf: AudioBuffer, rms: number) {
+  const d = buf.getChannelData(0);
+  let sum = 0;
+  for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+  const k = rms / Math.sqrt(sum / d.length || 1);
+  for (let i = 0; i < d.length; i++) d[i] *= k;
   return buf;
 }
 
@@ -341,6 +388,27 @@ const channels: Record<AmbientId, Channel> = {
       bps?.forEach((bp, i) => bp.frequency.setTargetAtTime(rand(500, 1200) * (i + 1), now, 0.04));
     },
   },
+  ruido: {
+    bus: null,
+    next: 0,
+    state: {},
+    build(bus) {
+      const bufs = [
+        normalize(makeNoise('brown', 4), 0.3),
+        normalize(makeNoise('pink', 4), 0.24),
+        normalize(makeNoise('white', 4), 0.18),
+        normalize(differentiate(makeNoise('pink', 4)), 0.14),
+        normalize(differentiate(makeNoise('white', 4)), 0.1),
+      ];
+      noiseGains.length = 0;
+      bufs.forEach((b) => {
+        const g = gain(0);
+        loop(b).connect(g).connect(bus);
+        noiseGains.push(g);
+      });
+      applyNoiseColor();
+    },
+  },
   musica: {
     bus: null,
     next: 0,
@@ -419,6 +487,14 @@ export const sfx = {
   snip() {
     if (!ctx || !sfxBus || muted) return;
     burst(sfxBus, ctx.currentTime, 0.11, 3200 + Math.random() * 1400, 0.3);
+  },
+  water() {
+    if (!ctx || !sfxBus || muted) return;
+    const t = ctx.currentTime;
+    for (let i = 0; i < 18; i++) burst(sfxBus, t + i * 0.06 + Math.random() * 0.04, 0.05, rand(900, 2400), 0.12, pink!);
+  },
+  pop() {
+    [523, 784, 1047].forEach((f, i) => tone(f, 0.12, 'triangle', 0.1, i * 0.05, f * 1.5));
   },
   step() {
     tone(180 + Math.random() * 40, 0.05, 'triangle', 0.035);

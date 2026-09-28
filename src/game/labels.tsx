@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { GameStore } from './store';
-import { DANIEL, GARDEN, HOUSE, MAILBOX, PLAZA, PROJECT_SIGNS, WELCOME, WORKSHOP } from './world';
+import { DANIEL, DOCK_END, GARDEN, HOUSE, MAILBOX, PLAZA, PROJECT_SIGNS, STATION, WELCOME, WORKSHOP } from './world';
 
 // Floating name tags. They live in one plain DOM layer on top of the canvas and
 // get re-projected every frame — cheaper than one React root per label.
@@ -27,6 +27,8 @@ export const LABELS: LabelDef[] = [
   { text: '✉️ Buzón', x: MAILBOX.x, y: 2.1, z: MAILBOX.z, tone: 'orange', size: 20 },
   { text: '👋 ¡Bienvenid@!', x: WELCOME.x, y: 1.85, z: WELCOME.z, tone: 'cream', size: 20 },
   { text: '💬 Daniel', x: DANIEL.x, y: 1.95, z: DANIEL.z, tone: 'orange', size: 20, bob: true },
+  { text: '📡 Estación ESP32', x: STATION.x, y: 2.05, z: STATION.z, tone: 'cream', size: 16 },
+  { text: '🌊 Muelle', x: DOCK_END.x, y: 1.2, z: DOCK_END.z, tone: 'cream', size: 16, nearOnly: 4 },
   ...PROJECT_SIGNS.map((s) => ({ text: s.project.title, x: s.x, y: 2.15, z: s.z, tone: 'cream' as const, size: 14, nearOnly: 2.2 })),
 ];
 

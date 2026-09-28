@@ -16,6 +16,16 @@ export type GameStore = {
   started: boolean;
   nearId: InteractableId | null;
   grassTotal: number;
+  // Orbit camera around the player (radians / world units).
+  camYaw: number;
+  camPitch: number;
+  camDist: number;
+  dragged: boolean;
+  // Garden: grows with each watering, resets on harvest.
+  garden: { growth: number; wateredAt: number; harvestedAt: number };
+  // Particle bursts requested by the UI (watering, harvest, party).
+  burst: (kind: 'water' | 'harvest' | 'party', x: number, z: number) => void;
+  meteo: Meteo | null;
   // Set by <Grass>; returns how many tufts were cut.
   cutAt: (x: number, z: number, r: number) => number;
   // Set by <Stars>; reveals stars hidden under freshly cut grass.
@@ -36,10 +46,19 @@ export function createStore(): GameStore {
     started: false,
     nearId: null,
     grassTotal: 1,
+    camYaw: 0,
+    camPitch: 0.5,
+    camDist: 13,
+    dragged: false,
+    garden: { growth: 1, wateredAt: -99, harvestedAt: -99 },
+    burst: () => {},
+    meteo: null,
     cutAt: () => 0,
     revealAt: () => {},
   };
 }
+
+export type Meteo = { temp: number; hum: number; wind: number; code: number; isDay: boolean; sunset: number };
 
 export type GameEvents = {
   onNear: (id: InteractableId | null) => void;

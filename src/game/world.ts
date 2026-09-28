@@ -3,7 +3,9 @@ import { PROJECTS } from '../data';
 
 // Island layout. Units are roughly meters; the player is ~1.5 tall.
 export const ISLAND_R = 26;
-export const WALK_R = 24.6;
+// The whole beach is walkable, plus the wooden dock that sticks out to sea.
+export const WALK_R = 28.6;
+export const DOCK = { x: 5, z0: 26.2, z1: 32.1, halfW: 0.8 };
 export const PLAYER_R = 0.4;
 export const SPAWN = new THREE.Vector3(0, 0, 7);
 
@@ -28,6 +30,8 @@ export const GARDEN = { x: -13, z: 0 };
 export const MAILBOX = { x: 8, z: 10 };
 export const WELCOME = { x: -2.6, z: 4.4 };
 export const DANIEL = { x: 9, z: -3.6 };
+export const STATION = { x: -8.2, z: -3.4 };
+export const DOCK_END = { x: 5, z: 31.3 };
 
 export const PROJECT_COLORS = ['#f0a45d', '#7cc6e8', '#9fd67a', '#e37b8b', '#b28ee0', '#f2cf5b', '#6fd1c1', '#c9a27a'];
 
@@ -48,7 +52,7 @@ export const GARDEN_PLOTS: GardenPlot[] = [
   { x: GARDEN.x + 1.6, z: GARDEN.z + 1.6, kind: 'cabbage' },
 ];
 
-export type InteractableId = 'welcome' | 'daniel' | 'board' | 'garden' | 'mailbox' | `project:${number}`;
+export type InteractableId = 'welcome' | 'daniel' | 'board' | 'garden' | 'mailbox' | 'station' | 'dock' | `project:${number}`;
 
 export type Interactable = {
   id: InteractableId;
@@ -65,6 +69,8 @@ export const INTERACTABLES: Interactable[] = [
   { id: 'board', label: 'Tablón de proyectos', verb: 'Leer el', x: PLAZA.x, z: PLAZA.z, radius: 2.4 },
   { id: 'garden', label: 'Huerto de habilidades', verb: 'Mirar el', x: GARDEN.x, z: GARDEN.z + 3.6, radius: 2.6 },
   { id: 'mailbox', label: 'Buzón', verb: 'Abrir el', x: MAILBOX.x, z: MAILBOX.z, radius: 2.2 },
+  { id: 'station', label: 'Estación ESP32', verb: 'Mirar la', x: STATION.x, z: STATION.z, radius: 1.9 },
+  { id: 'dock', label: 'muelle', verb: 'Sentarse en el', x: DOCK_END.x, z: DOCK_END.z, radius: 1.5 },
   ...PROJECT_SIGNS.map((s) => ({
     id: `project:${s.project.id}` as InteractableId,
     label: s.project.title,
@@ -78,6 +84,8 @@ export const INTERACTABLES: Interactable[] = [
 // Where the player stands when auto-walking to something.
 export function approachPoint(it: Interactable): THREE.Vector3 {
   if (it.id === 'garden') return new THREE.Vector3(it.x, 0, it.z + 0.6);
+  if (it.id === 'dock') return new THREE.Vector3(it.x, 0, it.z - 0.3);
+  if (it.id === 'station') return new THREE.Vector3(it.x + 0.9, 0, it.z + 0.9);
   const toSpawn = new THREE.Vector2(SPAWN.x - it.x, SPAWN.z - it.z).normalize();
   if (it.id.startsWith('project:')) {
     const toPlaza = new THREE.Vector2(PLAZA.x - it.x, PLAZA.z - it.z).normalize();
@@ -99,6 +107,7 @@ const STRUCTURE_COLLIDERS: Collider[] = [
   { x: MAILBOX.x, z: MAILBOX.z, r: 0.45 },
   { x: WELCOME.x, z: WELCOME.z, r: 0.5 },
   { x: DANIEL.x, z: DANIEL.z, r: 0.45 },
+  { x: STATION.x, z: STATION.z, r: 0.4 },
   ...GARDEN_PLOTS.map((p) => ({ x: p.x, z: p.z, r: 1.15 })),
   ...PROJECT_SIGNS.map((s) => ({ x: s.x, z: s.z, r: 0.45 })),
 ];
@@ -112,6 +121,7 @@ const KEEP_CLEAR: Collider[] = [
   { x: MAILBOX.x, z: MAILBOX.z, r: 2 },
   { x: WELCOME.x, z: WELCOME.z, r: 1.8 },
   { x: DANIEL.x, z: DANIEL.z, r: 2 },
+  { x: STATION.x, z: STATION.z, r: 2 },
 ];
 
 // Dirt path from the spawn to every landmark.
@@ -197,11 +207,25 @@ export function resolveCollisions(p: THREE.Vector3) {
       p.z = c.z + (dz / d) * min;
     }
   }
+  if (onDock(p.x, p.z)) return;
   const r = Math.hypot(p.x, p.z);
   if (r > WALK_R) {
     p.x *= WALK_R / r;
     p.z *= WALK_R / r;
   }
+}
+
+export function onDock(x: number, z: number) {
+  return Math.abs(x - DOCK.x) < DOCK.halfW && z > DOCK.z0 && z < DOCK.z1;
+}
+
+// Height of the walkable surface: grass on top, a small step down to the sand, the dock planks.
+export function groundHeight(x: number, z: number) {
+  if (onDock(x, z) && z > ISLAND_R + 0.4) return -0.19;
+  const r = Math.hypot(x, z);
+  if (r <= ISLAND_R - 0.3) return 0;
+  if (r >= ISLAND_R + 0.5) return -0.35;
+  return -0.35 * ((r - (ISLAND_R - 0.3)) / 0.8);
 }
 
 export const STAR_COUNT = 12;

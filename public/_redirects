@@ -1,1 +1,5 @@
-/*    /index.html   200
+# SPA routes. Anything else falls through to 404.html (served with a real 404 status).
+/clasico      /   200
+/proyectos    /   200
+/sobre-mi     /   200
+/privacidad   /   200

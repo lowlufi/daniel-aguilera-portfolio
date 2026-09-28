@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type WheelEvent as ReactWheelEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, X } from 'lucide-react';
 import { PROJECTS, SKILLS, SOCIAL } from '../data';
 import Scene from './Scene';
 import { LabelsOverlay } from './labels';
-import { AMBIENTS, initAudio, pauseAudio, setAmbient, setAmbientVolume, setMix as setAudioMix, setMuted as setAudioMuted, sfx, type AmbientId, type Mix } from './audio';
+import { AMBIENTS, NOISE_COLORS, initAudio, setNoiseColor as setAudioNoiseColor, pauseAudio, setAmbient, setAmbientVolume, setMix as setAudioMix, setMuted as setAudioMuted, sfx, type AmbientId, type Mix } from './audio';
 import { WEATHERS, WEATHER_CONFIG, stepAtmosphere, type WeatherId } from './weather';
-import { createStore, type GameEvents } from './store';
-import { INTERACTABLES, PROJECT_SIGNS, STAR_COUNT, approachPoint, type InteractableId } from './world';
+import { createStore, type GameEvents, type Meteo } from './store';
+import { GARDEN as GARDEN_CENTER, INTERACTABLES, PROJECT_SIGNS, STAR_COUNT, approachPoint, type InteractableId } from './world';
 
 type Props = {
   navigate: (to: string) => void;
@@ -17,7 +17,7 @@ type Props = {
 };
 
 type Choice = { label: string; run: () => void };
-type Dialog = { speaker: string; lines: string[]; choices?: Choice[] };
+type Dialog = { speaker: string; lines: string[]; choices?: Choice[]; skippable?: boolean };
 type Panel = 'projects' | 'skills' | null;
 type Toast = { key: number; icon: string; title: string; text: string };
 
@@ -27,7 +27,35 @@ const ACHIEVEMENTS = {
   estrellas: { icon: '⭐', title: 'Cazador de estrellitas', text: `Encontraste las ${STAR_COUNT} estrellitas escondidas.` },
   vecino: { icon: '🏡', title: 'Buen vecino', text: 'Visitaste a Daniel, el tablón, el huerto y el buzón.' },
   curioso: { icon: '🔍', title: 'Curiosidad infinita', text: 'Leíste todos los letreros de proyectos.' },
+  pulgar: { icon: '💧', title: 'Pulgar verde', text: 'Regaste el huerto tres veces.' },
+  cosecha: { icon: '🧺', title: 'Cosecha feliz', text: 'Cosechaste el huerto de habilidades.' },
+  meteo: { icon: '📡', title: 'Meteorólogo', text: 'Sincronizaste la isla con el clima real de San Antonio.' },
+  muelle: { icon: '🌊', title: 'Contemplativo', text: 'Te sentaste a mirar el mar desde el muelle.' },
+  secreto: { icon: '🎉', title: 'Código secreto', text: '↑ ↑ ↓ ↓ ← → ← → B A. ¡Eres de los buenos!' },
 } as const;
+
+const KONAMI = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
+
+// Open-Meteo weather codes → words, and → the closest island weather.
+function describeCode(code: number) {
+  if (code === 0) return 'despejado';
+  if (code <= 3) return 'parcialmente nublado';
+  if (code === 45 || code === 48) return 'con niebla';
+  if (code >= 51 && code <= 57) return 'con llovizna';
+  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return 'con lluvia';
+  if (code >= 71 && code <= 77) return 'con nieve';
+  if (code >= 95) return 'con tormenta';
+  return 'variable';
+}
+function islandWeatherFor(m: Meteo): WeatherId {
+  const c = m.code;
+  if (c === 45 || c === 48) return 'niebla';
+  if ((c >= 51 && c <= 67) || (c >= 80 && c <= 82) || c >= 95) return 'lluvia';
+  if (c >= 71 && c <= 77) return 'nieve';
+  if (!m.isDay) return 'noche';
+  const toSunset = m.sunset - Date.now() / 1000;
+  return toSunset > -1800 && toSunset < 5400 ? 'atardecer' : 'soleado';
+}
 type AchievementId = keyof typeof ACHIEVEMENTS;
 
 const TRAVEL: { id: InteractableId; emoji: string; label: string }[] = [
@@ -45,6 +73,7 @@ const SOUND_PRESETS: { label: string; emoji: string; mix: Mix }[] = [
   { label: 'Playa', emoji: '🏖️', mix: { olas: 0.8, viento: 0.3, pajaritos: 0.15 } },
   { label: 'Chimenea', emoji: '🪵', mix: { fogata: 0.8, lluvia: 0.3, musica: 0.25 } },
   { label: 'Noche', emoji: '🌌', mix: { grillos: 0.7, fogata: 0.2, olas: 0.2 } },
+  { label: 'Concentración', emoji: '🎧', mix: { ruido: 0.55, lluvia: 0.25 } },
   { label: 'Silencio', emoji: '🤫', mix: {} },
 ];
 
@@ -106,6 +135,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   });
   const [mix, setMixState] = useState<Record<AmbientId, number>>(() => fullMix(readStorage<Mix>('island-mix', WEATHER_CONFIG[weather].mix)));
   const [ambVol, setAmbVol] = useState(() => readStorage('island-ambvol', 0.8));
+  const [noiseColor, setNoiseColor] = useState(() => readStorage('island-noise-color', 1));
   const [sheet, setSheet] = useState<Sheet>(null);
   const reduceMotion = useReducedMotion() ?? false;
   const timers = useRef<number[]>([]);
@@ -157,6 +187,45 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     sfx.close();
   }, []);
 
+  const chooseWeatherRef = useRef<(w: WeatherId) => void>(() => {});
+  const konami = useRef<string[]>([]);
+  const danielTalks = useRef(0);
+  const waterCount = useRef(0);
+
+  const waterGarden = useCallback(() => {
+    setDialog(null);
+    const g = store.garden;
+    g.wateredAt = performance.now() / 1000;
+    g.growth = Math.min(1.45, Math.round((g.growth + 0.15) * 100) / 100);
+    store.burst('water', GARDEN_CENTER.x, GARDEN_CENTER.z);
+    sfx.water();
+    waterCount.current += 1;
+    if (waterCount.current >= 3) unlock('pulgar');
+    toast('💧', '¡Regaste el huerto!', g.growth >= 1.29 ? 'Las plantas se ven listas para cosechar. 🧺' : 'Las plantas crecen un poquito. Riega otra vez.');
+  }, [store, toast, unlock]);
+
+  const harvestGarden = useCallback(() => {
+    setDialog(null);
+    const g = store.garden;
+    if (g.growth < 1.29) {
+      toast('🌱', 'Aún no está listo', 'Riega el huerto un par de veces antes de cosechar.');
+      sfx.close();
+      return;
+    }
+    g.growth = 1;
+    g.harvestedAt = performance.now() / 1000;
+    store.burst('harvest', GARDEN_CENTER.x, GARDEN_CENTER.z);
+    sfx.pop();
+    unlock('cosecha');
+    toast('🧺', '¡Cosecha lista!', 'Girasoles, tomates, zanahorias y lechugas. Igual que sus habilidades: siempre creciendo.');
+  }, [store, toast, unlock]);
+
+  // Once seen (or skipped), the welcome tour stops opening on its own.
+  const finishTutorial = useCallback(() => {
+    writeStorage('island-tutorial-done', true);
+    closeDialog();
+  }, [closeDialog]);
+
   const openUrl = (url: string) => window.open(url, '_blank', 'noopener,noreferrer');
 
   const buildDialog = useCallback(
@@ -171,7 +240,20 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             'Mantén Espacio (o ✂️) para cortar el pasto. Dicen que hay estrellitas escondidas entre el pasto alto…',
             'Acércate a las cosas y pulsa E para interactuar. ¡O usa los botones de abajo para ir directo!',
           ],
-          choices: [{ label: '¡Vamos!', run: closeDialog }],
+          choices: [{ label: '¡Vamos!', run: finishTutorial }],
+          skippable: true,
+        };
+      if (id === 'daniel' && danielTalks.current >= 4)
+        return {
+          speaker: 'Daniel',
+          lines: [
+            '¿Otra vez por aquí? 😄 Me caes bien, así que te cuento un secreto…',
+            'En esta isla, prueba escribir ↑ ↑ ↓ ↓ ← → ← → B A. Nadie sabe qué pasa. 🤫',
+          ],
+          choices: [
+            { label: 'Ver tus proyectos', run: () => { setDialog(null); setPanel('projects'); sfx.open(); } },
+            { label: '¡Gracias!', run: closeDialog },
+          ],
         };
       if (id === 'daniel')
         return {
@@ -199,7 +281,57 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         return {
           speaker: 'Huerto de habilidades',
           lines: ['Cada cultivo de este huerto es algo que Daniel ha ido sembrando con los años. 🌱'],
-          choices: [{ label: 'Mirar las plantas', run: () => { setDialog(null); setPanel('skills'); sfx.open(); } }, close],
+          choices: [
+            { label: 'Mirar las plantas', run: () => { setDialog(null); setPanel('skills'); sfx.open(); } },
+            { label: '💧 Regar', run: waterGarden },
+            { label: '🧺 Cosechar', run: harvestGarden },
+            close,
+          ],
+        };
+      if (id === 'station') {
+        const m = store.meteo;
+        if (!m)
+          return {
+            speaker: 'Estación ESP32',
+            lines: [
+              'Una mini estación meteorológica con un ESP32 y un sensor DHT22 que armó Daniel. 📡',
+              'Mmm… no logra conectarse ahora mismo. Vuelve en un ratito.',
+            ],
+            choices: [close],
+          };
+        const target = islandWeatherFor(m);
+        const label = WEATHERS.find((w) => w.id === target);
+        return {
+          speaker: 'Estación ESP32',
+          lines: [
+            'Una mini estación meteorológica con un ESP32 y un sensor DHT22 que armó Daniel. 📡',
+            `Ahora mismo en San Antonio: ${m.temp.toFixed(1)} °C, ${Math.round(m.hum)} % de humedad y viento de ${Math.round(m.wind)} km/h. Está ${describeCode(m.code)}.`,
+            '(Datos en vivo de Open-Meteo, se actualizan cada 10 minutos.)',
+          ],
+          choices: [
+            {
+              label: `Poner la isla igual que San Antonio (${label?.emoji} ${label?.label})`,
+              run: () => {
+                setDialog(null);
+                chooseWeatherRef.current(target);
+                unlock('meteo');
+              },
+            },
+            close,
+          ],
+        };
+      }
+      if (id === 'dock')
+        return {
+          speaker: 'Muelle',
+          lines: [
+            'Te sientas en el borde del muelle y dejas los pies colgando sobre el agua. 🌊',
+            'Se escuchan las olas, las gaviotas a lo lejos… Aquí nadie te apura.',
+          ],
+          choices: [
+            { label: 'Quedarse un ratito', run: () => { unlock('muelle'); closeDialog(); } },
+            { label: 'Volver a explorar', run: closeDialog },
+          ],
         };
       if (id === 'mailbox')
         return {
@@ -223,7 +355,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
           : [{ label: `Visitar ${p.url.replace(/^https?:\/\/(www\.)?/, '')} ↗`, run: () => openUrl(p.url) }, close],
       };
     },
-    [closeDialog, openComposer],
+    [closeDialog, finishTutorial, harvestGarden, openComposer, store, unlock, waterGarden],
   );
 
   const openDialog = useCallback(
@@ -233,6 +365,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       store.target = null;
       store.targetId = null;
       visited.current.add(id);
+      if (id === 'daniel') danielTalks.current += 1;
       if (['daniel', 'board', 'garden', 'mailbox'].every((x) => visited.current.has(x as InteractableId))) unlock('vecino');
       if (id.startsWith('project:')) {
         seenProjects.current.add(Number(id.split(':')[1]));
@@ -330,13 +463,16 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     if (startedRef.current) return;
     startedRef.current = true;
     setAmbientVolume(ambVol);
+    setAudioNoiseColor(noiseColor);
     setAudioMix(mix);
     initAudio(muted);
     setStarted(true);
-    later(() => {
-      if (!busyRef.current) openDialog('welcome');
-    }, 1300);
-  }, [ambVol, later, mix, muted, openDialog]);
+    if (!readStorage('island-tutorial-done', false)) {
+      later(() => {
+        if (!busyRef.current) openDialog('welcome');
+      }, 1300);
+    }
+  }, [ambVol, later, mix, muted, noiseColor, openDialog]);
 
   // Stop every sound and pending timer when leaving the island.
   useEffect(
@@ -357,6 +493,39 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     sfx.select();
   }, []);
 
+  chooseWeatherRef.current = chooseWeather;
+
+  // Live readings for the ESP32 station (San Antonio, Valparaíso).
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch(
+          'https://api.open-meteo.com/v1/forecast?latitude=-33.5933&longitude=-71.6217&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,is_day&daily=sunset&forecast_days=1&timezone=auto&timeformat=unixtime',
+        );
+        if (!res.ok) return;
+        const d = await res.json();
+        if (!alive) return;
+        store.meteo = {
+          temp: d.current.temperature_2m,
+          hum: d.current.relative_humidity_2m,
+          wind: d.current.wind_speed_10m,
+          code: d.current.weather_code,
+          isDay: d.current.is_day === 1,
+          sunset: d.daily?.sunset?.[0] ?? 0,
+        };
+      } catch {
+        // Offline or blocked: the station just keeps showing "wifi...".
+      }
+    };
+    load();
+    const t = window.setInterval(load, 10 * 60 * 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [store]);
+
   const applyMix = useCallback((m: Mix) => {
     const full = fullMix(m);
     setMixState(full);
@@ -372,6 +541,12 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     });
     setAmbient(id, v);
   }, []);
+
+  const changeNoiseColor = (c: number) => {
+    setNoiseColor(c);
+    setAudioNoiseColor(c);
+    writeStorage('island-noise-color', c);
+  };
 
   const changeAmbVol = (v: number) => {
     setAmbVol(v);
@@ -438,6 +613,14 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         openDialog(store.nearId);
         return;
       }
+      konami.current = [...konami.current, key].slice(-KONAMI.length);
+      if (konami.current.join() === KONAMI.join()) {
+        konami.current = [];
+        store.burst('party', store.pos.x, store.pos.z);
+        sfx.achievement();
+        unlock('secreto');
+        toast('🎉', '¡Fiesta en la isla!', 'Encontraste el código secreto.');
+      }
       store.keys.add(key);
     };
     const up = (e: KeyboardEvent) => store.keys.delete(e.key.toLowerCase());
@@ -450,7 +633,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [advance, choiceIdx, closeDialog, dialog, openDialog, panel, paused, sheet, showChoices, start, started, store]);
+  }, [advance, choiceIdx, closeDialog, dialog, openDialog, panel, paused, sheet, showChoices, start, started, store, toast, unlock]);
 
   useEffect(() => {
     if (dialog || panel) store.keys.clear();
@@ -458,10 +641,67 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
 
   const nearItem = near ? INTERACTABLES.find((x) => x.id === near) : null;
 
+  // Hold and drag on the island to orbit the camera; wheel or pinch to zoom.
+  // A short press without movement still counts as a click (walk there).
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef(0);
+  const onCanvasPointerDown = (e: ReactPointerEvent) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    store.dragged = false;
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()];
+      pinch.current = Math.hypot(a.x - b.x, a.y - b.y);
+    }
+  };
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const p = pointers.current.get(e.pointerId);
+      if (!p || !startedRef.current) return;
+      const dx = e.clientX - p.x;
+      const dy = e.clientY - p.y;
+      p.x = e.clientX;
+      p.y = e.clientY;
+      if (pointers.current.size === 2) {
+        const [a, b] = [...pointers.current.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinch.current > 0) store.camDist = Math.min(26, Math.max(6, store.camDist * (pinch.current / d)));
+        pinch.current = d;
+        store.dragged = true;
+        return;
+      }
+      if (!store.dragged && Math.abs(dx) + Math.abs(dy) < 3) return;
+      store.dragged = true;
+      document.body.style.cursor = 'grabbing';
+      store.camYaw -= dx * 0.0065;
+      store.camPitch = Math.min(1.25, Math.max(0.12, store.camPitch + dy * 0.0045));
+    };
+    const up = (e: PointerEvent) => {
+      pointers.current.delete(e.pointerId);
+      pinch.current = 0;
+      if (document.body.style.cursor === 'grabbing') document.body.style.cursor = '';
+      // Let the click handler see `dragged` before it resets.
+      window.setTimeout(() => (store.dragged = false), 0);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+  }, [store]);
+  const onWheel = (e: ReactWheelEvent) => {
+    if (!startedRef.current) return;
+    store.camDist = Math.min(26, Math.max(6, store.camDist * (1 + e.deltaY * 0.0012)));
+  };
+
   return (
     <MotionConfig reducedMotion="user">
     <div className="absolute inset-0 font-cozy select-none">
       <Canvas
+        onPointerDown={onCanvasPointerDown}
+        onWheel={onWheel}
         shadows={quality === 'high'}
         flat
         dpr={[1, quality === 'high' ? 1.75 : 1.25]}
@@ -542,7 +782,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               <br />
               <Kbd>Espacio</Kbd> cortar pasto · <Kbd>E</Kbd> interactuar
               <br />
-              <span className="opacity-70">o haz clic en el suelo para caminar</span>
+              <span className="opacity-80">Clic en el suelo: caminar · Arrastra: girar cámara · Rueda: zoom</span>
             </div>
           )}
 
@@ -618,6 +858,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             choiceIdx={choiceIdx}
             setChoiceIdx={setChoiceIdx}
             onAdvance={advance}
+            onSkip={finishTutorial}
           />
         )}
       </AnimatePresence>
@@ -667,6 +908,8 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 onPreset={applyMix}
                 onWeatherPreset={() => applyMix(WEATHER_CONFIG[weather].mix)}
                 onToggleMute={toggleMute}
+                noiseColor={noiseColor}
+                onNoiseColor={changeNoiseColor}
               />
             )}
           </motion.aside>
@@ -674,6 +917,43 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       </AnimatePresence>
     </div>
     </MotionConfig>
+  );
+}
+
+function NoiseColorPicker({ value, onChange }: { value: number; onChange: (c: number) => void }) {
+  const nearest = NOISE_COLORS[Math.round(value)];
+  return (
+    <div className="mt-2.5">
+      <div className="flex items-center justify-between text-[11px] font-extrabold">
+        <span>Tono: {nearest.label}</span>
+        <span className="opacity-70">grave ← → agudo</span>
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={NOISE_COLORS.length - 1}
+        step={0.01}
+        value={value}
+        aria-label="Color del ruido"
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="cozy-range mt-1 w-full"
+        style={{ background: `linear-gradient(90deg, ${NOISE_COLORS.map((c) => c.hex).join(', ')})` }}
+      />
+      <div className="mt-1.5 flex gap-1">
+        {NOISE_COLORS.map((c, i) => (
+          <button
+            key={c.label}
+            type="button"
+            onClick={() => onChange(i)}
+            aria-pressed={Math.round(value) === i}
+            className={`flex-1 rounded-full py-1 text-[10.5px] font-black ring-offset-1 ring-offset-[#fff8e7] ${Math.round(value) === i ? 'ring-2 ring-[#f0a45d]' : ''}`}
+            style={{ background: c.hex, color: i === 0 ? '#fff8e7' : '#3d2410' }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -713,9 +993,11 @@ type SoundMixerProps = {
   onPreset: (m: Mix) => void;
   onWeatherPreset: () => void;
   onToggleMute: () => void;
+  noiseColor: number;
+  onNoiseColor: (c: number) => void;
 };
 
-function SoundMixer({ mix, ambVol, muted, onChannel, onVolume, onPreset, onWeatherPreset, onToggleMute }: SoundMixerProps) {
+function SoundMixer({ mix, ambVol, muted, onChannel, onVolume, onPreset, onWeatherPreset, onToggleMute, noiseColor, onNoiseColor }: SoundMixerProps) {
   return (
     <>
       <div className="flex flex-wrap gap-1.5">
@@ -762,7 +1044,7 @@ function SoundMixer({ mix, ambVol, muted, onChannel, onVolume, onPreset, onWeath
               >
                 {a.emoji}
               </button>
-              <label className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1">
                 <span className="block text-[13px] font-extrabold leading-tight">{a.label}</span>
                 <input
                   type="range"
@@ -770,10 +1052,12 @@ function SoundMixer({ mix, ambVol, muted, onChannel, onVolume, onPreset, onWeath
                   max={1}
                   step={0.01}
                   value={v}
+                  aria-label={`Volumen de ${a.label}`}
                   onChange={(e) => onChannel(a.id, Number(e.target.value))}
                   className="cozy-range mt-1 w-full"
                 />
-              </label>
+                {a.id === 'ruido' && <NoiseColorPicker value={noiseColor} onChange={onNoiseColor} />}
+              </div>
             </li>
           );
         })}
@@ -874,9 +1158,10 @@ type DialogBoxProps = {
   choiceIdx: number;
   setChoiceIdx: (i: number) => void;
   onAdvance: () => void;
+  onSkip: () => void;
 };
 
-function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, setChoiceIdx, onAdvance }: DialogBoxProps) {
+function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, setChoiceIdx, onAdvance, onSkip }: DialogBoxProps) {
   const list = useRef<HTMLUListElement>(null);
   // Keep keyboard focus on the highlighted choice so Enter/Space pick it.
   useEffect(() => {
@@ -926,6 +1211,18 @@ function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, s
         <span className="absolute -top-4 left-6 -rotate-3 rounded-full bg-[#f0a45d] px-5 py-1.5 text-base font-black text-[#3d2410] shadow-[0_3px_0_#c97d3c]">
           {dialog.speaker}
         </span>
+        {dialog.skippable && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSkip();
+            }}
+            className="absolute -top-4 right-6 rounded-full bg-[#fff8e7] px-4 py-1.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.25)] ring-2 ring-[#ead6b3] hover:-translate-y-0.5 transition-transform"
+          >
+            Saltar tutorial ⏭
+          </button>
+        )}
         <p aria-hidden className="min-h-[3.2em] text-[17px] md:text-lg font-bold leading-relaxed">
           {text}
         </p>

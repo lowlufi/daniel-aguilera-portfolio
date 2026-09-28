@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } fro
 import * as THREE from 'three';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Sparkles } from '@react-three/drei';
+import { EffectComposer, HueSaturation, SMAA, TiltShift, Vignette } from '@react-three/postprocessing';
+import { KernelSize } from 'postprocessing';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { LabelProjector } from './labels';
 import { onThunder, sfx } from './audio';
 import { atmo, stepAtmosphere, WEATHER_CONFIG, type WeatherId } from './weather';
@@ -19,6 +22,7 @@ import {
   PLAZA,
   PROJECT_SIGNS,
   SPAWN,
+  STATION,
   STAR_COUNT,
   TREES,
   WELCOME,
@@ -26,6 +30,7 @@ import {
   blocksGrass,
   mulberry32,
   resolveCollisions,
+  groundHeight,
   type InteractableId,
 } from './world';
 
@@ -39,7 +44,7 @@ type SceneProps = {
 };
 
 export default function Scene({ store, events, quality, onWalkTo, weather, reduceMotion }: SceneProps) {
-  const { scene } = useThree();
+  const { scene, gl } = useThree();
   const hemi = useRef<THREE.HemisphereLight>(null);
   const sun = useRef<THREE.DirectionalLight>(null);
   const amb = useRef<THREE.AmbientLight>(null);
@@ -53,6 +58,18 @@ export default function Scene({ store, events, quality, onWalkTo, weather, reduc
   useEffect(() => {
     atmo.target = weather;
   }, [weather]);
+
+  // A soft studio environment gives every material the glossy "toy" highlights.
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = env;
+    return () => {
+      scene.environment = null;
+      env.dispose();
+      pmrem.dispose();
+    };
+  }, [gl, scene]);
 
   useEffect(() => {
     scene.fog = new THREE.Fog('#f9b48d', 42, 125);
@@ -96,6 +113,7 @@ export default function Scene({ store, events, quality, onWalkTo, weather, reduc
       amb.current.intensity = atmo.ambient;
     }
     WINDOW_MAT.color.copy(atmo.windows);
+    scene.environmentIntensity = atmo.env;
   });
 
   const fireflies = WEATHER_CONFIG[weather].fireflies;
@@ -141,8 +159,12 @@ export default function Scene({ store, events, quality, onWalkTo, weather, reduc
         </Clickable>
       ))}
       <Clickable id="garden" onWalkTo={onWalkTo}>
-        <Garden />
+        <Garden store={store} />
       </Clickable>
+      <Clickable id="station" onWalkTo={onWalkTo}>
+        <WeatherStation store={store} />
+      </Clickable>
+      <Bursts store={store} />
       <Clickable id="mailbox" onWalkTo={onWalkTo}>
         <Mailbox />
       </Clickable>
@@ -161,6 +183,9 @@ export default function Scene({ store, events, quality, onWalkTo, weather, reduc
 
       <Rain store={store} count={quality === 'high' ? 1600 : 900} />
       <Snow store={store} count={quality === 'high' ? 1400 : 800} />
+      <MistBanks store={store} count={quality === 'high' ? 40 : 22} />
+      <HorizonClouds />
+      <Effects quality={quality} />
       {fireflies > 0 && (
         <Sparkles
           count={quality === 'high' ? 70 : 35}
@@ -179,11 +204,33 @@ export default function Scene({ store, events, quality, onWalkTo, weather, reduc
 
 const WINDOW_MAT = new THREE.MeshBasicMaterial({ color: '#ffd98a' });
 
+// Link's Awakening-style finish: miniature tilt-shift, soft glow, a touch more color.
+function Effects({ quality }: { quality: 'high' | 'low' }) {
+  if (quality === 'low') {
+    return (
+      <EffectComposer multisampling={0}>
+        <SMAA />
+        <TiltShift offset={-0.1} focusArea={0.5} feather={0.32} kernelSize={KernelSize.SMALL} />
+        <HueSaturation saturation={0.12} />
+        <Vignette offset={0.3} darkness={0.45} />
+      </EffectComposer>
+    );
+  }
+  return (
+    <EffectComposer multisampling={4}>
+      <TiltShift offset={-0.1} focusArea={0.45} feather={0.32} kernelSize={KernelSize.MEDIUM} />
+      <HueSaturation saturation={0.12} />
+      <Vignette offset={0.3} darkness={0.45} />
+    </EffectComposer>
+  );
+}
+
 function Clickable({ id, onWalkTo, children }: { id: InteractableId; onWalkTo: (id: InteractableId) => void; children: ReactNode }) {
   return (
     <group
       onClick={(e) => {
         e.stopPropagation();
+        if (e.delta > 6) return; // that was a camera drag
         onWalkTo(id);
       }}
       onPointerOver={() => (document.body.style.cursor = 'pointer')}
@@ -243,11 +290,13 @@ function Sky() {
               col += vec3(s * (0.55 + 0.45 * sin(uTime * 2.3 + r * 60.0)) * uStars);
             }
             float sd = max(dot(d, normalize(uSun)), 0.0);
-            col += uSunColor * pow(sd, 28.0) * 0.6 * uSunAmt;
-            col += uSunColor * pow(sd, 5.0) * 0.2 * uSunAmt;
+            col += uSunColor * pow(sd, 32.0) * 0.45 * uSunAmt;
+            col += uSunColor * pow(sd, 9.0) * 0.1 * uSunAmt;
             col = mix(col, uSunColor * 1.05, smoothstep(0.9983, 0.9991, sd) * uSunAmt);
             col += vec3(0.9, 0.93, 1.0) * uFlash * 0.45;
-            gl_FragColor = vec4(col, 1.0);
+            // Colors above are authored in display (sRGB) space; the effect
+            // composer expects linear output and encodes it at the end.
+            gl_FragColor = vec4(pow(col, vec3(2.2)), 1.0);
           }`,
       }),
     [],
@@ -340,12 +389,12 @@ function Ocean() {
             float w = 1.0 - abs(vUv.x - 0.5) * 2.0;
             float s = sin(vUv.y * 420.0 - uTime * 1.6 + sin(vUv.x * 30.0 + uTime) * 2.5);
             float a = smoothstep(0.82, 1.0, s) * w * w * smoothstep(0.0, 0.08, vUv.y) * (1.0 - vUv.y * 0.6);
-            gl_FragColor = vec4(uColor, a * 0.75 * uAmt);
+            gl_FragColor = vec4(pow(uColor, vec3(2.2)), a * 0.75 * uAmt);
           }`,
       }),
     [],
   );
-  const water = useRef<THREE.MeshLambertMaterial>(null);
+  const water = useRef<THREE.MeshStandardMaterial>(null);
   const glint = useRef<THREE.Group>(null);
   const foam = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
@@ -368,7 +417,7 @@ function Ocean() {
     <group>
       <mesh rotation-x={-Math.PI / 2} position-y={-0.55} receiveShadow>
         <circleGeometry args={[420, 48]} />
-        <meshLambertMaterial ref={water} emissiveIntensity={0.18} />
+        <meshStandardMaterial roughness={0.55} ref={water} emissiveIntensity={0.18} />
       </mesh>
       <group ref={glint}>
         <mesh rotation-x={-Math.PI / 2} position={[0, -0.5, 150]}>
@@ -487,20 +536,109 @@ function Snow({ store, count }: { store: GameStore; count: number }) {
   return <points ref={ref} geometry={geo} material={mat} frustumCulled={false} visible={false} />;
 }
 
+// Soft sprite texture shared by mist banks and the cloud sea.
+function useSoftTexture() {
+  return useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grd.addColorStop(0, 'rgba(255,255,255,0.9)');
+    grd.addColorStop(0.45, 'rgba(255,255,255,0.45)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 128, 128);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, []);
+}
+
+// Low fog banks drifting over the grass (strongest in the "niebla" weather).
+function MistBanks({ store, count }: { store: GameStore; count: number }) {
+  const tex = useSoftTexture();
+  const group = useRef<THREE.Group>(null);
+  const puffs = useMemo(() => {
+    const rnd = mulberry32(77);
+    return Array.from({ length: count }, () => ({
+      x: (rnd() - 0.5) * 60,
+      z: (rnd() - 0.5) * 60,
+      y: 0.6 + rnd() * 1.8,
+      s: 7 + rnd() * 9,
+      speed: 0.3 + rnd() * 0.5,
+      phase: rnd() * 6.28,
+    }));
+  }, [count]);
+  const mat = useMemo(() => new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0, fog: false }), [tex]);
+  useFrame(({ clock }, delta) => {
+    const g = group.current;
+    if (!g) return;
+    g.visible = atmo.mist > 0.02;
+    if (!g.visible) return;
+    mat.opacity = 0.32 * atmo.mist;
+    mat.color.copy(atmo.fog);
+    const dt = Math.min(delta, 0.05);
+    const t = clock.elapsedTime;
+    g.children.forEach((sp, i) => {
+      const p = puffs[i];
+      p.x += p.speed * dt;
+      // Keep the banks wrapped around the player so the mist never runs out.
+      if (p.x - store.pos.x > 30) p.x -= 60;
+      if (p.x - store.pos.x < -30) p.x += 60;
+      if (p.z - store.pos.z > 30) p.z -= 60;
+      if (p.z - store.pos.z < -30) p.z += 60;
+      sp.position.set(p.x, p.y + Math.sin(t * 0.3 + p.phase) * 0.3, p.z);
+    });
+  });
+  return (
+    <group ref={group} visible={false}>
+      {puffs.map((p, i) => (
+        <sprite key={i} material={mat} scale={[p.s, p.s * 0.45, 1]} />
+      ))}
+    </group>
+  );
+}
+
+// A ring of low clouds around the horizon hides where the sea ends.
+function HorizonClouds() {
+  const tex = useSoftTexture();
+  const puffs = useMemo(() => {
+    const rnd = mulberry32(31);
+    return Array.from({ length: 70 }, (_, i) => {
+      const a = (i / 70) * Math.PI * 2 + rnd() * 0.08;
+      const d = 95 + rnd() * 45;
+      return { x: Math.cos(a) * d, z: Math.sin(a) * d, y: 1 + rnd() * 7, s: 38 + rnd() * 30 };
+    });
+  }, []);
+  const mat = useMemo(() => new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false }), [tex]);
+  useFrame(() => {
+    // Tinted between the fog and cloud colors so the ring melts into the sky.
+    mat.color.copy(atmo.fog).lerp(atmo.cloud, 0.35);
+    mat.opacity = 0.95;
+  });
+  return (
+    <group>
+      {puffs.map((p, i) => (
+        <sprite key={i} material={mat} position={[p.x, p.y, p.z]} scale={[p.s, p.s * 0.32, 1]} />
+      ))}
+    </group>
+  );
+}
+
 /* ---------------- Terrain ---------------- */
 
-const SAND = new THREE.Color('#f3d6a4');
+const SAND = new THREE.Color('#fbe3ad');
 const SNOW_WHITE = new THREE.Color('#eef2f6');
 
 function Island({ store }: { store: GameStore }) {
-  const top = useRef<THREE.MeshLambertMaterial>(null);
-  const sand = useRef<THREE.MeshLambertMaterial>(null);
+  const top = useRef<THREE.MeshStandardMaterial>(null);
+  const sand = useRef<THREE.MeshStandardMaterial>(null);
   useFrame(() => {
     top.current?.color.copy(atmo.ground);
     sand.current?.color.copy(SAND).lerp(SNOW_WHITE, atmo.snow * 0.75);
   });
   const onClick = (e: ThreeEvent<MouseEvent>) => {
-    if (store.frozen) return;
+    if (store.frozen || e.delta > 6) return;
     e.stopPropagation();
     store.target = new THREE.Vector3(e.point.x, 0, e.point.z);
     store.targetId = null;
@@ -509,13 +647,13 @@ function Island({ store }: { store: GameStore }) {
     <group>
       <mesh position-y={-1} receiveShadow onClick={onClick}>
         <cylinderGeometry args={[ISLAND_R, ISLAND_R - 0.8, 2, 72]} />
-        <meshLambertMaterial attach="material-0" color="#9b6b43" />
-        <meshLambertMaterial ref={top} attach="material-1" color="#86b85a" />
-        <meshLambertMaterial attach="material-2" color="#9b6b43" />
+        <meshStandardMaterial roughness={0.55} attach="material-0" color="#9b6b43" />
+        <meshStandardMaterial roughness={0.55} ref={top} attach="material-1" color="#86b85a" />
+        <meshStandardMaterial roughness={0.55} attach="material-2" color="#9b6b43" />
       </mesh>
       <mesh position-y={-0.85} receiveShadow onClick={onClick}>
         <cylinderGeometry args={[ISLAND_R + 3.2, ISLAND_R + 4.2, 1, 72]} />
-        <meshLambertMaterial ref={sand} color="#f3d6a4" />
+        <meshStandardMaterial roughness={0.55} ref={sand} color="#f3d6a4" />
       </mesh>
     </group>
   );
@@ -539,7 +677,7 @@ function PathStones() {
   return (
     <instancedMesh ref={ref} args={[undefined, undefined, PATH_STONES.length]} receiveShadow>
       <cylinderGeometry args={[1, 1, 0.08, 9]} />
-      <meshLambertMaterial color="#d9b98c" />
+      <meshStandardMaterial roughness={0.55} color="#d9b98c" />
     </instancedMesh>
   );
 }
@@ -561,52 +699,58 @@ function Tree({ x, z, scale, kind, fruit, seed, store }: (typeof TREES)[number] 
   useFrame(({ clock }, delta) => {
     if (ref.current) ref.current.rotation.z = Math.sin(clock.elapsedTime * 0.8 + seed) * 0.025;
     // Trees standing between the camera and the player turn see-through.
-    const dz = z - store.pos.z;
-    const blocking = store.started && dz > 0.5 && dz < 13 && Math.abs(x - store.pos.x) < 2.6 + dz * 0.12;
+    // Distance along the player→camera direction, and sideways from that line.
+    const bx = Math.sin(store.camYaw);
+    const bz = Math.cos(store.camYaw);
+    const rx = x - store.pos.x;
+    const rz = z - store.pos.z;
+    const along = rx * bx + rz * bz;
+    const side = Math.abs(rx * bz - rz * bx);
+    const blocking = store.started && along > 0.5 && along < store.camDist && side < 2.6 + along * 0.12;
     const want = blocking ? 0.28 : 1;
     if (Math.abs(fade.current - want) < 0.01) return;
     fade.current += (want - fade.current) * (1 - Math.exp(-8 * Math.min(delta, 0.05)));
     root.current?.traverse((o) => {
-      const m = (o as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
       if (!m) return;
       m.transparent = fade.current < 0.99;
       m.opacity = fade.current;
       m.depthWrite = fade.current > 0.99;
     });
   });
-  const leaf = kind === 'blossom' ? '#f4a7c0' : kind === 'pine' ? '#4f8a5b' : seed % 2 ? '#6fa84a' : '#7fb851';
-  const leaf2 = kind === 'blossom' ? '#f8c3d4' : kind === 'pine' ? '#5d9c67' : '#8cc45b';
+  const leaf = kind === 'blossom' ? '#ff9ec4' : kind === 'pine' ? '#35a06a' : seed % 2 ? '#4fbf4c' : '#62cc55';
+  const leaf2 = kind === 'blossom' ? '#ffc4dc' : kind === 'pine' ? '#4dba7c' : '#86df68';
   return (
     <group ref={root} position={[x, 0, z]} scale={scale} rotation-y={seed}>
       <mesh position-y={0.8} castShadow>
-        <cylinderGeometry args={[0.16, 0.24, 1.6, 7]} />
-        <meshLambertMaterial color="#8b5a3c" />
+        <cylinderGeometry args={[0.2, 0.28, 1.6, 12]} />
+        <meshStandardMaterial roughness={0.55} color="#8b5a3c" />
       </mesh>
       <group ref={ref} position-y={1.5}>
         {kind === 'pine' ? (
           <>
             <mesh position-y={0.6} castShadow>
-              <coneGeometry args={[1.25, 1.6, 7]} />
-              <meshLambertMaterial color={leaf} flatShading />
+              <coneGeometry args={[1.25, 1.7, 20]} />
+              <meshStandardMaterial roughness={0.55} color={leaf} />
             </mesh>
             <mesh position-y={1.45} castShadow>
-              <coneGeometry args={[0.9, 1.3, 7]} />
-              <meshLambertMaterial color={leaf2} flatShading />
+              <coneGeometry args={[0.9, 1.35, 20]} />
+              <meshStandardMaterial roughness={0.55} color={leaf2} />
             </mesh>
           </>
         ) : (
           <>
             <mesh position-y={0.7} castShadow>
-              <icosahedronGeometry args={[1.25, 0]} />
-              <meshLambertMaterial color={leaf} flatShading />
+              <icosahedronGeometry args={[1.3, 4]} />
+              <meshStandardMaterial roughness={0.55} color={leaf} />
             </mesh>
             <mesh position={[0.55, 1.15, 0.2]} castShadow>
-              <icosahedronGeometry args={[0.8, 0]} />
-              <meshLambertMaterial color={leaf2} flatShading />
+              <icosahedronGeometry args={[0.85, 4]} />
+              <meshStandardMaterial roughness={0.55} color={leaf2} />
             </mesh>
             <mesh position={[-0.6, 1.0, -0.2]} castShadow>
-              <icosahedronGeometry args={[0.75, 0]} />
-              <meshLambertMaterial color={leaf2} flatShading />
+              <icosahedronGeometry args={[0.8, 4]} />
+              <meshStandardMaterial roughness={0.55} color={leaf2} />
             </mesh>
             {fruit &&
               [
@@ -616,7 +760,7 @@ function Tree({ x, z, scale, kind, fruit, seed, store }: (typeof TREES)[number] 
               ].map((p, j) => (
                 <mesh key={j} position={p as [number, number, number]}>
                   <sphereGeometry args={[0.16, 10, 8]} />
-                  <meshLambertMaterial color={kind === 'blossom' ? '#ff7b9c' : '#ff9a3c'} />
+                  <meshStandardMaterial roughness={0.55} color={kind === 'blossom' ? '#ff7b9c' : '#ff9a3c'} />
                 </mesh>
               ))}
           </>
@@ -666,7 +810,7 @@ function Flowers() {
   return (
     <instancedMesh ref={heads} args={[undefined, undefined, data.length]}>
       <icosahedronGeometry args={[0.1, 0]} />
-      <meshLambertMaterial emissive="#ffffff" emissiveIntensity={0.08} />
+      <meshStandardMaterial roughness={0.55} emissive="#ffffff" emissiveIntensity={0.08} />
     </instancedMesh>
   );
 }
@@ -684,8 +828,8 @@ function Rocks() {
     <group>
       {rocks.map((r, i) => (
         <mesh key={i} position={[r.x, -0.3, r.z]} scale={r.s} rotation={[r.rot, r.rot * 2, 0]} castShadow>
-          <dodecahedronGeometry args={[1, 0]} />
-          <meshLambertMaterial color="#b9a7b5" flatShading />
+          <icosahedronGeometry args={[1, 3]} />
+          <meshStandardMaterial roughness={0.4} color="#c7bdd6" />
         </mesh>
       ))}
     </group>
@@ -698,21 +842,21 @@ function Dock() {
       {Array.from({ length: 9 }, (_, i) => (
         <mesh key={i} position={[0, 0, i * 0.62]} castShadow receiveShadow>
           <boxGeometry args={[1.8, 0.12, 0.54]} />
-          <meshLambertMaterial color={i % 2 ? '#b07d52' : '#a8744a'} />
+          <meshStandardMaterial roughness={0.55} color={i % 2 ? '#b07d52' : '#a8744a'} />
         </mesh>
       ))}
       {[0, 2.4, 4.8].map((z) =>
         [-0.85, 0.85].map((x) => (
           <mesh key={`${x}${z}`} position={[x, -0.2, z]}>
             <cylinderGeometry args={[0.08, 0.08, 1, 6]} />
-            <meshLambertMaterial color="#7a5234" />
+            <meshStandardMaterial roughness={0.55} color="#7a5234" />
           </mesh>
         )),
       )}
       <group position={[0.85, 0.1, 5]}>
         <mesh position-y={0.55}>
           <cylinderGeometry args={[0.05, 0.05, 1.1, 6]} />
-          <meshLambertMaterial color="#5b4636" />
+          <meshStandardMaterial roughness={0.55} color="#5b4636" />
         </mesh>
         <mesh position-y={1.18}>
           <sphereGeometry args={[0.15, 12, 10]} />
@@ -730,23 +874,23 @@ function House({ x, z, wall, roof, door, scale = 1 }: { x: number; z: number; wa
     <group position={[x, 0, z]} scale={scale}>
       <mesh position-y={1.2} castShadow receiveShadow>
         <boxGeometry args={[3.6, 2.4, 3.2]} />
-        <meshLambertMaterial color={wall} />
+        <meshStandardMaterial roughness={0.55} color={wall} />
       </mesh>
       <mesh position-y={3.2} rotation-y={Math.PI / 4} castShadow>
         <coneGeometry args={[3.2, 1.8, 4]} />
-        <meshLambertMaterial color={roof} flatShading />
+        <meshStandardMaterial color={roof} roughness={0.45} flatShading />
       </mesh>
       <mesh position={[1, 3.4, -0.4]} castShadow>
         <boxGeometry args={[0.45, 1.1, 0.45]} />
-        <meshLambertMaterial color="#a0624a" />
+        <meshStandardMaterial roughness={0.55} color="#a0624a" />
       </mesh>
       <mesh position={[0, 0.75, 1.61]}>
         <boxGeometry args={[0.85, 1.5, 0.05]} />
-        <meshLambertMaterial color={door} />
+        <meshStandardMaterial roughness={0.55} color={door} />
       </mesh>
       <mesh position={[0.22, 0.75, 1.65]}>
         <sphereGeometry args={[0.05, 8, 6]} />
-        <meshLambertMaterial color="#f2cf5b" />
+        <meshStandardMaterial roughness={0.55} color="#f2cf5b" />
       </mesh>
       {[-1.15, 1.15].map((wx) => (
         <group key={wx} position={[wx, 1.45, 1.61]}>
@@ -755,17 +899,17 @@ function House({ x, z, wall, roof, door, scale = 1 }: { x: number; z: number; wa
           </mesh>
           <mesh position-z={0.03}>
             <boxGeometry args={[0.06, 0.7, 0.03]} />
-            <meshLambertMaterial color="#fff8e7" />
+            <meshStandardMaterial roughness={0.55} color="#fff8e7" />
           </mesh>
           <mesh position-z={0.03}>
             <boxGeometry args={[0.8, 0.06, 0.03]} />
-            <meshLambertMaterial color="#fff8e7" />
+            <meshStandardMaterial roughness={0.55} color="#fff8e7" />
           </mesh>
         </group>
       ))}
       <mesh position={[0, 0.03, 2.3]} receiveShadow>
         <boxGeometry args={[1.4, 0.06, 1]} />
-        <meshLambertMaterial color="#c79a6b" />
+        <meshStandardMaterial roughness={0.55} color="#c79a6b" />
       </mesh>
     </group>
   );
@@ -777,16 +921,16 @@ function ProjectBoard() {
       {[-1, 1].map((sx) => (
         <mesh key={sx} position={[sx * 1.05, 0.9, 0]} castShadow>
           <cylinderGeometry args={[0.09, 0.1, 1.8, 6]} />
-          <meshLambertMaterial color="#7a5234" />
+          <meshStandardMaterial roughness={0.55} color="#7a5234" />
         </mesh>
       ))}
       <mesh position={[0, 1.35, 0]} castShadow>
         <boxGeometry args={[2.4, 1.2, 0.14]} />
-        <meshLambertMaterial color="#c8966a" />
+        <meshStandardMaterial roughness={0.55} color="#c8966a" />
       </mesh>
       <mesh position={[0, 2.03, 0]} castShadow>
         <boxGeometry args={[2.7, 0.16, 0.36]} />
-        <meshLambertMaterial color="#d9695f" />
+        <meshStandardMaterial roughness={0.55} color="#d9695f" />
       </mesh>
       {[
         [-0.6, 1.5, '#fff8e7'],
@@ -796,7 +940,7 @@ function ProjectBoard() {
       ].map(([px, py, c], i) => (
         <mesh key={i} position={[px as number, py as number, 0.08]} rotation-z={(i - 1.5) * 0.08}>
           <boxGeometry args={[0.55, 0.4, 0.02]} />
-          <meshLambertMaterial color={c as string} />
+          <meshStandardMaterial roughness={0.55} color={c as string} />
         </mesh>
       ))}
     </group>
@@ -812,11 +956,11 @@ function ProjectSign({ x, z, rot, color, soon }: { x: number; z: number; rot: nu
     <group position={[x, 0, z]} rotation-y={rot}>
       <mesh position-y={0.6} castShadow>
         <cylinderGeometry args={[0.07, 0.08, 1.2, 6]} />
-        <meshLambertMaterial color="#7a5234" />
+        <meshStandardMaterial roughness={0.55} color="#7a5234" />
       </mesh>
       <mesh position-y={1.15} castShadow>
         <boxGeometry args={[1.1, 0.7, 0.1]} />
-        <meshLambertMaterial color="#d7ab7c" />
+        <meshStandardMaterial roughness={0.55} color="#d7ab7c" />
       </mesh>
       <mesh position={[0, 1.15, 0.06]}>
         <circleGeometry args={[0.22, 20]} />
@@ -830,18 +974,42 @@ function ProjectSign({ x, z, rot, color, soon }: { x: number; z: number; rot: nu
   );
 }
 
-function Garden() {
+function Garden({ store }: { store: GameStore }) {
+  const crops = useRef<(THREE.Group | null)[]>([]);
+  const soil = useRef<THREE.MeshStandardMaterial[]>([]);
+  useFrame(({ clock }) => {
+    const now = performance.now() / 1000;
+    const g = store.garden;
+    // Plants bounce after watering, and spring up after a harvest.
+    const sinceWater = now - g.wateredAt;
+    const sinceHarvest = now - g.harvestedAt;
+    const bounce = sinceWater < 1.4 ? Math.sin(sinceWater * 14) * 0.12 * (1 - sinceWater / 1.4) : 0;
+    const regrow = sinceHarvest < 1.2 ? sinceHarvest / 1.2 : 1;
+    crops.current.forEach((c, i) => {
+      if (!c) return;
+      const k = g.growth * regrow;
+      c.scale.set(k, k * (1 + bounce), k);
+      c.rotation.y = Math.sin(clock.elapsedTime * 0.6 + i) * 0.05;
+    });
+    // Wet soil looks darker for a while.
+    const wet = Math.max(0, 1 - sinceWater / 20);
+    soil.current.forEach((m) => m?.color.setRGB(0.19 - wet * 0.08, 0.087 - wet * 0.04, 0.035 - wet * 0.015));
+  });
   return (
     <group>
       {GARDEN_PLOTS.map((p, i) => (
         <group key={i} position={[p.x, 0, p.z]}>
           <mesh position-y={0.1} receiveShadow>
             <boxGeometry args={[2.3, 0.2, 2.3]} />
-            <meshLambertMaterial color="#7a5234" />
+            <meshStandardMaterial ref={(m) => { if (m) soil.current[i] = m; }} roughness={0.7} color="#7a5234" />
           </mesh>
-          {[-0.6, 0, 0.6].map((ox) =>
-            [-0.6, 0.6].map((oz) => <Crop key={`${ox}${oz}`} kind={p.kind} x={ox} z={oz} />),
-          )}
+          <group ref={(g) => (crops.current[i] = g)} position-y={0.2}>
+            <group position-y={-0.2}>
+              {[-0.6, 0, 0.6].map((ox) =>
+                [-0.6, 0.6].map((oz) => <Crop key={`${ox}${oz}`} kind={p.kind} x={ox} z={oz} />),
+              )}
+            </group>
+          </group>
         </group>
       ))}
       {/* Little picket fence around the garden. */}
@@ -851,7 +1019,7 @@ function Garden() {
         return (
           <mesh key={i} position={[GARDEN.x + Math.cos(a) * 3.5, 0.3, GARDEN.z + Math.sin(a) * 3.5]} castShadow>
             <boxGeometry args={[0.12, 0.6, 0.12]} />
-            <meshLambertMaterial color="#fff8e7" />
+            <meshStandardMaterial roughness={0.55} color="#fff8e7" />
           </mesh>
         );
       })}
@@ -865,15 +1033,15 @@ function Crop({ kind, x, z }: { kind: 'sunflower' | 'carrot' | 'tomato' | 'cabba
       <group position={[x, 0.2, z]}>
         <mesh position-y={0.55}>
           <cylinderGeometry args={[0.03, 0.04, 1.1, 5]} />
-          <meshLambertMaterial color="#5f9447" />
+          <meshStandardMaterial roughness={0.55} color="#5f9447" />
         </mesh>
         <mesh position={[0, 1.12, 0.05]} rotation-x={0.3}>
           <cylinderGeometry args={[0.24, 0.24, 0.05, 12]} />
-          <meshLambertMaterial color="#ffc93c" />
+          <meshStandardMaterial roughness={0.55} color="#ffc93c" />
         </mesh>
         <mesh position={[0, 1.13, 0.09]} rotation-x={0.3}>
           <cylinderGeometry args={[0.11, 0.11, 0.06, 10]} />
-          <meshLambertMaterial color="#7a4a24" />
+          <meshStandardMaterial roughness={0.55} color="#7a4a24" />
         </mesh>
       </group>
     );
@@ -882,7 +1050,7 @@ function Crop({ kind, x, z }: { kind: 'sunflower' | 'carrot' | 'tomato' | 'cabba
       <group position={[x, 0.2, z]}>
         <mesh position-y={0.3}>
           <icosahedronGeometry args={[0.3, 0]} />
-          <meshLambertMaterial color="#5f9447" flatShading />
+          <meshStandardMaterial roughness={0.55} color="#5f9447" />
         </mesh>
         {[
           [0.18, 0.35, 0.15],
@@ -891,7 +1059,7 @@ function Crop({ kind, x, z }: { kind: 'sunflower' | 'carrot' | 'tomato' | 'cabba
         ].map((p, i) => (
           <mesh key={i} position={p as [number, number, number]}>
             <sphereGeometry args={[0.09, 10, 8]} />
-            <meshLambertMaterial color="#e5484d" />
+            <meshStandardMaterial roughness={0.55} color="#e5484d" />
           </mesh>
         ))}
       </group>
@@ -901,19 +1069,177 @@ function Crop({ kind, x, z }: { kind: 'sunflower' | 'carrot' | 'tomato' | 'cabba
       <group position={[x, 0.2, z]}>
         <mesh position-y={0.08} rotation-x={Math.PI}>
           <coneGeometry args={[0.09, 0.3, 6]} />
-          <meshLambertMaterial color="#f08a3c" />
+          <meshStandardMaterial roughness={0.55} color="#f08a3c" />
         </mesh>
         <mesh position-y={0.3}>
           <coneGeometry args={[0.13, 0.35, 5]} />
-          <meshLambertMaterial color="#6fb04d" flatShading />
+          <meshStandardMaterial roughness={0.55} color="#6fb04d" />
         </mesh>
       </group>
     );
   return (
     <mesh position={[x, 0.38, z]} scale={[1, 0.8, 1]}>
       <icosahedronGeometry args={[0.26, 1]} />
-      <meshLambertMaterial color="#9ed27a" flatShading />
+      <meshStandardMaterial roughness={0.55} color="#9ed27a" />
     </mesh>
+  );
+}
+
+// Daniel's mini weather station: an ESP32 dev board, a DHT22 sensor, a tiny
+// solar panel and an OLED screen showing live readings for San Antonio.
+function WeatherStation({ store }: { store: GameStore }) {
+  const led = useRef<THREE.MeshBasicMaterial>(null);
+  const shown = useRef('');
+  const { canvas, tex } = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 128;
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return { canvas: c, tex: t };
+  }, []);
+  useFrame(({ clock }) => {
+    if (led.current) led.current.color.set(Math.sin(clock.elapsedTime * 4) > 0.6 ? '#4dd2ff' : '#0b3a52');
+    const m = store.meteo;
+    const blink = Math.floor(clock.elapsedTime * 2) % 2 === 0;
+    const key = m ? `${m.temp}|${m.hum}` : `wait${blink}`;
+    if (key === shown.current) return;
+    shown.current = key;
+    const g = canvas.getContext('2d')!;
+    g.fillStyle = '#05070a';
+    g.fillRect(0, 0, 256, 128);
+    g.fillStyle = '#7fe7ff';
+    g.font = 'bold 22px monospace';
+    g.fillText('SAN ANTONIO', 14, 30);
+    g.font = 'bold 40px monospace';
+    if (m) {
+      g.fillText(`${m.temp.toFixed(1)}°C`, 14, 78);
+      g.font = 'bold 26px monospace';
+      g.fillText(`HR ${Math.round(m.hum)}%`, 14, 114);
+    } else {
+      g.fillText(blink ? '--.-°C' : '  .  ', 14, 78);
+      g.font = 'bold 22px monospace';
+      g.fillText('wifi...', 14, 114);
+    }
+    tex.needsUpdate = true;
+  });
+  return (
+    <group position={[STATION.x, 0, STATION.z]} rotation-y={0.5}>
+      <mesh position-y={0.55} castShadow>
+        <cylinderGeometry args={[0.05, 0.06, 1.1, 8]} />
+        <meshStandardMaterial roughness={0.6} color="#7a5234" />
+      </mesh>
+      {/* enclosure */}
+      <mesh position-y={1.2} castShadow>
+        <boxGeometry args={[0.62, 0.42, 0.16]} />
+        <meshStandardMaterial roughness={0.35} color="#f4f1ea" />
+      </mesh>
+      {/* green PCB + ESP32 module */}
+      <mesh position={[0, 1.2, 0.085]}>
+        <boxGeometry args={[0.54, 0.34, 0.02]} />
+        <meshStandardMaterial roughness={0.5} color="#1f7a4a" />
+      </mesh>
+      <mesh position={[0.14, 1.13, 0.1]}>
+        <boxGeometry args={[0.18, 0.14, 0.02]} />
+        <meshStandardMaterial roughness={0.2} metalness={0.8} color="#c9ced6" />
+      </mesh>
+      {/* OLED */}
+      <mesh position={[-0.1, 1.24, 0.1]}>
+        <planeGeometry args={[0.26, 0.13]} />
+        <meshBasicMaterial map={tex} toneMapped={false} />
+      </mesh>
+      <mesh position={[0.2, 1.3, 0.1]}>
+        <sphereGeometry args={[0.018, 8, 6]} />
+        <meshBasicMaterial ref={led} color="#4dd2ff" />
+      </mesh>
+      {/* DHT22 sensor with its little grille */}
+      <mesh position={[0.36, 1.12, 0.04]}>
+        <boxGeometry args={[0.1, 0.16, 0.06]} />
+        <meshStandardMaterial roughness={0.5} color="#e9eef2" />
+      </mesh>
+      {[0, 1, 2].map((i) => (
+        <mesh key={i} position={[0.36, 1.07 + i * 0.045, 0.072]}>
+          <boxGeometry args={[0.07, 0.012, 0.005]} />
+          <meshBasicMaterial color="#9aa6b2" />
+        </mesh>
+      ))}
+      {/* antenna */}
+      <mesh position={[-0.26, 1.55, 0]}>
+        <cylinderGeometry args={[0.012, 0.012, 0.32, 6]} />
+        <meshStandardMaterial roughness={0.4} color="#2b2b2b" />
+      </mesh>
+      {/* tiny solar panel */}
+      <mesh position={[0, 1.52, -0.05]} rotation-x={-0.6}>
+        <boxGeometry args={[0.46, 0.02, 0.3]} />
+        <meshStandardMaterial roughness={0.15} metalness={0.4} color="#243a6b" />
+      </mesh>
+    </group>
+  );
+}
+
+// Short-lived particles: water drops over the garden, veggies popping out, party confetti.
+const BURST_N = 260;
+function Bursts({ store }: { store: GameStore }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const st = useMemo(
+    () => ({ p: new Float32Array(BURST_N * 3), v: new Float32Array(BURST_N * 3), life: new Float32Array(BURST_N), size: new Float32Array(BURST_N), next: 0, idle: true }),
+    [],
+  );
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  const col = useMemo(() => new THREE.Color(), []);
+  useEffect(() => {
+    const spawn = (x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, size: number, color: string) => {
+      const i = st.next;
+      st.next = (st.next + 1) % BURST_N;
+      st.p.set([x, y, z], i * 3);
+      st.v.set([vx, vy, vz], i * 3);
+      st.life[i] = life;
+      st.size[i] = size;
+      ref.current?.setColorAt(i, col.set(color));
+      st.idle = false;
+    };
+    store.burst = (kind, x, z) => {
+      const R = Math.random;
+      if (kind === 'water') {
+        for (let k = 0; k < 90; k++) spawn(x + (R() - 0.5) * 6, 3 + R() * 1.5, z + (R() - 0.5) * 6, 0, -2 - R() * 2, 0, 1.2, 0.07, R() < 0.5 ? '#7fd3ff' : '#bfeaff');
+      } else if (kind === 'harvest') {
+        const veg = ['#ff8a3c', '#e5484d', '#ffc93c', '#9ed27a'];
+        for (let k = 0; k < 40; k++) spawn(x + (R() - 0.5) * 5, 0.6, z + (R() - 0.5) * 5, (R() - 0.5) * 3, 4 + R() * 3, (R() - 0.5) * 3, 1.3, 0.13, veg[k % veg.length]);
+      } else {
+        const party = ['#ff6b9a', '#ffd23f', '#7ccf8a', '#7fc4ff', '#b28ee0', '#ff9a3c'];
+        for (let k = 0; k < 160; k++) spawn(x + (R() - 0.5) * 16, 8 + R() * 6, z + (R() - 0.5) * 16, (R() - 0.5) * 1.5, -1.5 - R() * 1.5, (R() - 0.5) * 1.5, 5, 0.1, party[k % party.length]);
+      }
+      if (ref.current?.instanceColor) ref.current.instanceColor.needsUpdate = true;
+    };
+  }, [store, st, col]);
+  useFrame((_, delta) => {
+    const m = ref.current;
+    if (!m || st.idle) return;
+    const dt = Math.min(delta, 0.05);
+    let alive = false;
+    for (let i = 0; i < BURST_N; i++) {
+      if (st.life[i] > 0) {
+        alive = true;
+        st.life[i] -= dt;
+        st.v[i * 3 + 1] -= 7 * dt;
+        st.p[i * 3] += st.v[i * 3] * dt;
+        st.p[i * 3 + 1] = Math.max(0.05, st.p[i * 3 + 1] + st.v[i * 3 + 1] * dt);
+        st.p[i * 3 + 2] += st.v[i * 3 + 2] * dt;
+        dummy.position.set(st.p[i * 3], st.p[i * 3 + 1], st.p[i * 3 + 2]);
+        dummy.rotation.set(st.life[i] * 6, st.life[i] * 4, 0);
+        dummy.scale.setScalar(st.size[i] * Math.min(1, st.life[i] * 3));
+      } else dummy.scale.setScalar(0);
+      dummy.updateMatrix();
+      m.setMatrixAt(i, dummy.matrix);
+    }
+    m.instanceMatrix.needsUpdate = true;
+    if (!alive) st.idle = true;
+  });
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, BURST_N]} frustumCulled={false}>
+      <icosahedronGeometry args={[1, 1]} />
+      <meshStandardMaterial roughness={0.3} />
+    </instancedMesh>
   );
 }
 
@@ -926,24 +1252,24 @@ function Mailbox() {
     <group position={[MAILBOX.x, 0, MAILBOX.z]} rotation-y={-0.5}>
       <mesh position-y={0.5} castShadow>
         <cylinderGeometry args={[0.07, 0.07, 1, 6]} />
-        <meshLambertMaterial color="#7a5234" />
+        <meshStandardMaterial roughness={0.55} color="#7a5234" />
       </mesh>
       <mesh position-y={1.1} castShadow>
         <boxGeometry args={[0.5, 0.45, 0.75]} />
-        <meshLambertMaterial color="#e0584f" />
+        <meshStandardMaterial roughness={0.55} color="#e0584f" />
       </mesh>
       <mesh position-y={1.32} rotation-x={Math.PI / 2}>
         <cylinderGeometry args={[0.25, 0.25, 0.75, 14, 1, false, 0, Math.PI]} />
-        <meshLambertMaterial color="#e0584f" side={THREE.DoubleSide} />
+        <meshStandardMaterial roughness={0.55} color="#e0584f" side={THREE.DoubleSide} />
       </mesh>
       <group ref={flag} position={[0.27, 1.1, -0.1]}>
         <mesh position-y={0.25}>
           <boxGeometry args={[0.04, 0.5, 0.04]} />
-          <meshLambertMaterial color="#5b4636" />
+          <meshStandardMaterial roughness={0.55} color="#5b4636" />
         </mesh>
         <mesh position={[0, 0.42, 0.12]}>
           <boxGeometry args={[0.03, 0.18, 0.22]} />
-          <meshLambertMaterial color="#f2cf5b" />
+          <meshStandardMaterial roughness={0.55} color="#f2cf5b" />
         </mesh>
       </group>
     </group>
@@ -955,11 +1281,11 @@ function WelcomeSign() {
     <group position={[WELCOME.x, 0, WELCOME.z]} rotation-y={0.35}>
       <mesh position-y={0.55} castShadow>
         <cylinderGeometry args={[0.07, 0.08, 1.1, 6]} />
-        <meshLambertMaterial color="#7a5234" />
+        <meshStandardMaterial roughness={0.55} color="#7a5234" />
       </mesh>
       <mesh position-y={1.1} castShadow>
         <boxGeometry args={[1.2, 0.6, 0.1]} />
-        <meshLambertMaterial color="#e8c393" />
+        <meshStandardMaterial roughness={0.55} color="#e8c393" />
       </mesh>
     </group>
   );
@@ -1015,61 +1341,65 @@ function Villager({ look, anim, showTool = false }: { look: Look; anim: MutableR
       </mesh>
       <mesh ref={lf} position={[-0.14, 0.09, 0]} castShadow>
         <sphereGeometry args={[0.11, 10, 8]} />
-        <meshLambertMaterial color="#6b4a3a" />
+        <meshStandardMaterial roughness={0.55} color="#6b4a3a" />
       </mesh>
       <mesh ref={rf} position={[0.14, 0.09, 0]} castShadow>
         <sphereGeometry args={[0.11, 10, 8]} />
-        <meshLambertMaterial color="#6b4a3a" />
+        <meshStandardMaterial roughness={0.55} color="#6b4a3a" />
       </mesh>
       <group ref={body}>
         <mesh position-y={0.3}>
           <cylinderGeometry args={[0.2, 0.24, 0.3, 12]} />
-          <meshLambertMaterial color={look.pants} />
+          <meshStandardMaterial roughness={0.55} color={look.pants} />
         </mesh>
         <mesh position-y={0.62} castShadow>
           <capsuleGeometry args={[0.25, 0.22, 6, 14]} />
-          <meshLambertMaterial color={look.shirt} />
+          <meshStandardMaterial roughness={0.55} color={look.shirt} />
         </mesh>
         <group ref={la} position={[-0.3, 0.76, 0]}>
           <mesh position-y={-0.17} rotation-z={-0.15}>
             <capsuleGeometry args={[0.075, 0.2, 4, 8]} />
-            <meshLambertMaterial color={look.shirt} />
+            <meshStandardMaterial roughness={0.55} color={look.shirt} />
           </mesh>
           <mesh position={[-0.04, -0.36, 0]}>
             <sphereGeometry args={[0.075, 8, 6]} />
-            <meshLambertMaterial color={look.skin} />
+            <meshStandardMaterial roughness={0.55} color={look.skin} />
           </mesh>
         </group>
         <group ref={ra} position={[0.3, 0.76, 0]}>
           <mesh position-y={-0.17} rotation-z={0.15}>
             <capsuleGeometry args={[0.075, 0.2, 4, 8]} />
-            <meshLambertMaterial color={look.shirt} />
+            <meshStandardMaterial roughness={0.55} color={look.shirt} />
           </mesh>
           <mesh position={[0.04, -0.36, 0]}>
             <sphereGeometry args={[0.075, 8, 6]} />
-            <meshLambertMaterial color={look.skin} />
+            <meshStandardMaterial roughness={0.55} color={look.skin} />
           </mesh>
           <group ref={tool} position={[0.04, -0.38, 0.05]} visible={false}>
             <mesh position-z={0.18} rotation-x={Math.PI / 2}>
               <cylinderGeometry args={[0.025, 0.025, 0.42, 6]} />
-              <meshLambertMaterial color="#a0624a" />
+              <meshStandardMaterial roughness={0.55} color="#a0624a" />
             </mesh>
             <mesh position={[0.12, 0, 0.4]} rotation-x={Math.PI / 2}>
               <torusGeometry args={[0.14, 0.025, 6, 14, Math.PI * 1.1]} />
-              <meshLambertMaterial color="#e6ecf2" emissive="#ffffff" emissiveIntensity={0.2} />
+              <meshStandardMaterial roughness={0.55} color="#e6ecf2" emissive="#ffffff" emissiveIntensity={0.2} />
             </mesh>
           </group>
         </group>
         <group position-y={1.17}>
           <mesh castShadow>
-            <sphereGeometry args={[0.4, 24, 18]} />
-            <meshLambertMaterial color={look.skin} />
+            <sphereGeometry args={[0.4, 32, 24]} />
+            <meshStandardMaterial roughness={0.4} color={look.skin} />
           </mesh>
           {[-1, 1].map((sx) => (
             <group key={sx}>
-              <mesh position={[sx * 0.14, 0.02, 0.36]} scale={[1, 1.25, 0.5]}>
-                <sphereGeometry args={[0.05, 10, 8]} />
-                <meshBasicMaterial color="#2b1d16" />
+              <mesh position={[sx * 0.15, 0.0, 0.345]} scale={[1, 1.4, 0.55]}>
+                <sphereGeometry args={[0.068, 16, 12]} />
+                <meshStandardMaterial color="#2b1d16" roughness={0.15} />
+              </mesh>
+              <mesh position={[sx * 0.15 + 0.022, 0.045, 0.385]}>
+                <sphereGeometry args={[0.02, 8, 6]} />
+                <meshBasicMaterial color="#ffffff" />
               </mesh>
               <mesh position={[sx * 0.25, -0.1, 0.29]} scale={[1.3, 0.8, 0.4]}>
                 <sphereGeometry args={[0.055, 10, 8]} />
@@ -1097,11 +1427,11 @@ function Villager({ look, anim, showTool = false }: { look: Look; anim: MutableR
             <>
               <mesh position={[0, 0.1, -0.06]} scale={[1.06, 0.9, 1.02]} castShadow>
                 <sphereGeometry args={[0.41, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-                <meshLambertMaterial color={look.hair} />
+                <meshStandardMaterial roughness={0.55} color={look.hair} />
               </mesh>
               <mesh position={[0.1, 0.27, 0.26]} rotation={[0.9, 0, -0.4]}>
                 <capsuleGeometry args={[0.08, 0.18, 4, 8]} />
-                <meshLambertMaterial color={look.hair} />
+                <meshStandardMaterial roughness={0.55} color={look.hair} />
               </mesh>
             </>
           )}
@@ -1109,15 +1439,15 @@ function Villager({ look, anim, showTool = false }: { look: Look; anim: MutableR
             <group position-y={0.24}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.62, 0.62, 0.04, 24]} />
-                <meshLambertMaterial color={look.hat.color} />
+                <meshStandardMaterial roughness={0.55} color={look.hat.color} />
               </mesh>
               <mesh position-y={0.14}>
                 <cylinderGeometry args={[0.28, 0.33, 0.26, 18]} />
-                <meshLambertMaterial color={look.hat.color} />
+                <meshStandardMaterial roughness={0.55} color={look.hat.color} />
               </mesh>
               <mesh position-y={0.06}>
                 <cylinderGeometry args={[0.335, 0.335, 0.08, 18]} />
-                <meshLambertMaterial color={look.hat.band} />
+                <meshStandardMaterial roughness={0.55} color={look.hat.band} />
               </mesh>
             </group>
           )}
@@ -1186,7 +1516,10 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
       s.target = null;
       s.targetId = null;
       const run = k.has('shift') || Math.hypot(s.joy.x, s.joy.z) > 0.92;
-      dir.current.set(ix, iz).normalize();
+      // Input is relative to where the camera looks.
+      const sy = Math.sin(s.camYaw);
+      const cy = Math.cos(s.camYaw);
+      dir.current.set(cy * ix + sy * iz, -sy * ix + cy * iz).normalize();
       want = len * (run ? 6.4 : 3.8);
     } else if (s.target && !s.frozen) {
       const dx = s.target.x - s.pos.x;
@@ -1220,6 +1553,7 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
       s.pos.z += dir.current.y * s.speed * dt;
       resolveCollisions(s.pos);
     }
+    s.pos.y += (groundHeight(s.pos.x, s.pos.z) - s.pos.y) * (1 - Math.exp(-14 * dt));
     if (want > 0) {
       const target = Math.atan2(dir.current.x, dir.current.y);
       let diff = target - s.facing;
@@ -1293,11 +1627,16 @@ function CameraRig({ store, reduceMotion }: { store: GameStore; reduceMotion: bo
       desired.set(Math.sin(t) * 34, 17, Math.cos(t) * 34);
       lookWant.set(0, 0, -3);
     } else {
-      const k = portrait ? 1.5 : 1;
-      desired.set(store.pos.x, store.pos.y + 6.3 * k, store.pos.z + 11.5 * k);
-      lookWant.set(store.pos.x, store.pos.y + 1.2, store.pos.z - 6);
+      const d = store.camDist * (portrait ? 1.5 : 1);
+      const yaw = store.camYaw;
+      const pitch = store.camPitch;
+      const flat = Math.cos(pitch) * d;
+      desired.set(store.pos.x + Math.sin(yaw) * flat, store.pos.y + 0.8 + Math.sin(pitch) * d, store.pos.z + Math.cos(yaw) * flat);
+      // Look a little ahead of the player so more of the island (and sky) is in view.
+      const ahead = 6 * Math.cos(pitch);
+      lookWant.set(store.pos.x - Math.sin(yaw) * ahead, store.pos.y + 1.2, store.pos.z - Math.cos(yaw) * ahead);
     }
-    const f = 1 - Math.exp(-(store.started ? 3.2 : 1.2) * dt);
+    const f = 1 - Math.exp(-(store.started ? (store.dragged ? 12 : 3.2) : 1.2) * dt);
     camera.position.lerp(desired, f);
     look.current.lerp(lookWant, f);
     camera.lookAt(look.current);
@@ -1416,7 +1755,7 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
     const m = mesh.current;
     if (!m) return;
     const rnd = mulberry32(8);
-    const palette = ['#7fb551', '#8cc05a', '#76ad4b', '#9bc963', '#a7c95c', '#6ea548'];
+    const palette = ['#7fcf55', '#8fd962', '#72c24c', '#9fe06c', '#b2e27a', '#68b947'];
     baseColors.current = [];
     for (let i = 0; i < field.n; i++) {
       writeMatrix(i);
@@ -1545,7 +1884,7 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
       <instancedMesh ref={mesh} args={[geo, mat, field.n]} receiveShadow frustumCulled={false} />
       <instancedMesh ref={bits} args={[undefined, undefined, BITS]} frustumCulled={false}>
         <planeGeometry args={[0.07, 0.16]} />
-        <meshLambertMaterial color="#8cc05a" side={THREE.DoubleSide} />
+        <meshStandardMaterial roughness={0.55} color="#8cc05a" side={THREE.DoubleSide} />
       </instancedMesh>
     </>
   );
@@ -1646,7 +1985,7 @@ function Stars({ store, events }: { store: GameStore; events: MutableRefObject<G
       {STAR_SPOTS.map((p, i) => (
         <group key={i} ref={(g) => (refs.current[i] = g)} position={[p.x, 0.3, p.z]}>
           <mesh geometry={geo} castShadow>
-            <meshLambertMaterial color="#ffd23f" emissive="#ffb300" emissiveIntensity={0.55} />
+            <meshStandardMaterial roughness={0.55} color="#ffd23f" emissive="#ffb300" emissiveIntensity={0.55} />
           </mesh>
         </group>
       ))}
