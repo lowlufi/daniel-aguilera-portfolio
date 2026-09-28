@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, X } from 'lucide-react';
 import { PROJECTS, SKILLS, SOCIAL } from '../data';
 import Scene from './Scene';
-import { initAudio, setMuted as setAudioMuted, sfx } from './audio';
+import { LabelsOverlay } from './labels';
+import { AMBIENTS, initAudio, pauseAudio, setAmbient, setAmbientVolume, setMix as setAudioMix, setMuted as setAudioMuted, sfx, type AmbientId, type Mix } from './audio';
+import { WEATHERS, WEATHER_CONFIG, stepAtmosphere, type WeatherId } from './weather';
 import { createStore, type GameEvents } from './store';
 import { INTERACTABLES, PROJECT_SIGNS, STAR_COUNT, approachPoint, type InteractableId } from './world';
 
@@ -36,6 +38,21 @@ const TRAVEL: { id: InteractableId; emoji: string; label: string }[] = [
 ];
 
 const CROP_EMOJI = ['🌻', '🍅', '🥕', '🥬'];
+
+const SOUND_PRESETS: { label: string; emoji: string; mix: Mix }[] = [
+  { label: 'Tormenta', emoji: '⛈️', mix: { lluvia: 0.9, truenos: 0.6, viento: 0.4 } },
+  { label: 'Bosque', emoji: '🌲', mix: { pajaritos: 0.7, arroyo: 0.5, viento: 0.25 } },
+  { label: 'Playa', emoji: '🏖️', mix: { olas: 0.8, viento: 0.3, pajaritos: 0.15 } },
+  { label: 'Chimenea', emoji: '🪵', mix: { fogata: 0.8, lluvia: 0.3, musica: 0.25 } },
+  { label: 'Noche', emoji: '🌌', mix: { grillos: 0.7, fogata: 0.2, olas: 0.2 } },
+  { label: 'Silencio', emoji: '🤫', mix: {} },
+];
+
+type Sheet = 'weather' | 'sound' | null;
+
+function fullMix(m: Mix): Record<AmbientId, number> {
+  return Object.fromEntries(AMBIENTS.map((a) => [a.id, m[a.id] ?? 0])) as Record<AmbientId, number>;
+}
 
 function readStorage<T>(key: string, fallback: T): T {
   try {
@@ -83,6 +100,18 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const [stars, setStars] = useState(0);
   const [cut, setCut] = useState(0);
   const [muted, setMuted] = useState(() => readStorage('island-muted', false));
+  const [weather, setWeather] = useState<WeatherId>(() => {
+    const w = readStorage<WeatherId>('island-weather', 'atardecer');
+    return w in WEATHER_CONFIG ? w : 'atardecer';
+  });
+  const [mix, setMixState] = useState<Record<AmbientId, number>>(() => fullMix(readStorage<Mix>('island-mix', WEATHER_CONFIG[weather].mix)));
+  const [ambVol, setAmbVol] = useState(() => readStorage('island-ambvol', 0.8));
+  const [sheet, setSheet] = useState<Sheet>(null);
+  const reduceMotion = useReducedMotion() ?? false;
+  const timers = useRef<number[]>([]);
+  const later = useCallback((fn: () => void, ms: number) => {
+    timers.current.push(window.setTimeout(fn, ms));
+  }, []);
   const [unlocked, setUnlocked] = useState<AchievementId[]>(() => readStorage('island-achievements', [] as AchievementId[]));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const visited = useRef(new Set<InteractableId>());
@@ -90,7 +119,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const toastKey = useRef(0);
   const revealHint = useRef(false);
 
-  if (import.meta.env.DEV) (window as unknown as { __island?: unknown }).__island = { store, walkTo: (id: InteractableId) => walkToRef.current(id) };
+  if (import.meta.env.DEV) (window as unknown as { __island?: unknown }).__island = { store, walkTo: (id: InteractableId) => walkToRef.current(id), snapWeather: () => stepAtmosphere(1) };
   const walkToRef = useRef<(id: InteractableId) => void>(() => {});
 
   const busyRef = useRef(false);
@@ -98,19 +127,12 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   store.frozen = !started || !!dialog || !!panel || paused;
   store.started = started;
 
-  useEffect(() => {
-    const prev = document.title;
-    document.title = 'Isla de Daniel Eduardo — Portafolio';
-    return () => {
-      document.title = prev;
-    };
-  }, []);
 
   const toast = useCallback((icon: string, title: string, text: string) => {
     const key = ++toastKey.current;
     setToasts((t) => [...t.slice(-2), { key, icon, title, text }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.key !== key)), 3600);
-  }, []);
+    later(() => setToasts((t) => t.filter((x) => x.key !== key)), 3600);
+  }, [later]);
 
   const unlockedRef = useRef(unlocked);
   const unlock = useCallback(
@@ -217,7 +239,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         if (seenProjects.current.size === PROJECT_SIGNS.length) unlock('curioso');
       }
       sfx.open();
+      (document.activeElement as HTMLElement | null)?.blur?.();
       setPanel(null);
+      setSheet(null);
       setDialog(buildDialog(id));
       setLine(0);
       setTyped(0);
@@ -273,12 +297,16 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const lineDone = typed >= fullText.length;
   useEffect(() => {
     if (!dialog || lineDone) return;
+    if (reduceMotion) {
+      setTyped(fullText.length);
+      return;
+    }
     const t = window.setTimeout(() => {
       setTyped((n) => n + 1);
       if (typed % 3 === 0 && fullText[typed] !== ' ') sfx.talk();
     }, 22);
     return () => window.clearTimeout(t);
-  }, [dialog, typed, lineDone, fullText]);
+  }, [dialog, typed, lineDone, fullText, reduceMotion]);
 
   const isLastLine = !!dialog && line === dialog.lines.length - 1;
   const showChoices = isLastLine && lineDone && !!dialog?.choices?.length;
@@ -301,12 +329,55 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const start = useCallback(() => {
     if (startedRef.current) return;
     startedRef.current = true;
+    setAmbientVolume(ambVol);
+    setAudioMix(mix);
     initAudio(muted);
     setStarted(true);
-    window.setTimeout(() => {
+    later(() => {
       if (!busyRef.current) openDialog('welcome');
     }, 1300);
-  }, [muted, openDialog]);
+  }, [ambVol, later, mix, muted, openDialog]);
+
+  // Stop every sound and pending timer when leaving the island.
+  useEffect(
+    () => () => {
+      pauseAudio();
+      timers.current.forEach((t) => window.clearTimeout(t));
+    },
+    [],
+  );
+
+  const chooseWeather = useCallback((w: WeatherId) => {
+    setWeather(w);
+    writeStorage('island-weather', w);
+    const m = fullMix(WEATHER_CONFIG[w].mix);
+    setMixState(m);
+    setAudioMix(m);
+    writeStorage('island-mix', m);
+    sfx.select();
+  }, []);
+
+  const applyMix = useCallback((m: Mix) => {
+    const full = fullMix(m);
+    setMixState(full);
+    setAudioMix(full);
+    writeStorage('island-mix', full);
+  }, []);
+
+  const changeChannel = useCallback((id: AmbientId, v: number) => {
+    setMixState((prev) => {
+      const next = { ...prev, [id]: v };
+      writeStorage('island-mix', next);
+      return next;
+    });
+    setAmbient(id, v);
+  }, []);
+
+  const changeAmbVol = (v: number) => {
+    setAmbVol(v);
+    setAmbientVolume(v);
+    writeStorage('island-ambvol', v);
+  };
 
   const toggleMute = () => {
     const m = !muted;
@@ -324,6 +395,18 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     const down = (e: KeyboardEvent) => {
       if (paused || isTyping(e) || e.metaKey || e.ctrlKey) return;
       const key = e.key.toLowerCase();
+      // A focused button keeps Enter (and Space inside menus) for itself. Out on the
+      // island, Space always means "cut", so drop focus from the HUD button.
+      const onControl = (e.target as HTMLElement | null)?.closest?.('button, a') as HTMLElement | null;
+      if (onControl && key === 'enter') return;
+      if (onControl && key === ' ') {
+        if (!started || dialog || panel || sheet) return;
+        onControl.blur();
+      }
+      if (key === 'escape' && sheet) {
+        setSheet(null);
+        return;
+      }
       if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) e.preventDefault();
       if (!started) {
         if (key === 'enter' || key === ' ') start();
@@ -367,7 +450,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [advance, choiceIdx, closeDialog, dialog, openDialog, panel, paused, showChoices, start, started, store]);
+  }, [advance, choiceIdx, closeDialog, dialog, openDialog, panel, paused, sheet, showChoices, start, started, store]);
 
   useEffect(() => {
     if (dialog || panel) store.keys.clear();
@@ -376,17 +459,19 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const nearItem = near ? INTERACTABLES.find((x) => x.id === near) : null;
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="absolute inset-0 font-cozy select-none">
       <Canvas
-        shadows
+        shadows={quality === 'high'}
         flat
-        dpr={[1, quality === 'high' ? 1.75 : 1.5]}
+        dpr={[1, quality === 'high' ? 1.75 : 1.25]}
         camera={{ fov: 50, position: [30, 17, 30], near: 0.1, far: 900 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
         style={{ touchAction: 'none' }}
       >
-        <Scene store={store} events={events} quality={quality} onWalkTo={walkTo} />
+        <Scene store={store} events={events} quality={quality} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} />
       </Canvas>
+      <LabelsOverlay />
 
       {/* Crawlable summary for search engines and screen readers. */}
       <div className="sr-only">
@@ -406,10 +491,18 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               </span>
               <Stat>⭐ {stars}/{STAR_COUNT}</Stat>
               <Stat>✂️ {cut}</Stat>
-              <Stat title="Logros">🏆 {unlocked.length}/{Object.keys(ACHIEVEMENTS).length}</Stat>
+              <Stat title="Logros" className="hidden sm:inline-flex">
+                🏆 {unlocked.length}/{Object.keys(ACHIEVEMENTS).length}
+              </Stat>
             </div>
             <div className="pointer-events-auto flex items-center gap-1.5 md:gap-2">
-              <IconButton label={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute}>
+              <IconButton label="Clima" active={sheet === 'weather'} onClick={() => setSheet((v) => (v === 'weather' ? null : 'weather'))}>
+                {WEATHERS.find((w) => w.id === weather)?.emoji}
+              </IconButton>
+              <IconButton label="Sonidos ambiente" active={sheet === 'sound'} onClick={() => setSheet((v) => (v === 'sound' ? null : 'sound'))}>
+                🎧
+              </IconButton>
+              <IconButton label={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className="hidden md:grid">
                 {muted ? '🔇' : '🔊'}
               </IconButton>
               <IconButton label="Ayuda" onClick={() => openDialog('welcome')}>
@@ -420,7 +513,8 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 onClick={() => navigate('/clasico')}
                 className="rounded-full bg-[#fff8e7]/95 px-3 md:px-4 h-10 text-xs md:text-sm font-extrabold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] hover:-translate-y-0.5 transition-transform"
               >
-                Versión clásica
+                <span className="md:hidden">Clásica</span>
+                <span className="hidden md:inline">Versión clásica</span>
               </button>
             </div>
           </div>
@@ -434,7 +528,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 key={t.id}
                 type="button"
                 onClick={() => walkTo(t.id)}
-                className="shrink-0 rounded-full bg-[#7ccf8a] px-3.5 md:px-4 py-2 text-[13px] md:text-sm font-extrabold text-white shadow-[0_3px_0_#4f9c5d] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_1px_0_#4f9c5d] transition-transform"
+                className="shrink-0 rounded-full bg-[#7ccf8a] px-3.5 md:px-4 py-2 text-[13px] md:text-sm font-extrabold text-[#1d4a26] shadow-[0_3px_0_#4f9c5d] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_1px_0_#4f9c5d] transition-transform"
               >
                 <span className="mr-1">{t.emoji}</span>
                 {t.label}
@@ -518,6 +612,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             key={dialog.speaker}
             dialog={dialog}
             text={fullText.slice(0, typed)}
+            fullText={fullText}
             lineDone={lineDone}
             showChoices={showChoices}
             choiceIdx={choiceIdx}
@@ -541,26 +636,184 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
           </PanelShell>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {started && sheet && (
+          <motion.aside
+            key={sheet}
+            role="dialog"
+            aria-label={sheet === 'weather' ? 'Elegir clima' : 'Sonidos ambiente'}
+            initial={{ opacity: 0, y: -10, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.97 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+            className="absolute right-3 top-[112px] md:right-4 md:top-[68px] z-30 w-[min(340px,calc(100%-24px))] max-h-[calc(100svh-190px)] md:max-h-[calc(100svh-150px)] overflow-y-auto rounded-[1.75rem] bg-[#fff8e7] p-4 text-[#5b4636] shadow-[0_6px_0_rgba(91,70,54,0.22),0_20px_50px_rgba(60,30,40,0.25)]"
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-black">{sheet === 'weather' ? '🌦️ Clima de la isla' : '🎧 Sonidos ambiente'}</h2>
+              <button type="button" onClick={() => setSheet(null)} aria-label="Cerrar" className="grid h-9 w-9 place-items-center rounded-full bg-[#f0e2c8] hover:bg-[#ead6b3]">
+                <X size={16} strokeWidth={3} />
+              </button>
+            </div>
+            {sheet === 'weather' ? (
+              <WeatherPicker weather={weather} onChoose={chooseWeather} />
+            ) : (
+              <SoundMixer
+                mix={mix}
+                ambVol={ambVol}
+                muted={muted}
+                onChannel={changeChannel}
+                onVolume={changeAmbVol}
+                onPreset={applyMix}
+                onWeatherPreset={() => applyMix(WEATHER_CONFIG[weather].mix)}
+                onToggleMute={toggleMute}
+              />
+            )}
+          </motion.aside>
+        )}
+      </AnimatePresence>
     </div>
+    </MotionConfig>
   );
 }
 
-function Stat({ children, title }: { children: ReactNode; title?: string }) {
+function WeatherPicker({ weather, onChoose }: { weather: WeatherId; onChoose: (w: WeatherId) => void }) {
   return (
-    <span title={title} className="inline-flex h-10 items-center rounded-full bg-[#fff8e7]/95 px-3 md:px-3.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] tabular-nums">
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        {WEATHERS.map((w) => {
+          const on = w.id === weather;
+          return (
+            <button
+              key={w.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onChoose(w.id)}
+              className={`flex items-center gap-2.5 rounded-2xl px-3 py-3 text-left text-[15px] font-extrabold transition-colors ${
+                on ? 'bg-[#f0a45d] text-[#3d2410] shadow-[0_3px_0_#c97d3c]' : 'bg-white hover:bg-[#fbf1dc]'
+              }`}
+            >
+              <span className="text-2xl">{w.emoji}</span>
+              {w.label}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-xs font-bold opacity-80">El clima también cambia los sonidos. Puedes ajustarlos en 🎧.</p>
+    </>
+  );
+}
+
+type SoundMixerProps = {
+  mix: Record<AmbientId, number>;
+  ambVol: number;
+  muted: boolean;
+  onChannel: (id: AmbientId, v: number) => void;
+  onVolume: (v: number) => void;
+  onPreset: (m: Mix) => void;
+  onWeatherPreset: () => void;
+  onToggleMute: () => void;
+};
+
+function SoundMixer({ mix, ambVol, muted, onChannel, onVolume, onPreset, onWeatherPreset, onToggleMute }: SoundMixerProps) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" onClick={onWeatherPreset} className="rounded-full bg-[#7ccf8a] px-3 py-1.5 text-xs font-black text-[#1d4a26] shadow-[0_2px_0_#4f9c5d]">
+          🌦️ Del clima
+        </button>
+        {SOUND_PRESETS.map((p) => (
+          <button key={p.label} type="button" onClick={() => onPreset(p.mix)} className="rounded-full bg-white px-3 py-1.5 text-xs font-black hover:bg-[#fbf1dc]">
+            {p.emoji} {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 rounded-2xl bg-[#f6ecd9] px-3 py-2.5">
+        <button type="button" onClick={onToggleMute} aria-label={muted ? 'Activar sonido' : 'Silenciar todo'} className="text-xl">
+          {muted ? '🔇' : '🔊'}
+        </button>
+        <label className="flex-1">
+          <span className="sr-only">Volumen general</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={ambVol}
+            onChange={(e) => onVolume(Number(e.target.value))}
+            className="cozy-range w-full"
+          />
+        </label>
+      </div>
+
+      <ul className="mt-3 space-y-1.5">
+        {AMBIENTS.map((a) => {
+          const v = mix[a.id];
+          const on = v > 0.001;
+          return (
+            <li key={a.id} className={`flex items-center gap-3 rounded-2xl px-3 py-2 transition-colors ${on ? 'bg-white' : 'bg-transparent'}`}>
+              <button
+                type="button"
+                aria-pressed={on}
+                aria-label={`${on ? 'Apagar' : 'Encender'} ${a.label}`}
+                onClick={() => onChannel(a.id, on ? 0 : 0.5)}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-xl transition-all ${on ? 'bg-[#f0a45d] shadow-[0_2px_0_#c97d3c]' : 'bg-[#f0e2c8] grayscale-[60%]'}`}
+              >
+                {a.emoji}
+              </button>
+              <label className="min-w-0 flex-1">
+                <span className="block text-[13px] font-extrabold leading-tight">{a.label}</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={v}
+                  onChange={(e) => onChannel(a.id, Number(e.target.value))}
+                  className="cozy-range mt-1 w-full"
+                />
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-3 text-[11px] font-bold opacity-80">Todos los sonidos se generan en vivo en tu navegador. Siguen sonando mientras exploras.</p>
+    </>
+  );
+}
+
+function Stat({ children, title, className = 'inline-flex' }: { children: ReactNode; title?: string; className?: string }) {
+  return (
+    <span title={title} className={`${className} h-10 items-center rounded-full bg-[#fff8e7]/95 px-3 md:px-3.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] tabular-nums`}>
       {children}
     </span>
   );
 }
 
-function IconButton({ children, label, onClick }: { children: ReactNode; label: string; onClick: () => void }) {
+function IconButton({
+  children,
+  label,
+  onClick,
+  active = false,
+  className = 'grid',
+}: {
+  children: ReactNode;
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+  className?: string;
+}) {
   return (
     <button
       type="button"
       aria-label={label}
+      aria-pressed={active}
       title={label}
       onClick={onClick}
-      className="grid h-10 w-10 place-items-center rounded-full bg-[#fff8e7]/95 text-lg shadow-[0_3px_0_rgba(91,70,54,0.2)] hover:-translate-y-0.5 transition-transform"
+      className={`${className} h-10 w-10 place-items-center rounded-full text-lg shadow-[0_3px_0_rgba(91,70,54,0.2)] hover:-translate-y-0.5 transition-transform ${
+        active ? 'bg-[#f0a45d]' : 'bg-[#fff8e7]/95'
+      }`}
     >
       {children}
     </button>
@@ -586,7 +839,7 @@ function StartScreen({ onStart, onClassic, coarse }: { onStart: () => void; onCl
         transition={{ type: 'spring', stiffness: 160, damping: 18, delay: 0.25 }}
         className="w-full max-w-md rounded-[2rem] bg-[#fff8e7] px-7 py-8 text-center text-[#6b4f3a] shadow-[0_8px_0_rgba(91,70,54,0.25),0_30px_60px_rgba(60,30,40,0.3)]"
       >
-        <div className="text-sm font-extrabold uppercase tracking-[0.25em] text-[#e0906b]">🏝️ Bienvenid@ a la isla de</div>
+        <div className="text-sm font-extrabold uppercase tracking-[0.25em] text-[#a4552c]">🏝️ Bienvenid@ a la isla de</div>
         <h1 className="mt-2 text-4xl md:text-5xl font-black leading-none text-[#5b4636]">Daniel Eduardo</h1>
         <p className="mt-3 text-[15px] font-bold leading-snug opacity-80">
           Ingeniero en Informática. Desarrollo web full stack, IoT y soluciones a medida.
@@ -597,11 +850,11 @@ function StartScreen({ onStart, onClassic, coarse }: { onStart: () => void; onCl
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.96 }}
           autoFocus
-          className="mt-7 w-full rounded-full bg-[#7ccf8a] py-4 text-lg font-black text-white shadow-[0_5px_0_#4f9c5d] active:translate-y-1 active:shadow-[0_1px_0_#4f9c5d]"
+          className="mt-7 w-full rounded-full bg-[#7ccf8a] py-4 text-lg font-black text-[#1d4a26] shadow-[0_5px_0_#4f9c5d] active:translate-y-1 active:shadow-[0_1px_0_#4f9c5d]"
         >
           ▶ Entrar a la isla
         </motion.button>
-        <p className="mt-4 text-xs font-bold opacity-65">
+        <p className="mt-4 text-xs font-bold opacity-80">
           {coarse ? 'Usa el joystick para caminar y ✂️ para cortar el pasto.' : 'WASD para caminar · Espacio para cortar el pasto · E para hablar'}
         </p>
         <button type="button" onClick={onClassic} className="mt-5 text-sm font-extrabold underline decoration-2 underline-offset-4 opacity-70 hover:opacity-100">
@@ -615,6 +868,7 @@ function StartScreen({ onStart, onClassic, coarse }: { onStart: () => void; onCl
 type DialogBoxProps = {
   dialog: Dialog;
   text: string;
+  fullText: string;
   lineDone: boolean;
   showChoices: boolean;
   choiceIdx: number;
@@ -622,7 +876,12 @@ type DialogBoxProps = {
   onAdvance: () => void;
 };
 
-function DialogBox({ dialog, text, lineDone, showChoices, choiceIdx, setChoiceIdx, onAdvance }: DialogBoxProps) {
+function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, setChoiceIdx, onAdvance }: DialogBoxProps) {
+  const list = useRef<HTMLUListElement>(null);
+  // Keep keyboard focus on the highlighted choice so Enter/Space pick it.
+  useEffect(() => {
+    if (showChoices) list.current?.querySelectorAll('button')[choiceIdx]?.focus({ preventScroll: true });
+  }, [showChoices, choiceIdx]);
   return (
     <motion.div
       initial={{ opacity: 0, y: 30, scale: 0.96 }}
@@ -634,6 +893,7 @@ function DialogBox({ dialog, text, lineDone, showChoices, choiceIdx, setChoiceId
       <AnimatePresence>
         {showChoices && dialog.choices && (
           <motion.ul
+            ref={list}
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0 }}
@@ -646,7 +906,7 @@ function DialogBox({ dialog, text, lineDone, showChoices, choiceIdx, setChoiceId
                   onClick={c.run}
                   onMouseEnter={() => setChoiceIdx(i)}
                   className={`flex w-full items-center gap-2 rounded-2xl px-4 py-2 text-left text-[15px] font-extrabold transition-colors ${
-                    i === choiceIdx ? 'bg-[#f0a45d] text-white' : 'text-[#6b4f3a]'
+                    i === choiceIdx ? 'bg-[#f0a45d] text-[#3d2410]' : 'text-[#6b4f3a]'
                   }`}
                 >
                   <span className={i === choiceIdx ? 'opacity-100' : 'opacity-0'}>▶</span>
@@ -659,14 +919,20 @@ function DialogBox({ dialog, text, lineDone, showChoices, choiceIdx, setChoiceId
       </AnimatePresence>
       <div
         role="dialog"
-        aria-live="polite"
+        aria-label={dialog.speaker}
         onClick={onAdvance}
         className="relative cursor-pointer rounded-[2rem] bg-[#fff8e7] px-6 pb-7 pt-8 md:px-9 md:pt-9 text-[#5b4636] shadow-[0_6px_0_rgba(91,70,54,0.22),0_20px_50px_rgba(60,30,40,0.25)]"
       >
-        <span className="absolute -top-4 left-6 -rotate-3 rounded-full bg-[#f0a45d] px-5 py-1.5 text-base font-black text-white shadow-[0_3px_0_#c97d3c]">
+        <span className="absolute -top-4 left-6 -rotate-3 rounded-full bg-[#f0a45d] px-5 py-1.5 text-base font-black text-[#3d2410] shadow-[0_3px_0_#c97d3c]">
           {dialog.speaker}
         </span>
-        <p className="min-h-[3.2em] text-[17px] md:text-lg font-bold leading-relaxed">{text}</p>
+        <p aria-hidden className="min-h-[3.2em] text-[17px] md:text-lg font-bold leading-relaxed">
+          {text}
+        </p>
+        {/* Screen readers get each line once, complete, instead of letter by letter. */}
+        <p className="sr-only" aria-live="polite">
+          {lineDone ? `${dialog.speaker}: ${fullText}` : ''}
+        </p>
         {lineDone && !showChoices && (
           <motion.span
             animate={{ y: [0, 4, 0] }}
@@ -682,6 +948,28 @@ function DialogBox({ dialog, text, lineDone, showChoices, choiceIdx, setChoiceId
 }
 
 function PanelShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const closeBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    closeBtn.current?.focus({ preventScroll: true });
+    return () => prev?.focus?.({ preventScroll: true });
+  }, []);
+  // Keep Tab inside the panel.
+  const trap = (e: ReactKeyboardEvent) => {
+    if (e.key !== 'Tab' || !box.current) return;
+    const items = box.current.querySelectorAll<HTMLElement>('a[href], button');
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -695,12 +983,17 @@ function PanelShell({ title, onClose, children }: { title: string; onClose: () =
         animate={{ y: 0, scale: 1 }}
         exit={{ y: 20, scale: 0.97 }}
         transition={{ type: 'spring', stiffness: 240, damping: 24 }}
+        ref={box}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onKeyDown={trap}
         onClick={(e) => e.stopPropagation()}
         className="flex max-h-[88svh] w-full max-w-3xl flex-col overflow-hidden rounded-[2rem] bg-[#fff8e7] text-[#5b4636] shadow-[0_8px_0_rgba(91,70,54,0.25),0_30px_60px_rgba(60,30,40,0.3)]"
       >
         <div className="flex items-center justify-between gap-3 border-b-2 border-dashed border-[#e8d5b5] px-6 py-4">
           <h2 className="text-xl md:text-2xl font-black">{title}</h2>
-          <button type="button" onClick={onClose} aria-label="Cerrar" className="grid h-10 w-10 place-items-center rounded-full bg-[#f0e2c8] hover:bg-[#ead6b3]">
+          <button ref={closeBtn} type="button" onClick={onClose} aria-label="Cerrar" className="grid h-10 w-10 place-items-center rounded-full bg-[#f0e2c8] hover:bg-[#ead6b3]">
             <X size={18} strokeWidth={3} />
           </button>
         </div>
@@ -733,7 +1026,7 @@ function ProjectsPanel() {
                 href={p.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ml-auto inline-flex items-center gap-1 rounded-full bg-[#7ccf8a] px-3 py-1 text-xs font-black text-white shadow-[0_2px_0_#4f9c5d]"
+                className="ml-auto inline-flex items-center gap-1 rounded-full bg-[#7ccf8a] px-3 py-1 text-xs font-black text-[#1d4a26] shadow-[0_2px_0_#4f9c5d]"
               >
                 Visitar <ArrowUpRight size={13} strokeWidth={3} />
               </a>

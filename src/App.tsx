@@ -11,7 +11,29 @@ import {
 import Lenis from 'lenis';
 import { PROJECTS, SKILLS, SOCIAL, type Project } from './data';
 
-const IslandGame = lazy(() => import('./game/IslandGame'));
+// Start downloading the game right away when landing on it, in parallel with React booting.
+const loadIslandGame = () => import('./game/IslandGame');
+const earlyGame = typeof window !== 'undefined' && window.location.pathname === '/' ? loadIslandGame() : null;
+const IslandGame = lazy(() => earlyGame ?? loadIslandGame());
+
+const ROUTE_META: Record<string, { title: string; description: string }> = {
+  '/': {
+    title: 'Daniel Eduardo — Portafolio interactivo',
+    description: 'Explora la isla de Daniel Eduardo: Ingeniero en Informática. Desarrollo web full stack, IoT y soluciones a medida.',
+  },
+  '/clasico': {
+    title: 'Daniel Eduardo — Portafolio',
+    description: 'Portafolio de Daniel Eduardo — Ingeniero en Informática con mención en gestión de la información. Desarrollo web full stack, IoT y soluciones a medida.',
+  },
+  '/proyectos': { title: 'Proyectos — Daniel Eduardo', description: 'Proyectos web de Daniel Eduardo: plataformas educativas, e-commerce, medios, música y SaaS.' },
+  '/sobre-mi': { title: 'Sobre mí — Daniel Eduardo', description: 'Quién es Daniel Eduardo, Ingeniero en Informática, y las herramientas que usa.' },
+  '/privacidad': { title: 'Privacidad — Daniel Eduardo', description: 'Política de privacidad del portafolio de Daniel Eduardo.' },
+};
+
+function setMeta(selector: string, attr: string, value: string) {
+  const el = document.head.querySelector(selector);
+  if (el) el.setAttribute(attr, value);
+}
 
 function canRunGame() {
   if (typeof window === 'undefined') return false;
@@ -1375,6 +1397,7 @@ export default function App() {
   const auroraRef = useRef<HTMLVideoElement>(null);
   const switchingRef = useRef(false);
   const lenisRef = useRef<Lenis | null>(null);
+  const routeRef = useRef<string>('home');
   const [theme, setTheme] = useState<Theme>(() => loadStoredTheme() ?? 'night');
   const [pathname, setPathname] = useState<string>(getInitialPath);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1441,7 +1464,7 @@ export default function App() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
-        if (composerOpen) return;
+        if (composerOpen || routeRef.current === 'game') return;
         e.preventDefault();
         setPaletteOpen((v) => !v);
       }
@@ -1519,13 +1542,35 @@ export default function App() {
   };
 
   const [gameSupported] = useState(canRunGame);
-  const route: 'game' | 'home' | 'projects' | 'about' | 'privacy' | '404' =
+  type Route = 'game' | 'home' | 'projects' | 'about' | 'privacy' | '404';
+  const route: Route =
     pathname === '/' ? (gameSupported ? 'game' : 'home') :
     pathname === '/clasico' ? 'home' :
     pathname === '/proyectos' ? 'projects' :
     pathname === '/sobre-mi' ? 'about' :
     pathname === '/privacidad' ? 'privacy' :
     KNOWN_ROUTES.includes(pathname) ? 'home' : '404';
+
+  routeRef.current = route;
+
+  // Per-route title, description, canonical, and noindex on unknown URLs.
+  useEffect(() => {
+    const meta = ROUTE_META[pathname];
+    const url = `https://danieleduardo.cl${meta ? pathname : '/'}`;
+    document.title = meta?.title ?? 'Página no encontrada — Daniel Eduardo';
+    setMeta('meta[name="description"]', 'content', meta?.description ?? ROUTE_META['/clasico'].description);
+    setMeta('link[rel="canonical"]', 'href', url);
+    setMeta('meta[property="og:url"]', 'content', url);
+    let robots = document.head.querySelector('meta[name="robots"]');
+    if (!meta) {
+      if (!robots) {
+        robots = document.createElement('meta');
+        robots.setAttribute('name', 'robots');
+        document.head.appendChild(robots);
+      }
+      robots.setAttribute('content', 'noindex');
+    } else robots?.remove();
+  }, [pathname]);
 
   const pageProps: PageProps = { navigate, reduceMotion, canHover, openComposer };
 

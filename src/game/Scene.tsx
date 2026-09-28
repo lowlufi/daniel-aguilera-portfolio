@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
-import { Html, Sparkles } from '@react-three/drei';
-import { sfx } from './audio';
+import { Sparkles } from '@react-three/drei';
+import { LabelProjector } from './labels';
+import { onThunder, sfx } from './audio';
+import { atmo, stepAtmosphere, WEATHER_CONFIG, type WeatherId } from './weather';
 import type { GameEvents, GameStore } from './store';
 import {
   COLLIDERS,
@@ -18,7 +20,6 @@ import {
   PROJECT_SIGNS,
   SPAWN,
   STAR_COUNT,
-  SUN_DIR,
   TREES,
   WELCOME,
   WORKSHOP,
@@ -33,27 +34,80 @@ type SceneProps = {
   events: MutableRefObject<GameEvents>;
   quality: 'high' | 'low';
   onWalkTo: (id: InteractableId) => void;
+  weather: WeatherId;
+  reduceMotion: boolean;
 };
 
-export default function Scene({ store, events, quality, onWalkTo }: SceneProps) {
+export default function Scene({ store, events, quality, onWalkTo, weather, reduceMotion }: SceneProps) {
   const { scene } = useThree();
+  const hemi = useRef<THREE.HemisphereLight>(null);
+  const sun = useRef<THREE.DirectionalLight>(null);
+  const amb = useRef<THREE.AmbientLight>(null);
+
+  // Snap to the chosen weather on the first frame, blend on later changes.
+  useMemo(() => {
+    atmo.target = weather;
+    stepAtmosphere(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    atmo.target = weather;
+  }, [weather]);
+
   useEffect(() => {
     scene.fog = new THREE.Fog('#f9b48d', 42, 125);
     return () => {
       scene.fog = null;
+      document.body.style.cursor = '';
     };
   }, [scene]);
 
+  useEffect(() => {
+    const timers: number[] = [];
+    onThunder((delay) => timers.push(window.setTimeout(() => (atmo.flash = 1), delay * 1000)));
+    return () => {
+      onThunder(null);
+      timers.forEach((t) => window.clearTimeout(t));
+    };
+  }, []);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+    stepAtmosphere(1 - Math.exp(-1.4 * dt));
+    atmo.flash = Math.max(0, atmo.flash - dt * 2.2);
+    const fog = scene.fog as THREE.Fog | null;
+    if (fog) {
+      fog.color.copy(atmo.fog);
+      fog.near = atmo.fogNear;
+      fog.far = atmo.fogFar;
+    }
+    if (hemi.current) {
+      hemi.current.color.copy(atmo.hemiSky);
+      hemi.current.groundColor.copy(atmo.hemiGround);
+      hemi.current.intensity = atmo.hemi + atmo.flash * 1.4;
+    }
+    if (sun.current) {
+      sun.current.color.copy(atmo.lightColor);
+      sun.current.intensity = atmo.light;
+      sun.current.position.copy(atmo.lightPos);
+    }
+    if (amb.current) {
+      amb.current.color.copy(atmo.ambientColor);
+      amb.current.intensity = atmo.ambient;
+    }
+    WINDOW_MAT.color.copy(atmo.windows);
+  });
+
+  const fireflies = WEATHER_CONFIG[weather].fireflies;
+
   return (
     <>
-      <hemisphereLight args={['#ffd2b0', '#6f8f58', 1.05]} />
+      <hemisphereLight ref={hemi} />
       <directionalLight
-        position={[-16, 22, -30]}
-        intensity={1.55}
-        color="#ffbf85"
-        castShadow
-        shadow-mapSize-width={quality === 'high' ? 2048 : 1024}
-        shadow-mapSize-height={quality === 'high' ? 2048 : 1024}
+        ref={sun}
+        castShadow={quality === 'high'}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
         shadow-camera-left={-30}
         shadow-camera-right={30}
         shadow-camera-top={30}
@@ -63,10 +117,10 @@ export default function Scene({ store, events, quality, onWalkTo }: SceneProps) 
         shadow-bias={-0.0006}
         shadow-normalBias={0.04}
       />
-      <ambientLight intensity={0.18} color="#ffb3c7" />
+      <ambientLight ref={amb} />
 
       <Sky />
-      <Clouds />
+      <Clouds reduceMotion={reduceMotion} />
       <Ocean />
       <Island store={store} />
       <PathStones />
@@ -75,15 +129,15 @@ export default function Scene({ store, events, quality, onWalkTo }: SceneProps) 
       <Rocks />
       <Dock />
 
-      <House x={HOUSE.x} z={HOUSE.z} wall="#fbe8c8" roof="#d9695f" door="#8a5a3b" label="Casa de Daniel" />
-      <House x={WORKSHOP.x} z={WORKSHOP.z} wall="#f3e2c7" roof="#6f9fd8" door="#6b4a3a" label="Taller" scale={1.1} />
+      <House x={HOUSE.x} z={HOUSE.z} wall="#fbe8c8" roof="#d9695f" door="#8a5a3b" />
+      <House x={WORKSHOP.x} z={WORKSHOP.z} wall="#f3e2c7" roof="#6f9fd8" door="#6b4a3a" scale={1.1} />
 
       <Clickable id="board" onWalkTo={onWalkTo}>
         <ProjectBoard />
       </Clickable>
       {PROJECT_SIGNS.map((s) => (
         <Clickable key={s.project.id} id={`project:${s.project.id}`} onWalkTo={onWalkTo}>
-          <ProjectSign x={s.x} z={s.z} rot={s.rot} color={s.color} title={s.project.title} soon={!!s.project.comingSoon} store={store} />
+          <ProjectSign x={s.x} z={s.z} rot={s.rot} color={s.color} soon={!!s.project.comingSoon} />
         </Clickable>
       ))}
       <Clickable id="garden" onWalkTo={onWalkTo}>
@@ -102,12 +156,28 @@ export default function Scene({ store, events, quality, onWalkTo }: SceneProps) 
       <Grass store={store} events={events} quality={quality} />
       <Stars store={store} events={events} />
       <Player store={store} events={events} />
-      <CameraRig store={store} />
+      <CameraRig store={store} reduceMotion={reduceMotion} />
+      <LabelProjector store={store} />
 
-      <Sparkles count={quality === 'high' ? 70 : 35} scale={[46, 3.5, 46]} position={[0, 1.8, -2]} size={3.2} speed={0.25} color="#ffe6a0" opacity={0.85} noise={1.2} />
+      <Rain store={store} count={quality === 'high' ? 1600 : 900} />
+      <Snow store={store} count={quality === 'high' ? 1400 : 800} />
+      {fireflies > 0 && (
+        <Sparkles
+          count={quality === 'high' ? 70 : 35}
+          scale={[46, 3.5, 46]}
+          position={[0, 1.8, -2]}
+          size={3.2}
+          speed={reduceMotion ? 0 : 0.25}
+          color="#ffe6a0"
+          opacity={fireflies}
+          noise={1.2}
+        />
+      )}
     </>
   );
 }
+
+const WINDOW_MAT = new THREE.MeshBasicMaterial({ color: '#ffd98a' });
 
 function Clickable({ id, onWalkTo, children }: { id: InteractableId; onWalkTo: (id: InteractableId) => void; children: ReactNode }) {
   return (
@@ -124,34 +194,6 @@ function Clickable({ id, onWalkTo, children }: { id: InteractableId; onWalkTo: (
   );
 }
 
-function Label({
-  children,
-  y,
-  tone = 'cream',
-  size = 20,
-  innerRef,
-}: {
-  children: ReactNode;
-  y: number;
-  tone?: 'cream' | 'orange';
-  size?: number;
-  innerRef?: MutableRefObject<HTMLDivElement | null>;
-}) {
-  return (
-    <Html position={[0, y, 0]} center distanceFactor={size} zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
-      <div
-        ref={innerRef}
-        style={{ transition: 'opacity 250ms ease' }}
-        className={`font-cozy whitespace-nowrap rounded-full px-3 py-1 text-[13px] font-extrabold shadow-[0_3px_0_rgba(91,70,54,0.25)] ${
-          tone === 'orange' ? 'bg-[#f0a45d] text-white' : 'bg-[#fff8e7]/95 text-[#6b4f3a]'
-        }`}
-      >
-        {children}
-      </div>
-    </Html>
-  );
-}
-
 /* ---------------- Sky & atmosphere ---------------- */
 
 function Sky() {
@@ -162,7 +204,19 @@ function Sky() {
         side: THREE.BackSide,
         depthWrite: false,
         fog: false,
-        uniforms: { uSun: { value: SUN_DIR.clone() } },
+        uniforms: {
+          uTop: { value: atmo.sky[0] },
+          uMid: { value: atmo.sky[1] },
+          uLow: { value: atmo.sky[2] },
+          uHor: { value: atmo.sky[3] },
+          uBelow: { value: atmo.sky[4] },
+          uSun: { value: atmo.sunDir },
+          uSunColor: { value: atmo.sunColor },
+          uSunAmt: { value: 0 },
+          uStars: { value: 0 },
+          uFlash: { value: 0 },
+          uTime: { value: 0 },
+        },
         vertexShader: /* glsl */ `
           varying vec3 vDir;
           void main() {
@@ -170,32 +224,40 @@ function Sky() {
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }`,
         fragmentShader: /* glsl */ `
-          uniform vec3 uSun;
+          uniform vec3 uTop, uMid, uLow, uHor, uBelow, uSun, uSunColor;
+          uniform float uSunAmt, uStars, uFlash, uTime;
           varying vec3 vDir;
           void main() {
             vec3 d = normalize(vDir);
             float h = d.y;
-            vec3 top = vec3(0.31, 0.33, 0.62);
-            vec3 mid = vec3(0.76, 0.50, 0.78);
-            vec3 low = vec3(1.0, 0.62, 0.58);
-            vec3 hor = vec3(1.0, 0.78, 0.55);
-            vec3 below = vec3(0.98, 0.70, 0.55);
             vec3 col;
-            if (h < 0.0) col = mix(hor, below, clamp(-h * 4.0, 0.0, 1.0));
-            else if (h < 0.09) col = mix(hor, low, h / 0.09);
-            else if (h < 0.36) col = mix(low, mid, (h - 0.09) / 0.27);
-            else col = mix(mid, top, clamp((h - 0.36) / 0.5, 0.0, 1.0));
+            if (h < 0.0) col = mix(uHor, uBelow, clamp(-h * 4.0, 0.0, 1.0));
+            else if (h < 0.09) col = mix(uHor, uLow, h / 0.09);
+            else if (h < 0.36) col = mix(uLow, uMid, (h - 0.09) / 0.27);
+            else col = mix(uMid, uTop, clamp((h - 0.36) / 0.5, 0.0, 1.0));
+            if (uStars > 0.01) {
+              vec3 p = d * 180.0;
+              vec3 cell = floor(p);
+              float r = fract(sin(dot(cell, vec3(12.9898, 78.233, 45.164))) * 43758.5453);
+              float s = step(0.986, r) * smoothstep(0.03, 0.25, h) * smoothstep(0.42, 0.08, length(fract(p) - 0.5));
+              col += vec3(s * (0.55 + 0.45 * sin(uTime * 2.3 + r * 60.0)) * uStars);
+            }
             float sd = max(dot(d, normalize(uSun)), 0.0);
-            col += vec3(1.0, 0.82, 0.5) * pow(sd, 28.0) * 0.6;
-            col += vec3(1.0, 0.7, 0.45) * pow(sd, 5.0) * 0.2;
-            col = mix(col, vec3(1.0, 0.95, 0.8), smoothstep(0.9983, 0.9991, sd));
+            col += uSunColor * pow(sd, 28.0) * 0.6 * uSunAmt;
+            col += uSunColor * pow(sd, 5.0) * 0.2 * uSunAmt;
+            col = mix(col, uSunColor * 1.05, smoothstep(0.9983, 0.9991, sd) * uSunAmt);
+            col += vec3(0.9, 0.93, 1.0) * uFlash * 0.45;
             gl_FragColor = vec4(col, 1.0);
           }`,
       }),
     [],
   );
-  useFrame(({ camera }) => {
+  useFrame(({ camera, clock }) => {
     ref.current?.position.copy(camera.position);
+    material.uniforms.uSunAmt.value = atmo.sunAmt;
+    material.uniforms.uStars.value = atmo.stars;
+    material.uniforms.uFlash.value = atmo.flash;
+    material.uniforms.uTime.value = clock.elapsedTime;
   });
   return (
     <mesh ref={ref} material={material} renderOrder={-1} frustumCulled={false}>
@@ -224,28 +286,38 @@ const CLOUDS = (() => {
     };
   });
 })();
+const PUFF_COUNT = CLOUDS.reduce((n, c) => n + c.puffs.length, 0);
 
-function Clouds() {
-  const refs = useRef<(THREE.Group | null)[]>([]);
-  const mat = useMemo(() => new THREE.MeshLambertMaterial({ color: '#fff6ee', emissive: '#ffb4a0', emissiveIntensity: 0.55, fog: false }), []);
-  const geo = useMemo(() => new THREE.IcosahedronGeometry(1, 2), []);
-  useFrame((_, dt) => {
-    refs.current.forEach((g, i) => {
-      if (!g) return;
-      g.position.x += CLOUDS[i].speed * dt;
-      if (g.position.x > 170) g.position.x = -170;
+// All cloud puffs share one instanced mesh: one draw call instead of ~110.
+function Clouds({ reduceMotion }: { reduceMotion: boolean }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const mat = useMemo(() => new THREE.MeshLambertMaterial({ fog: false }), []);
+  const offsets = useRef(CLOUDS.map((c) => c.x));
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+  useFrame((_, delta) => {
+    const m = ref.current;
+    if (!m) return;
+    mat.color.copy(atmo.cloud);
+    mat.emissive.copy(atmo.cloudGlow);
+    mat.emissiveIntensity = atmo.cloudGlowAmt;
+    const dt = reduceMotion ? 0 : Math.min(delta, 0.05);
+    let i = 0;
+    CLOUDS.forEach((c, ci) => {
+      let x = (offsets.current[ci] += c.speed * dt);
+      if (x > 170) x = offsets.current[ci] = -170;
+      for (const p of c.puffs) {
+        dummy.position.set(x + p.x * c.scale, c.y + p.y * c.scale, c.z + p.z * c.scale);
+        dummy.scale.set(p.r * c.scale, p.r * 0.8 * c.scale, p.r * c.scale);
+        dummy.updateMatrix();
+        m.setMatrixAt(i++, dummy.matrix);
+      }
     });
+    m.instanceMatrix.needsUpdate = true;
   });
   return (
-    <group>
-      {CLOUDS.map((c, i) => (
-        <group key={i} ref={(g) => (refs.current[i] = g)} position={[c.x, c.y, c.z]} scale={c.scale}>
-          {c.puffs.map((p, j) => (
-            <mesh key={j} geometry={geo} material={mat} position={[p.x, p.y, p.z]} scale={[p.r, p.r * 0.8, p.r]} />
-          ))}
-        </group>
-      ))}
-    </group>
+    <instancedMesh ref={ref} args={[undefined, mat, PUFF_COUNT]} frustumCulled={false}>
+      <icosahedronGeometry args={[1, 2]} />
+    </instancedMesh>
   );
 }
 
@@ -256,38 +328,49 @@ function Ocean() {
         transparent: true,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
-        uniforms: { uTime: { value: 0 } },
+        uniforms: { uTime: { value: 0 }, uAmt: { value: 1 }, uColor: { value: atmo.glitterColor } },
         vertexShader: /* glsl */ `
           varying vec2 vUv;
           void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
         fragmentShader: /* glsl */ `
-          uniform float uTime;
+          uniform float uTime, uAmt;
+          uniform vec3 uColor;
           varying vec2 vUv;
           void main() {
             float w = 1.0 - abs(vUv.x - 0.5) * 2.0;
             float s = sin(vUv.y * 420.0 - uTime * 1.6 + sin(vUv.x * 30.0 + uTime) * 2.5);
             float a = smoothstep(0.82, 1.0, s) * w * w * smoothstep(0.0, 0.08, vUv.y) * (1.0 - vUv.y * 0.6);
-            gl_FragColor = vec4(1.0, 0.86, 0.6, a * 0.75);
+            gl_FragColor = vec4(uColor, a * 0.75 * uAmt);
           }`,
       }),
     [],
   );
+  const water = useRef<THREE.MeshLambertMaterial>(null);
+  const glint = useRef<THREE.Group>(null);
   const foam = useRef<THREE.Mesh>(null);
   useFrame(({ clock }) => {
     glitter.uniforms.uTime.value = clock.elapsedTime;
+    glitter.uniforms.uAmt.value = atmo.glitter;
+    if (glint.current) {
+      glint.current.rotation.y = Math.atan2(atmo.sunDir.x, atmo.sunDir.z);
+      glint.current.visible = atmo.glitter > 0.02;
+    }
+    if (water.current) {
+      water.current.color.copy(atmo.water);
+      water.current.emissive.copy(atmo.waterGlow);
+    }
     if (foam.current) {
       const s = 1 + Math.sin(clock.elapsedTime * 0.9) * 0.012;
       foam.current.scale.set(s, s, 1);
     }
   });
-  const sunYaw = Math.atan2(SUN_DIR.x, SUN_DIR.z);
   return (
     <group>
       <mesh rotation-x={-Math.PI / 2} position-y={-0.55} receiveShadow>
         <circleGeometry args={[420, 48]} />
-        <meshLambertMaterial color="#e89a8c" emissive="#ff8a6a" emissiveIntensity={0.18} />
+        <meshLambertMaterial ref={water} emissiveIntensity={0.18} />
       </mesh>
-      <group rotation-y={sunYaw}>
+      <group ref={glint}>
         <mesh rotation-x={-Math.PI / 2} position={[0, -0.5, 150]}>
           <planeGeometry args={[26, 250]} />
           <primitive object={glitter} attach="material" />
@@ -301,9 +384,121 @@ function Ocean() {
   );
 }
 
+/* ---------------- Weather particles ---------------- */
+
+function Rain({ store, count }: { store: GameStore; count: number }) {
+  const ref = useRef<THREE.LineSegments>(null);
+  const { geo, speed } = useMemo(() => {
+    const pos = new Float32Array(count * 6);
+    const speed = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      const x = Math.random() * 46 - 23;
+      const y = Math.random() * 20;
+      const z = Math.random() * 46 - 23;
+      pos.set([x, y, z, x + 0.05, y + 0.6, z], i * 6);
+      speed[i] = 17 + Math.random() * 8;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return { geo: g, speed };
+  }, [count]);
+  const mat = useMemo(() => new THREE.LineBasicMaterial({ color: '#dfe8f2', transparent: true, opacity: 0, depthWrite: false }), []);
+  useFrame((_, delta) => {
+    const l = ref.current;
+    if (!l) return;
+    l.visible = atmo.rain > 0.02;
+    if (!l.visible) return;
+    mat.opacity = 0.55 * atmo.rain;
+    l.position.set(store.pos.x, 0, store.pos.z - 4);
+    const dt = Math.min(delta, 0.05);
+    const p = geo.attributes.position.array as Float32Array;
+    for (let i = 0; i < count; i++) {
+      const o = i * 6;
+      let y = p[o + 1] - speed[i] * dt;
+      let x = p[o];
+      let z = p[o + 2];
+      if (y < 0) {
+        y = 17 + Math.random() * 4;
+        x = Math.random() * 46 - 23;
+        z = Math.random() * 46 - 23;
+      }
+      p[o] = x;
+      p[o + 1] = y;
+      p[o + 2] = z;
+      p[o + 3] = x + 0.05;
+      p[o + 4] = y + 0.6;
+      p[o + 5] = z;
+    }
+    geo.attributes.position.needsUpdate = true;
+  });
+  return <lineSegments ref={ref} geometry={geo} material={mat} frustumCulled={false} visible={false} />;
+}
+
+function Snow({ store, count }: { store: GameStore; count: number }) {
+  const ref = useRef<THREE.Points>(null);
+  const tex = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 32;
+    const g = c.getContext('2d')!;
+    const grd = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grd.addColorStop(0, 'rgba(255,255,255,1)');
+    grd.addColorStop(0.5, 'rgba(255,255,255,0.8)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 32, 32);
+    return new THREE.CanvasTexture(c);
+  }, []);
+  const { geo, speed, phase } = useMemo(() => {
+    const pos = new Float32Array(count * 3);
+    const speed = new Float32Array(count);
+    const phase = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      pos.set([Math.random() * 46 - 23, Math.random() * 18, Math.random() * 46 - 23], i * 3);
+      speed[i] = 0.8 + Math.random() * 0.9;
+      phase[i] = Math.random() * 6.28;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    return { geo: g, speed, phase };
+  }, [count]);
+  const mat = useMemo(() => new THREE.PointsMaterial({ size: 0.3, map: tex, transparent: true, opacity: 0, depthWrite: false }), [tex]);
+  useFrame(({ clock }, delta) => {
+    const pts = ref.current;
+    if (!pts) return;
+    pts.visible = atmo.snow > 0.02;
+    if (!pts.visible) return;
+    mat.opacity = atmo.snow;
+    pts.position.set(store.pos.x, 0, store.pos.z - 4);
+    const dt = Math.min(delta, 0.05);
+    const t = clock.elapsedTime;
+    const p = geo.attributes.position.array as Float32Array;
+    for (let i = 0; i < count; i++) {
+      const o = i * 3;
+      p[o] += Math.sin(t * 0.7 + phase[i]) * 0.5 * dt;
+      p[o + 1] -= speed[i] * dt;
+      if (p[o + 1] < 0) {
+        p[o] = Math.random() * 46 - 23;
+        p[o + 1] = 16 + Math.random() * 3;
+        p[o + 2] = Math.random() * 46 - 23;
+      }
+    }
+    geo.attributes.position.needsUpdate = true;
+  });
+  return <points ref={ref} geometry={geo} material={mat} frustumCulled={false} visible={false} />;
+}
+
 /* ---------------- Terrain ---------------- */
 
+const SAND = new THREE.Color('#f3d6a4');
+const SNOW_WHITE = new THREE.Color('#eef2f6');
+
 function Island({ store }: { store: GameStore }) {
+  const top = useRef<THREE.MeshLambertMaterial>(null);
+  const sand = useRef<THREE.MeshLambertMaterial>(null);
+  useFrame(() => {
+    top.current?.color.copy(atmo.ground);
+    sand.current?.color.copy(SAND).lerp(SNOW_WHITE, atmo.snow * 0.75);
+  });
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     if (store.frozen) return;
     e.stopPropagation();
@@ -315,12 +510,12 @@ function Island({ store }: { store: GameStore }) {
       <mesh position-y={-1} receiveShadow onClick={onClick}>
         <cylinderGeometry args={[ISLAND_R, ISLAND_R - 0.8, 2, 72]} />
         <meshLambertMaterial attach="material-0" color="#9b6b43" />
-        <meshLambertMaterial attach="material-1" color="#86b85a" />
+        <meshLambertMaterial ref={top} attach="material-1" color="#86b85a" />
         <meshLambertMaterial attach="material-2" color="#9b6b43" />
       </mesh>
       <mesh position-y={-0.85} receiveShadow onClick={onClick}>
         <cylinderGeometry args={[ISLAND_R + 3.2, ISLAND_R + 4.2, 1, 72]} />
-        <meshLambertMaterial color="#f3d6a4" />
+        <meshLambertMaterial ref={sand} color="#f3d6a4" />
       </mesh>
     </group>
   );
@@ -530,7 +725,7 @@ function Dock() {
 
 /* ---------------- Buildings & props ---------------- */
 
-function House({ x, z, wall, roof, door, label, scale = 1 }: { x: number; z: number; wall: string; roof: string; door: string; label: string; scale?: number }) {
+function House({ x, z, wall, roof, door, scale = 1 }: { x: number; z: number; wall: string; roof: string; door: string; scale?: number }) {
   return (
     <group position={[x, 0, z]} scale={scale}>
       <mesh position-y={1.2} castShadow receiveShadow>
@@ -555,9 +750,8 @@ function House({ x, z, wall, roof, door, label, scale = 1 }: { x: number; z: num
       </mesh>
       {[-1.15, 1.15].map((wx) => (
         <group key={wx} position={[wx, 1.45, 1.61]}>
-          <mesh>
+          <mesh material={WINDOW_MAT}>
             <boxGeometry args={[0.8, 0.7, 0.05]} />
-            <meshBasicMaterial color="#ffd98a" />
           </mesh>
           <mesh position-z={0.03}>
             <boxGeometry args={[0.06, 0.7, 0.03]} />
@@ -573,7 +767,6 @@ function House({ x, z, wall, roof, door, label, scale = 1 }: { x: number; z: num
         <boxGeometry args={[1.4, 0.06, 1]} />
         <meshLambertMaterial color="#c79a6b" />
       </mesh>
-      <Label y={4.7}>{label}</Label>
     </group>
   );
 }
@@ -606,23 +799,14 @@ function ProjectBoard() {
           <meshLambertMaterial color={c as string} />
         </mesh>
       ))}
-      <Label y={2.7} tone="orange">
-        📌 Proyectos
-      </Label>
     </group>
   );
 }
 
-function ProjectSign({ x, z, rot, color, title, soon, store }: { x: number; z: number; rot: number; color: string; title: string; soon: boolean; store: GameStore }) {
+function ProjectSign({ x, z, rot, color, soon }: { x: number; z: number; rot: number; color: string; soon: boolean }) {
   const lantern = useRef<THREE.Mesh>(null);
-  const label = useRef<HTMLDivElement | null>(null);
   useFrame(({ clock }) => {
     if (lantern.current) lantern.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 2 + x) * 0.08);
-    // Signs stand close together, so only the one you're next to shows its name.
-    if (label.current) {
-      const near = (store.pos.x - x) ** 2 + (store.pos.z - z) ** 2 < 2.2 ** 2;
-      label.current.style.opacity = near ? '1' : '0';
-    }
   });
   return (
     <group position={[x, 0, z]} rotation-y={rot}>
@@ -642,9 +826,6 @@ function ProjectSign({ x, z, rot, color, title, soon, store }: { x: number; z: n
         <sphereGeometry args={[0.1, 12, 10]} />
         <meshBasicMaterial color={soon ? '#cfc6ff' : '#ffe3a3'} />
       </mesh>
-      <Label y={2.15} size={14} innerRef={label}>
-        {title}
-      </Label>
     </group>
   );
 }
@@ -674,11 +855,6 @@ function Garden() {
           </mesh>
         );
       })}
-      <group position={[GARDEN.x, 0, GARDEN.z]}>
-        <Label y={2.6} tone="orange">
-          🌻 Huerto de habilidades
-        </Label>
-      </group>
     </group>
   );
 }
@@ -770,9 +946,6 @@ function Mailbox() {
           <meshLambertMaterial color="#f2cf5b" />
         </mesh>
       </group>
-      <Label y={2.1} tone="orange">
-        ✉️ Buzón
-      </Label>
     </group>
   );
 }
@@ -788,7 +961,6 @@ function WelcomeSign() {
         <boxGeometry args={[1.2, 0.6, 0.1]} />
         <meshLambertMaterial color="#e8c393" />
       </mesh>
-      <Label y={1.85}>👋 ¡Bienvenid@!</Label>
     </group>
   );
 }
@@ -961,7 +1133,6 @@ const DANIEL_LOOK: Look = { shirt: '#f28c6b', pants: '#4b5563', skin: '#f1c7a1',
 function DanielNpc({ store }: { store: GameStore }) {
   const ref = useRef<THREE.Group>(null);
   const anim = useRef<Anim>({ phase: 0, amt: 0, swing: 0 });
-  const bubble = useRef<THREE.Group>(null);
   useFrame(({ clock }, dt) => {
     const g = ref.current;
     if (!g) return;
@@ -972,17 +1143,11 @@ function DanielNpc({ store }: { store: GameStore }) {
     let diff = want - g.rotation.y;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff));
     g.rotation.y += diff * (1 - Math.exp(-5 * dt));
-    if (bubble.current) bubble.current.position.y = 1.95 + Math.sin(clock.elapsedTime * 3) * 0.06;
   });
   return (
     <group position={[DANIEL.x, 0, DANIEL.z]}>
       <group ref={ref}>
         <Villager look={DANIEL_LOOK} anim={anim} />
-      </group>
-      <group ref={bubble} position-y={1.95}>
-        <Label y={0} tone="orange">
-          💬 Daniel
-        </Label>
       </group>
     </group>
   );
@@ -1115,7 +1280,7 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
   );
 }
 
-function CameraRig({ store }: { store: GameStore }) {
+function CameraRig({ store, reduceMotion }: { store: GameStore; reduceMotion: boolean }) {
   const { camera, size } = useThree();
   const look = useRef(new THREE.Vector3(0, 0, -4));
   const desired = useMemo(() => new THREE.Vector3(), []);
@@ -1124,7 +1289,7 @@ function CameraRig({ store }: { store: GameStore }) {
     const dt = Math.min(delta, 0.05);
     const portrait = size.width / size.height < 0.9;
     if (!store.started) {
-      const t = clock.elapsedTime * 0.06;
+      const t = reduceMotion ? 0.6 : clock.elapsedTime * 0.06;
       desired.set(Math.sin(t) * 34, 17, Math.cos(t) * 34);
       lookWant.set(0, 0, -3);
     } else {
@@ -1174,7 +1339,7 @@ function makeTuftGeometry() {
 function Grass({ store, events: _events, quality }: { store: GameStore; events: MutableRefObject<GameEvents>; quality: 'high' | 'low' }) {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const bits = useRef<THREE.InstancedMesh>(null);
-  const uniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
+  const uniforms = useMemo(() => ({ uTime: { value: 0 }, uSnow: { value: 0 } }), []);
 
   const field = useMemo(() => {
     const rnd = mulberry32(21);
@@ -1213,6 +1378,7 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
     const m = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
     m.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = uniforms.uTime;
+      shader.uniforms.uSnow = uniforms.uSnow;
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying float vH;')
         .replace(
@@ -1225,8 +1391,11 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
           transformed.z += sway * 0.1 * position.y;`,
         );
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vH;')
-        .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb *= mix(0.62, 1.18, clamp(vH, 0.0, 1.0));');
+        .replace('#include <common>', '#include <common>\nvarying float vH;\nuniform float uSnow;')
+        .replace(
+          '#include <color_fragment>',
+          '#include <color_fragment>\ndiffuseColor.rgb *= mix(0.62, 1.18, clamp(vH, 0.0, 1.0));\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93, 0.95, 0.98), uSnow * smoothstep(0.25, 0.9, vH) * 0.85);',
+        );
     };
     return m;
   }, [uniforms]);
@@ -1263,11 +1432,12 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
   // Clippings that fly when you cut.
   const BITS = 180;
   const bitState = useMemo(
-    () => ({ p: new Float32Array(BITS * 3), v: new Float32Array(BITS * 3), life: new Float32Array(BITS), rot: new Float32Array(BITS), next: 0 }),
+    () => ({ p: new Float32Array(BITS * 3), v: new Float32Array(BITS * 3), life: new Float32Array(BITS), rot: new Float32Array(BITS), next: 0, idle: false }),
     [],
   );
   const spawnBit = (x: number, z: number) => {
     const b = bitState;
+    b.idle = false;
     const i = b.next;
     b.next = (b.next + 1) % BITS;
     b.p[i * 3] = x;
@@ -1326,6 +1496,7 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
   useFrame(({ clock }, delta) => {
     const dt = Math.min(delta, 0.05);
     uniforms.uTime.value = clock.elapsedTime;
+    uniforms.uSnow.value = atmo.snow;
     const f = field;
     const now = performance.now() / 1000;
     let dirty = false;
@@ -1344,8 +1515,10 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
 
     const b = bitState;
     const bm = bits.current;
-    if (!bm) return;
+    if (!bm || b.idle) return;
+    let alive = false;
     for (let i = 0; i < BITS; i++) {
+      if (b.life[i] > 0) alive = true;
       if (b.life[i] <= 0) {
         bitDummy.scale.setScalar(0);
       } else {
@@ -1363,6 +1536,8 @@ function Grass({ store, events: _events, quality }: { store: GameStore; events: 
       bm.setMatrixAt(i, bitDummy.matrix);
     }
     bm.instanceMatrix.needsUpdate = true;
+    // Everything has landed: the zeroed matrices are uploaded, stop until the next cut.
+    if (!alive) b.idle = true;
   });
 
   return (
