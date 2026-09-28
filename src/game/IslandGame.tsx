@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type WheelEvent as ReactWheelEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Canvas } from '@react-three/fiber';
+import { PerformanceMonitor } from '@react-three/drei';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, X } from 'lucide-react';
 import { PROJECTS, SKILLS, SOCIAL } from '../data';
@@ -118,6 +119,10 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     return coarse || (navigator.hardwareConcurrency || 4) <= 4 ? 'low' : 'high';
   }, []);
   const coarse = useCoarsePointer();
+  // Adaptive quality: sharper and richer while the frame rate holds, lighter when it doesn't.
+  const maxDpr = quality === 'high' ? 2 : 1.5;
+  const [dpr, setDpr] = useState(Math.min(maxDpr, window.devicePixelRatio || 1));
+  const [rich, setRich] = useState(true);
 
   const [started, setStarted] = useState(false);
   const [near, setNear] = useState<InteractableId | null>(null);
@@ -134,7 +139,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     return w in WEATHER_CONFIG ? w : 'atardecer';
   });
   const [mix, setMixState] = useState<Record<AmbientId, number>>(() => fullMix(readStorage<Mix>('island-mix', WEATHER_CONFIG[weather].mix)));
-  const [ambVol, setAmbVol] = useState(() => readStorage('island-ambvol', 0.8));
+  const [ambVol, setAmbVol] = useState(() => readStorage('island-ambvol-v2', 0.5));
   const [noiseColor, setNoiseColor] = useState(() => readStorage('island-noise-color', 1));
   const [sheet, setSheet] = useState<Sheet>(null);
   const reduceMotion = useReducedMotion() ?? false;
@@ -551,7 +556,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const changeAmbVol = (v: number) => {
     setAmbVol(v);
     setAmbientVolume(v);
-    writeStorage('island-ambvol', v);
+    writeStorage('island-ambvol-v2', v);
   };
 
   const toggleMute = () => {
@@ -704,12 +709,27 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         onWheel={onWheel}
         shadows={quality === 'high'}
         flat
-        dpr={[1, quality === 'high' ? 1.75 : 1.25]}
+        dpr={dpr}
         camera={{ fov: 50, position: [30, 17, 30], near: 0.1, far: 900 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
         style={{ touchAction: 'none' }}
       >
-        <Scene store={store} events={events} quality={quality} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} />
+        <PerformanceMonitor
+          flipflops={3}
+          onIncline={() => {
+            setDpr(Math.min(maxDpr, window.devicePixelRatio || 1));
+            setRich(true);
+          }}
+          onDecline={() => {
+            setDpr(1);
+            setRich(false);
+          }}
+          onFallback={() => {
+            setDpr(1);
+            setRich(false);
+          }}
+        />
+        <Scene store={store} events={events} quality={quality} rich={rich} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} />
       </Canvas>
       <LabelsOverlay />
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, type MutableRefObject, type ReactNode } fro
 import * as THREE from 'three';
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Sparkles } from '@react-three/drei';
-import { EffectComposer, HueSaturation, SMAA, TiltShift, Vignette } from '@react-three/postprocessing';
+import { EffectComposer, HueSaturation, N8AO, SMAA, TiltShift, Vignette } from '@react-three/postprocessing';
 import { KernelSize } from 'postprocessing';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { LabelProjector } from './labels';
@@ -38,12 +38,14 @@ type SceneProps = {
   store: GameStore;
   events: MutableRefObject<GameEvents>;
   quality: 'high' | 'low';
+  // Drops to false when the frame rate struggles (adaptive quality).
+  rich: boolean;
   onWalkTo: (id: InteractableId) => void;
   weather: WeatherId;
   reduceMotion: boolean;
 };
 
-export default function Scene({ store, events, quality, onWalkTo, weather, reduceMotion }: SceneProps) {
+export default function Scene({ store, events, quality, rich, onWalkTo, weather, reduceMotion }: SceneProps) {
   const { scene, gl } = useThree();
   const hemi = useRef<THREE.HemisphereLight>(null);
   const sun = useRef<THREE.DirectionalLight>(null);
@@ -185,7 +187,7 @@ export default function Scene({ store, events, quality, onWalkTo, weather, reduc
       <Snow store={store} count={quality === 'high' ? 1400 : 800} />
       <MistBanks store={store} count={quality === 'high' ? 40 : 22} />
       <HorizonClouds />
-      <Effects quality={quality} />
+      <Effects quality={quality} rich={rich} />
       {fireflies > 0 && (
         <Sparkles
           count={quality === 'high' ? 70 : 35}
@@ -205,7 +207,7 @@ export default function Scene({ store, events, quality, onWalkTo, weather, reduc
 const WINDOW_MAT = new THREE.MeshBasicMaterial({ color: '#ffd98a' });
 
 // Link's Awakening-style finish: miniature tilt-shift, soft glow, a touch more color.
-function Effects({ quality }: { quality: 'high' | 'low' }) {
+function Effects({ quality, rich }: { quality: 'high' | 'low'; rich: boolean }) {
   if (quality === 'low') {
     return (
       <EffectComposer multisampling={0}>
@@ -216,8 +218,19 @@ function Effects({ quality }: { quality: 'high' | 'low' }) {
       </EffectComposer>
     );
   }
+  if (!rich) {
+    return (
+      <EffectComposer multisampling={4}>
+        <TiltShift offset={-0.1} focusArea={0.45} feather={0.32} kernelSize={KernelSize.MEDIUM} />
+        <HueSaturation saturation={0.12} />
+        <Vignette offset={0.3} darkness={0.45} />
+      </EffectComposer>
+    );
+  }
+  // Soft ambient occlusion grounds every object like a real miniature.
   return (
     <EffectComposer multisampling={4}>
+      <N8AO halfRes quality="medium" aoRadius={1.4} intensity={2.4} distanceFalloff={0.7} color="#2d2140" />
       <TiltShift offset={-0.1} focusArea={0.45} feather={0.32} kernelSize={KernelSize.MEDIUM} />
       <HueSaturation saturation={0.12} />
       <Vignette offset={0.3} darkness={0.45} />
@@ -630,7 +643,40 @@ function HorizonClouds() {
 const SAND = new THREE.Color('#fbe3ad');
 const SNOW_WHITE = new THREE.Color('#eef2f6');
 
+// Soft light/dark patches so the lawn doesn't read as one flat green.
+function useGroundTexture() {
+  return useMemo(() => {
+    const size = 1024;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d')!;
+    g.fillStyle = 'rgb(226,226,226)';
+    g.fillRect(0, 0, size, size);
+    const rnd = mulberry32(404);
+    for (let i = 0; i < 260; i++) {
+      const x = rnd() * size;
+      const y = rnd() * size;
+      const r = 30 + rnd() * 110;
+      const light = rnd() < 0.55;
+      const grd = g.createRadialGradient(x, y, 0, x, y, r);
+      grd.addColorStop(0, light ? 'rgba(255,255,240,0.35)' : 'rgba(150,170,120,0.3)');
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grd;
+      g.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    for (let i = 0; i < 5000; i++) {
+      g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,230,0.25)' : 'rgba(90,120,70,0.2)';
+      g.fillRect(rnd() * size, rnd() * size, 2, 2);
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    return t;
+  }, []);
+}
+
 function Island({ store }: { store: GameStore }) {
+  const groundTex = useGroundTexture();
   const top = useRef<THREE.MeshStandardMaterial>(null);
   const sand = useRef<THREE.MeshStandardMaterial>(null);
   useFrame(() => {
@@ -648,7 +694,7 @@ function Island({ store }: { store: GameStore }) {
       <mesh position-y={-1} receiveShadow onClick={onClick}>
         <cylinderGeometry args={[ISLAND_R, ISLAND_R - 0.8, 2, 72]} />
         <meshStandardMaterial roughness={0.55} attach="material-0" color="#9b6b43" />
-        <meshStandardMaterial roughness={0.55} ref={top} attach="material-1" color="#86b85a" />
+        <meshStandardMaterial roughness={0.85} ref={top} attach="material-1" color="#86b85a" map={groundTex} />
         <meshStandardMaterial roughness={0.55} attach="material-2" color="#9b6b43" />
       </mesh>
       <mesh position-y={-0.85} receiveShadow onClick={onClick}>

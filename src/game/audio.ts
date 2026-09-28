@@ -32,7 +32,8 @@ let out: GainNode | null = null;
 let sfxBus: GainNode | null = null;
 let ambBus: GainNode | null = null;
 let muted = false;
-let ambientVolume = 0.8;
+let ambientVolume = 0.5;
+let reverb: GainNode | null = null;
 let scheduler = 0;
 const levels: Record<AmbientId, number> = { lluvia: 0, truenos: 0, viento: 0, pajaritos: 0, olas: 0, grillos: 0, fogata: 0, arroyo: 0, musica: 0, ruido: 0 };
 let noiseColor = 1;
@@ -59,13 +60,34 @@ export function initAudio(startMuted: boolean) {
   ctx = new AC();
   out = ctx.createGain();
   out.gain.value = muted ? 0 : 1;
-  out.connect(ctx.destination);
+  // Master chain: gentle compression and a soft top end keep every sound warm
+  // and stop sudden peaks (thunder, crackles) from jumping out.
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -20;
+  comp.knee.value = 18;
+  comp.ratio.value = 3.5;
+  comp.attack.value = 0.01;
+  comp.release.value = 0.35;
+  const soft = ctx.createBiquadFilter();
+  soft.type = 'lowpass';
+  soft.frequency.value = 10500;
+  soft.Q.value = 0.5;
+  out.connect(comp).connect(soft).connect(ctx.destination);
   sfxBus = ctx.createGain();
-  sfxBus.gain.value = 0.6;
+  sfxBus.gain.value = 0.32;
   sfxBus.connect(out);
   ambBus = ctx.createGain();
-  ambBus.gain.value = ambientVolume;
+  // Ambience fades in instead of starting at full volume.
+  ambBus.gain.setValueAtTime(0, ctx.currentTime);
+  ambBus.gain.linearRampToValueAtTime(ambientVolume, ctx.currentTime + 3);
   ambBus.connect(out);
+  // A small, soft room (generated impulse) for birds, music and UI blips.
+  const conv = ctx.createConvolver();
+  conv.buffer = makeImpulse(2.4);
+  reverb = ctx.createGain();
+  reverb.gain.value = 0.22;
+  reverb.connect(conv).connect(out);
+  sfxBus.connect(reverb);
   white = makeNoise('white', 3);
   pink = makeNoise('pink', 4);
   brown = makeNoise('brown', 4);
@@ -163,6 +185,17 @@ function normalize(buf: AudioBuffer, rms: number) {
   for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
   const k = rms / Math.sqrt(sum / d.length || 1);
   for (let i = 0; i < d.length; i++) d[i] *= k;
+  return buf;
+}
+
+function makeImpulse(seconds: number) {
+  const c = ctx!;
+  const len = Math.floor(c.sampleRate * seconds);
+  const buf = c.createBuffer(2, len, c.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
+  }
   return buf;
 }
 
@@ -305,6 +338,7 @@ const channels: Record<AmbientId, Channel> = {
         const t = Math.max(ch.next, now);
         const p = panner(rand(-0.85, 0.85));
         p.connect(ch.bus!);
+        if (reverb) p.connect(reverb);
         const kind = Math.random();
         const vol = rand(0.05, 0.11);
         if (kind < 0.4) {
@@ -347,6 +381,7 @@ const channels: Record<AmbientId, Channel> = {
         const t = Math.max(ch.state[k], now);
         const p = panner(k === 'a' ? -0.55 : 0.6);
         p.connect(ch.bus!);
+        if (reverb) p.connect(reverb);
         const f = k === 'a' ? 4350 : 4620;
         for (let i = 0; i < 3; i++) note(p, t + i * 0.042, f, 0.022, 'sine', 0.05, undefined, 0.004);
         ch.state[k] = t + rand(0.55, 0.9);
@@ -422,6 +457,7 @@ const channels: Record<AmbientId, Channel> = {
       wet.connect(delay).connect(fb).connect(delay);
       delay.connect(filter('lowpass', 2600)).connect(gain(0.6)).connect(bus);
       wet.connect(bus);
+      if (reverb) wet.connect(reverb);
       (channels.musica as Channel & { wet?: GainNode }).wet = wet;
     },
     tick(ch, now) {
@@ -497,12 +533,12 @@ export const sfx = {
     [523, 784, 1047].forEach((f, i) => tone(f, 0.12, 'triangle', 0.1, i * 0.05, f * 1.5));
   },
   step() {
-    tone(180 + Math.random() * 40, 0.05, 'triangle', 0.035);
+    tone(160 + Math.random() * 30, 0.05, 'sine', 0.018);
   },
   talk() {
     // "Villager-speak": a quick random-pitch blip per few letters.
     const notes = [523, 587, 659, 784, 880];
-    tone(notes[Math.floor(Math.random() * notes.length)] * (Math.random() < 0.5 ? 1 : 0.75), 0.06, 'square', 0.025);
+    tone(notes[Math.floor(Math.random() * notes.length)] * (Math.random() < 0.5 ? 1 : 0.75), 0.07, 'triangle', 0.03);
   },
   open() {
     tone(660, 0.09, 'sine', 0.12);
