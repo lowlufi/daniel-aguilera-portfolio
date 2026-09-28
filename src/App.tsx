@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import {
   motion,
   AnimatePresence,
@@ -9,6 +9,19 @@ import {
   useReducedMotion,
 } from 'motion/react';
 import Lenis from 'lenis';
+import { PROJECTS, SKILLS, SOCIAL, type Project } from './data';
+
+const IslandGame = lazy(() => import('./game/IslandGame'));
+
+function canRunGame() {
+  if (typeof window === 'undefined') return false;
+  try {
+    const c = document.createElement('canvas');
+    return !!(c.getContext('webgl2') || c.getContext('webgl'));
+  } catch {
+    return false;
+  }
+}
 import {
   Github,
   Linkedin,
@@ -39,6 +52,7 @@ import {
   Palette,
   Shield,
   X,
+  Gamepad2,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -60,12 +74,6 @@ const THEME_LABELS: Record<Theme, string> = {
 const FADE_MS = 700;
 const SWAP_LEAD_S = 0.7;
 
-const SOCIAL = {
-  github: 'https://github.com/lowlufi',
-  linkedin: 'https://www.linkedin.com/in/danielaguileracampusano/',
-  instagram: 'https://instagram.com/daanieleduardo',
-  email: 'danieleduardoaguilerac@gmail.com',
-};
 
 function useCanHover() {
   const [canHover, setCanHover] = useState(true);
@@ -90,120 +98,10 @@ function useIsMac() {
   return isMac;
 }
 
-type Project = {
-  id: number;
-  title: string;
-  description: string;
-  tags: string[];
-  icon: LucideIcon;
-  url: string;
-  featured?: boolean;
-  comingSoon?: boolean;
-};
-
-const PROJECTS: Project[] = [
-  {
-    id: 1,
-    title: 'Latise',
-    description: '"Tu mente digital": plataforma con herramientas cognitivas y experiencia web minimalista.',
-    tags: ['React', 'TypeScript', 'Tailwind'],
-    icon: Brain,
-    url: 'https://www.latise.cl',
-    featured: true,
-  },
-  {
-    id: 2,
-    title: 'ConexEd',
-    description: 'Plataforma para digitalizar la gestión de prácticas profesionales en liceos técnico-profesionales de Chile.',
-    tags: ['Web App', 'Educación', 'Tailwind'],
-    icon: GraduationCap,
-    url: 'https://conexed.cl',
-    featured: true,
-  },
-  {
-    id: 3,
-    title: 'Saludenti',
-    description: 'E-commerce de cosmética natural artesanal: productos orgánicos, cruelty-free y aromaterapia.',
-    tags: ['E-commerce', 'Landing'],
-    icon: Leaf,
-    url: 'https://saludenti.cl',
-    featured: true,
-  },
-  {
-    id: 4,
-    title: 'San Antonio News',
-    description: 'Portal de todas las noticias de la zona en un solo lugar.',
-    tags: ['Medios', 'CMS'],
-    icon: Newspaper,
-    url: 'https://sanantonionews.cl',
-  },
-  {
-    id: 5,
-    title: 'Donñelo',
-    description: 'Otro Mundo Musical — proyecto y plataforma de identidad para artista.',
-    tags: ['Música', 'Marca'],
-    icon: Music,
-    url: 'https://donnelo.cl',
-  },
-  {
-    id: 6,
-    title: 'JuanJeh Music',
-    description: 'Sitio web del músico JuanJeh — presencia digital y vitrina para su trabajo musical.',
-    tags: ['Música', 'Sitio Web'],
-    icon: Headphones,
-    url: 'https://juanjehmusic.cl',
-  },
-  {
-    id: 7,
-    title: 'CRM Masterización',
-    description: 'CRM para CRM Masterización Inc — gestión de clientes y proyectos para estudio de masterización musical.',
-    tags: ['CRM', 'SaaS', 'Audio'],
-    icon: AudioWaveform,
-    url: 'https://crm-masterizacion.cl',
-  },
-  {
-    id: 8,
-    title: 'Barbería Digital',
-    description: 'Plataforma para agendar horas en barberías — gestión de reservas, calendario y catálogo de servicios.',
-    tags: ['Reservas', 'Web App', 'Próximamente'],
-    icon: Scissors,
-    url: '#',
-    comingSoon: true,
-  },
-];
-
 const FEATURED = PROJECTS.filter((p) => p.featured);
 
 const ALL_TAGS = Array.from(new Set(PROJECTS.flatMap((p) => p.tags))).sort();
 
-type SkillGroup = {
-  title: string;
-  icon: LucideIcon;
-  items: string[];
-};
-
-const SKILLS: SkillGroup[] = [
-  {
-    title: 'Frontend',
-    icon: Code2,
-    items: ['React', 'TypeScript', 'Tailwind', 'Motion', 'Vite'],
-  },
-  {
-    title: 'Cloud & Backend',
-    icon: Globe,
-    items: ['Cloudflare Pages', 'AWS', 'Node.js', 'REST APIs'],
-  },
-  {
-    title: 'IoT & Hardware',
-    icon: Cpu,
-    items: ['NFC', 'Arduino', 'Microcontroladores'],
-  },
-  {
-    title: 'Performance',
-    icon: Gauge,
-    items: ['Web Vitals', 'SEO técnico', 'Accesibilidad'],
-  },
-];
 
 type ProjectCardProps = {
   project: Project;
@@ -542,10 +440,10 @@ function ProjectsPage({ navigate, reduceMotion, canHover, openComposer }: PagePr
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
           <a
-            href="/"
+            href="/clasico"
             onClick={(e) => {
               e.preventDefault();
-              navigate('/');
+              navigate('/clasico');
             }}
             className="liquid-glass inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs tracking-wide text-white/85 hover:text-white transition-colors mb-10"
           >
@@ -630,10 +528,10 @@ function AboutPage({ navigate, reduceMotion, openComposer }: PageProps) {
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
           <a
-            href="/"
+            href="/clasico"
             onClick={(e) => {
               e.preventDefault();
-              navigate('/');
+              navigate('/clasico');
             }}
             className="liquid-glass inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs tracking-wide text-white/85 hover:text-white transition-colors mb-10"
           >
@@ -763,10 +661,10 @@ function PrivacyPage({ navigate }: PageProps) {
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       >
         <a
-          href="/"
+          href="/clasico"
           onClick={(e) => {
             e.preventDefault();
-            navigate('/');
+            navigate('/clasico');
           }}
           className="liquid-glass inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs tracking-wide text-white/85 hover:text-white transition-colors mb-10"
         >
@@ -846,8 +744,8 @@ function NotFoundPage({ navigate }: PageProps) {
         </p>
         <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
           <a
-            href="/"
-            onClick={(e) => { e.preventDefault(); navigate('/'); }}
+            href="/clasico"
+            onClick={(e) => { e.preventDefault(); navigate('/clasico'); }}
             className="liquid-glass px-6 py-3 rounded-full text-sm tracking-wide text-white/90 hover:text-white transition-colors"
           >
             Volver al inicio
@@ -956,12 +854,26 @@ type TopControlsProps = {
   setManualTheme: (t: Theme) => void;
   openPalette: () => void;
   isMac: boolean;
+  onPlay?: () => void;
 };
 
-function TopControls({ theme, setManualTheme, openPalette, isMac }: TopControlsProps) {
+function TopControls({ theme, setManualTheme, openPalette, isMac, onPlay }: TopControlsProps) {
   const shortcut = isMac ? '⌘K' : 'Ctrl K';
   return (
     <div className="fixed top-4 right-4 md:top-5 md:right-5 z-40 flex items-center gap-2">
+      {onPlay && (
+        <button
+          onClick={onPlay}
+          aria-label="Abrir modo juego"
+          title="Modo juego"
+          className="liquid-glass group inline-flex items-center gap-2 h-11 px-3.5 rounded-full text-white/80 hover:text-white transition-colors"
+        >
+          <Gamepad2 size={16} strokeWidth={1.6} />
+          <span className="hidden md:inline text-[10.5px] tracking-[0.18em] uppercase text-white/55 group-hover:text-white/80 transition-colors">
+            Jugar
+          </span>
+        </button>
+      )}
       <button
         onClick={openPalette}
         aria-label={`Abrir buscador (${shortcut})`}
@@ -1030,7 +942,8 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
 
   const items = useMemo<CommandItem[]>(() => {
     const pages: CommandItem[] = [
-      { id: 'p:home', group: 'Páginas', label: 'Inicio', icon: Home, action: () => navigate('/') },
+      { id: 'p:game', group: 'Páginas', label: 'Modo juego (isla)', icon: Gamepad2, keywords: 'juego isla 3d', action: () => navigate('/') },
+      { id: 'p:home', group: 'Páginas', label: 'Inicio (versión clásica)', icon: Home, action: () => navigate('/clasico') },
       { id: 'p:projects', group: 'Páginas', label: 'Proyectos', icon: Folder, action: () => navigate('/proyectos') },
       { id: 'p:about', group: 'Páginas', label: 'Sobre mí', icon: User, action: () => navigate('/sobre-mi') },
       { id: 'p:privacy', group: 'Páginas', label: 'Privacidad', icon: Shield, action: () => navigate('/privacidad') },
@@ -1443,7 +1356,7 @@ function getInitialPath() {
   return window.location.pathname;
 }
 
-const KNOWN_ROUTES = ['/', '/proyectos', '/sobre-mi', '/privacidad'];
+const KNOWN_ROUTES = ['/', '/clasico', '/proyectos', '/sobre-mi', '/privacidad'];
 
 function loadStoredTheme(): Theme | null {
   if (typeof window === 'undefined') return null;
@@ -1605,14 +1518,27 @@ export default function App() {
     aurora: 'bg-gradient-to-br from-violet-900 via-indigo-950 to-black',
   };
 
-  const route: 'home' | 'projects' | 'about' | 'privacy' | '404' =
-    pathname === '/' ? 'home' :
+  const [gameSupported] = useState(canRunGame);
+  const route: 'game' | 'home' | 'projects' | 'about' | 'privacy' | '404' =
+    pathname === '/' ? (gameSupported ? 'game' : 'home') :
+    pathname === '/clasico' ? 'home' :
     pathname === '/proyectos' ? 'projects' :
     pathname === '/sobre-mi' ? 'about' :
     pathname === '/privacidad' ? 'privacy' :
     KNOWN_ROUTES.includes(pathname) ? 'home' : '404';
 
   const pageProps: PageProps = { navigate, reduceMotion, canHover, openComposer };
+
+  if (route === 'game') {
+    return (
+      <div className="fixed inset-0 bg-[#f6b38a] text-[#5b4636] overflow-hidden">
+        <Suspense fallback={<div className="absolute inset-0 grid place-items-center font-cozy text-lg">Cargando la isla…</div>}>
+          <IslandGame navigate={navigate} openComposer={openComposer} paused={composerOpen} />
+        </Suspense>
+        <ContactComposer open={composerOpen} onClose={closeComposer} />
+      </div>
+    );
+  }
   let pageEl: ReactNode = null;
   if (route === 'projects') pageEl = <ProjectsPage {...pageProps} />;
   else if (route === 'about') pageEl = <AboutPage {...pageProps} />;
@@ -1708,8 +1634,8 @@ export default function App() {
 
       {route !== 'home' && (
         <motion.a
-          href="/"
-          onClick={(e) => { e.preventDefault(); navigate('/'); }}
+          href="/clasico"
+          onClick={(e) => { e.preventDefault(); navigate('/clasico'); }}
           aria-label="Inicio — Daniel Eduardo"
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -1727,6 +1653,7 @@ export default function App() {
         setManualTheme={setManualTheme}
         openPalette={() => setPaletteOpen(true)}
         isMac={isMac}
+        onPlay={gameSupported ? () => navigate('/') : undefined}
       />
 
       <motion.div
