@@ -350,8 +350,8 @@ function HomePage({ navigate, reduceMotion, canHover, openComposer }: PageProps)
             className="font-light tracking-tight font-display"
             style={{ fontSize: 'clamp(2rem, 11vw, 8rem)', lineHeight: 1.02 }}
           >
-            Daniel Eduardo <br />
-            <span className="font-semibold italic text-white/90">Aguilera Campusano</span>
+            Daniel <br />
+            <span className="font-semibold italic text-white/90">Eduardo</span>
           </h1>
           <p className="max-w-2xl mx-auto text-sm md:text-xl font-light text-white/65 leading-relaxed">
             Ingeniero en Informática con mención en gestión de la información. Siempre apasionado por la tecnología y por innovar a partir de ella en todas sus formas.
@@ -469,7 +469,7 @@ function HomePage({ navigate, reduceMotion, canHover, openComposer }: PageProps)
         </motion.div>
 
         <div className="mt-32 pt-8 text-[10px] uppercase tracking-[0.24em] flex flex-col md:flex-row items-center justify-between gap-4 max-w-7xl mx-auto border-t relative z-10 text-white/30 border-white/5">
-          <span>© {new Date().getFullYear()} Daniel Aguilera</span>
+          <span>© {new Date().getFullYear()} Daniel Eduardo</span>
           <div className="flex items-center gap-5">
             <a
               href="/sobre-mi"
@@ -645,7 +645,7 @@ function AboutPage({ navigate, reduceMotion, openComposer }: PageProps) {
             Sobre <span className="italic text-white/85">mí</span>
           </h1>
           <p className="mt-6 max-w-3xl text-base md:text-lg text-white/70 font-light leading-relaxed">
-            Soy Daniel Aguilera Campusano, Ingeniero en Informática con mención en gestión de la información por la Universidad de Playa Ancha. Construyo experiencias web, plataformas educativas, e-commerce y sistemas IoT — uniendo el detalle artesanal con el rigor técnico.
+            Soy Daniel Eduardo, Ingeniero en Informática con mención en gestión de la información por la Universidad de Playa Ancha. Construyo experiencias web, plataformas educativas, e-commerce y sistemas IoT — uniendo el detalle artesanal con el rigor técnico.
           </p>
           <p className="mt-4 max-w-3xl text-base md:text-lg text-white/55 font-light leading-relaxed">
             Me obsesiona la artesanía digital: que el código sea simple, que la interfaz se sienta natural, y que cada microinteracción tenga una razón.
@@ -1710,7 +1710,7 @@ export default function App() {
         <motion.a
           href="/"
           onClick={(e) => { e.preventDefault(); navigate('/'); }}
-          aria-label="Inicio — Daniel Aguilera"
+          aria-label="Inicio — Daniel Eduardo"
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.6, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://danielaguileracampusano.pages.dev/sitemap.xml
+Sitemap: https://danieleduardo.cl/sitemap.xml
