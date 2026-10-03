@@ -23,8 +23,8 @@ export type GameStore = {
   dragged: boolean;
   // Garden: grows with each watering, resets on harvest.
   garden: { growth: number; wateredAt: number; harvestedAt: number };
-  // Particle bursts requested by the UI (watering, harvest, party).
-  burst: (kind: 'water' | 'harvest' | 'party', x: number, z: number) => void;
+  // Particle bursts requested by the UI (watering, harvest, party) or Dui (hearts).
+  burst: (kind: 'water' | 'harvest' | 'party' | 'hearts', x: number, z: number) => void;
   meteo: Meteo | null;
   // Set by <Grass>; returns how many tufts were cut.
   cutAt: (x: number, z: number, r: number) => number;
@@ -66,4 +66,6 @@ export type GameEvents = {
   onCut: (count: number) => void;
   onStar: (index: number) => void;
   onStarRevealed: () => void;
+  // Dui was petted.
+  onPet: () => void;
 };

@@ -33,6 +33,7 @@ const ACHIEVEMENTS = {
   meteo: { icon: '📡', title: 'Meteorólogo', text: 'Sincronizaste la isla con el clima real de San Antonio.' },
   muelle: { icon: '🌊', title: 'Contemplativo', text: 'Te sentaste a mirar el mar desde el muelle.' },
   secreto: { icon: '🎉', title: 'Código secreto', text: '↑ ↑ ↓ ↓ ← → ← → B A. ¡Eres de los buenos!' },
+  dui: { icon: '🐾', title: 'Amigo de Dui', text: 'Le hiciste cariño a Dui, el gato de Daniel.' },
 } as const;
 
 const KONAMI = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
@@ -286,10 +287,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         return {
           speaker: 'Daniel',
           lines: [
-            '¡Hola! Qué bueno que pasaste por mi isla. 😊',
-            'Soy Ingeniero en Informática con mención en gestión de la información, de la Universidad de Playa Ancha.',
-            'Construyo experiencias web, plataformas educativas, e-commerce y sistemas IoT — uniendo el detalle artesanal con el rigor técnico.',
-            'Me obsesiona la artesanía digital: que el código sea simple, que la interfaz se sienta natural y que cada microinteracción tenga una razón.',
+            '¡Hola! Soy Daniel, Ingeniero en Informática de la Universidad de Playa Ancha. Hago webs, e-commerce, plataformas educativas y sistemas IoT. 👋',
+            'Me obsesiona que el código sea simple y que cada detalle de la interfaz tenga una razón de ser.',
+            'Ah, y ese gordito naranjo que te sigue es Dui, mi gato. Está a dieta, así que comida no… pero cariño, todo el que quieras. 🐾',
           ],
           choices: [
             { label: 'Ver tus proyectos', run: () => { setDialog(null); setPanel('projects'); sfx.open(); } },
@@ -444,6 +444,15 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       setStars(next);
       if (next === STAR_COUNT) unlock('estrellas');
       else toast('⭐', `¡Estrellita! ${next}/${STAR_COUNT}`, 'Sigue cortando el pasto para encontrar más.');
+    },
+    onPet: () => {
+      const n = finiteOr(readStorage<unknown>('island-dui-pets', 0), 0) + 1;
+      writeStorage('island-dui-pets', n);
+      if (n === 1) {
+        unlock('dui');
+      } else if (n === 10) {
+        toast('🐾', 'Dui está feliz', 'Diez cariños. Ya te considera parte de la familia (y quiere comida).');
+      }
     },
     onStarRevealed: () => {
       if (revealHint.current) return;

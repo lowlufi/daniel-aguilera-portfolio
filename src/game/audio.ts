@@ -560,4 +560,13 @@ export const sfx = {
   achievement() {
     [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.09, i * 0.09));
   },
+  // Dui: a purr is a low buzz pulsing ~18 times a second, not a pitch; short
+  // sawtooth grains at 45-55 Hz read as one across small speakers too.
+  purr() {
+    for (let i = 0; i < 20; i++) tone(45 + Math.random() * 10, 0.05, 'sawtooth', 0.045, i * 0.055);
+  },
+  meow() {
+    tone(620, 0.12, 'triangle', 0.06, 0, 820);
+    tone(820, 0.22, 'triangle', 0.06, 0.11, 520);
+  },
 };

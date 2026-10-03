@@ -6,6 +6,7 @@ import { EffectComposer, HueSaturation, N8AO, SMAA, TiltShift, Vignette } from '
 import { KernelSize } from 'postprocessing';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { LabelProjector } from './labels';
+import { Dui } from './Dui';
 import { onThunder, sfx } from './audio';
 import { atmo, stepAtmosphere, WEATHER_CONFIG, type WeatherId } from './weather';
 import type { GameEvents, GameStore } from './store';
@@ -180,6 +181,16 @@ export default function Scene({ store, events, quality, rich, onWalkTo, weather,
       <Grass store={store} events={events} quality={quality} />
       <Stars store={store} events={events} />
       <Player store={store} events={events} />
+      <Dui
+        store={store}
+        reduceMotion={reduceMotion}
+        onPet={(x, z) => {
+          sfx.purr();
+          if (Math.random() < 0.35) sfx.meow();
+          store.burst('hearts', x, z);
+          events.current.onPet?.();
+        }}
+      />
       <CameraRig store={store} reduceMotion={reduceMotion} />
       <LabelProjector store={store} />
 
@@ -1261,6 +1272,10 @@ function Bursts({ store }: { store: GameStore }) {
       } else if (kind === 'harvest') {
         const veg = ['#ff8a3c', '#e5484d', '#ffc93c', '#9ed27a'];
         for (let k = 0; k < 40; k++) spawn(x + (R() - 0.5) * 5, 0.6, z + (R() - 0.5) * 5, (R() - 0.5) * 3, 4 + R() * 3, (R() - 0.5) * 3, 1.3, 0.13, veg[k % veg.length]);
+      } else if (kind === 'hearts') {
+        // A few pink puffs popping up off Dui's back: launched hard enough that
+        // gravity turns them before they come down.
+        for (let k = 0; k < 14; k++) spawn(x + (R() - 0.5) * 0.5, 0.9, z + (R() - 0.5) * 0.5, (R() - 0.5) * 1.2, 4 + R() * 1.5, (R() - 0.5) * 1.2, 0.8, 0.09, k % 2 ? '#ff7a9a' : '#ffb3c6');
       } else {
         const party = ['#ff6b9a', '#ffd23f', '#7ccf8a', '#7fc4ff', '#b28ee0', '#ff9a3c'];
         for (let k = 0; k < 160; k++) spawn(x + (R() - 0.5) * 16, 8 + R() * 6, z + (R() - 0.5) * 16, (R() - 0.5) * 1.5, -1.5 - R() * 1.5, (R() - 0.5) * 1.5, 5, 0.1, party[k % party.length]);
@@ -1356,6 +1371,9 @@ type Look = {
   hat?: { color: string; band: string };
   hair?: string;
   glasses?: boolean;
+  beard?: string;
+  // Lighter tone for the mustache and chin tuft so they separate from the jaw at a distance.
+  beardLight?: string;
 };
 
 type Anim = { phase: number; amt: number; swing: number };
@@ -1479,6 +1497,33 @@ function Villager({ look, anim, showTool = false }: { look: Look; anim: MutableR
             <sphereGeometry args={[0.035, 8, 6]} />
             <meshBasicMaterial color="#a8514a" />
           </mesh>
+          {look.beard && (
+            <>
+              {/* Jaw: a band of a sphere just outside the head (r 0.4), ear to ear, starting under the mouth so it stays visible. */}
+              <mesh scale={[1.02, 1, 1.06]}>
+                <sphereGeometry args={[0.415, 24, 10, -Math.PI * 0.12, Math.PI * 1.24, Math.PI * 0.64, Math.PI * 0.29]} />
+                <meshStandardMaterial roughness={0.55} color={look.beard} side={THREE.DoubleSide} />
+              </mesh>
+              <mesh position={[0, -0.3, 0.27]} scale={[1.25, 0.95, 0.75]} castShadow>
+                <sphereGeometry args={[0.14, 14, 10]} />
+                <meshStandardMaterial roughness={0.55} color={look.beardLight ?? look.beard} />
+              </mesh>
+              {[-1, 1].map((sx) => (
+                <group key={sx}>
+                  {/* Sideburns bridge the hair cap (ends ~y 0.04) and the jaw (starts ~y -0.18). */}
+                  <mesh position={[sx * 0.37, -0.07, 0.1]} rotation-z={sx * 0.1}>
+                    <capsuleGeometry args={[0.045, 0.14, 4, 8]} />
+                    <meshStandardMaterial roughness={0.55} color={look.beard} />
+                  </mesh>
+                  {/* Mustache halves droop outward and yaw back to follow the face. */}
+                  <mesh position={[sx * 0.055, -0.098, 0.378]} rotation={[0, sx * 0.3, Math.PI / 2 - sx * 0.3]} scale={[1, 1, 0.7]}>
+                    <capsuleGeometry args={[0.032, 0.075, 4, 8]} />
+                    <meshStandardMaterial roughness={0.55} color={look.beardLight ?? look.beard} />
+                  </mesh>
+                </group>
+              ))}
+            </>
+          )}
           {look.hair && (
             <>
               <mesh position={[0, 0.1, -0.06]} scale={[1.06, 0.9, 1.02]} castShadow>
@@ -1514,7 +1559,7 @@ function Villager({ look, anim, showTool = false }: { look: Look; anim: MutableR
 }
 
 const PLAYER_LOOK: Look = { shirt: '#7cc6e8', pants: '#5a7bb5', skin: '#ffd9b8', hat: { color: '#f2cf7a', band: '#e76f51' } };
-const DANIEL_LOOK: Look = { shirt: '#f28c6b', pants: '#4b5563', skin: '#f1c7a1', hair: '#3b2a22', glasses: true };
+const DANIEL_LOOK: Look = { shirt: '#f28c6b', pants: '#4b5563', skin: '#f1c7a1', hair: '#3b2a22', glasses: true, beard: '#8a4b2d', beardLight: '#a8613b' };
 
 function DanielNpc({ store }: { store: GameStore }) {
   const ref = useRef<THREE.Group>(null);
