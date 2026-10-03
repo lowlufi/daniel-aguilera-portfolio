@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type WheelEvent as ReactWheelEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { PerformanceMonitor } from '@react-three/drei';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
@@ -9,6 +10,7 @@ import { LabelsOverlay } from './labels';
 import { AMBIENTS, NOISE_COLORS, initAudio, setNoiseColor as setAudioNoiseColor, pauseAudio, setAmbient, setAmbientVolume, setMix as setAudioMix, setMuted as setAudioMuted, sfx, type AmbientId, type Mix } from './audio';
 import { WEATHERS, WEATHER_CONFIG, stepAtmosphere, type WeatherId } from './weather';
 import { createStore, type GameEvents, type Meteo } from './store';
+import { STAMPS, loadProgress, nextStamp, saveProgress, stampFor, type StampId } from './progress';
 import { GARDEN as GARDEN_CENTER, INTERACTABLES, PROJECT_SIGNS, STAR_COUNT, approachPoint, type InteractableId } from './world';
 
 type Props = {
@@ -19,7 +21,7 @@ type Props = {
 
 type Choice = { label: string; run: () => void };
 type Dialog = { speaker: string; lines: string[]; choices?: Choice[]; skippable?: boolean };
-type Panel = 'projects' | 'skills' | null;
+type Panel = 'projects' | 'skills' | 'libreta' | null;
 type Toast = { key: number; icon: string; title: string; text: string };
 
 const ACHIEVEMENTS = {
@@ -34,6 +36,7 @@ const ACHIEVEMENTS = {
   muelle: { icon: '🌊', title: 'Contemplativo', text: 'Te sentaste a mirar el mar desde el muelle.' },
   secreto: { icon: '🎉', title: 'Código secreto', text: '↑ ↑ ↓ ↓ ← → ← → B A. ¡Eres de los buenos!' },
   dui: { icon: '🐾', title: 'Amigo de Dui', text: 'Le hiciste cariño a Dui, el gato de Daniel.' },
+  libreta: { icon: '📖', title: 'Libreta completa', text: 'Juntaste los cinco sellos: ya conoces a Daniel, su trabajo y cómo escribirle.' },
 } as const;
 
 const KONAMI = ['arrowup', 'arrowup', 'arrowdown', 'arrowdown', 'arrowleft', 'arrowright', 'arrowleft', 'arrowright', 'b', 'a'];
@@ -137,6 +140,14 @@ function useCoarsePointer() {
 
 export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const store = useMemo(createStore, []);
+  // Saved notebook progress, loaded once and mirrored into the store so the
+  // scene can draw it (green lanterns, stars that stay collected).
+  const progress = useMemo(() => {
+    const p = loadProgress();
+    for (const id of p.projects) store.seenProjects.add(id);
+    for (const i of p.stars) store.starsTaken.add(i);
+    return p;
+  }, [store]);
   const quality = useMemo<'high' | 'low'>(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches;
     return coarse || (navigator.hardwareConcurrency || 4) <= 4 ? 'low' : 'high';
@@ -154,7 +165,8 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const [typed, setTyped] = useState(0);
   const [choiceIdx, setChoiceIdx] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
-  const [stars, setStars] = useState(0);
+  const [stars, setStars] = useState(() => store.starsTaken.size);
+  const [stamps, setStamps] = useState<StampId[]>(() => progress.stamps);
   const [cut, setCut] = useState(0);
   const [muted, setMuted] = useState(() => readStorage('island-muted', false));
   const [weather, setWeather] = useState<WeatherId>(() => {
@@ -173,12 +185,18 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const [unlocked, setUnlocked] = useState<AchievementId[]>(() => readStorage('island-achievements', [] as AchievementId[]));
   const [toasts, setToasts] = useState<Toast[]>([]);
   const visited = useRef(new Set<InteractableId>());
-  const seenProjects = useRef(new Set<number>());
   const toastKey = useRef(0);
   const revealHint = useRef(false);
 
   if (import.meta.env.DEV) (window as unknown as { __island?: unknown }).__island = { store, walkTo: (id: InteractableId) => walkToRef.current(id), snapWeather: () => stepAtmosphere(1) };
   const walkToRef = useRef<(id: InteractableId) => void>(() => {});
+
+  // Dui leads idle players to the next missing stamp; none left, no guiding.
+  useEffect(() => {
+    const n = nextStamp(stamps);
+    const it = n ? INTERACTABLES.find((x) => x.id === n.target) : undefined;
+    store.duiGoal = it ? new THREE.Vector3(it.x, 0, it.z) : null;
+  }, [stamps, store]);
 
   const busyRef = useRef(false);
   busyRef.current = !!dialog || !!panel || paused || !!store.target;
@@ -206,8 +224,37 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     },
     [toast],
   );
+
+  const persistProgress = useCallback(() => {
+    saveProgress({ stamps: stampsRef.current, projects: [...store.seenProjects], stars: [...store.starsTaken] });
+  }, [store]);
+
+  const grantStamp = useCallback(
+    (id: StampId) => {
+      if (stampsRef.current.includes(id)) return;
+      const next = [...stampsRef.current, id];
+      stampsRef.current = next;
+      setStamps(next);
+      persistProgress();
+      if (next.length === STAMPS.length) {
+        // The last stamp is usually the mailbox: end on a high note there.
+        store.burst('party', store.pos.x, store.pos.z);
+        unlock('libreta');
+        return;
+      }
+      // The arrival stamp is a gift; announcing it would only be noise.
+      if (id === 'llegada') return;
+      const s = STAMPS.find((x) => x.id === id);
+      if (!s) return;
+      sfx.star();
+      toast(s.icon, `Sello ${next.length}/${STAMPS.length} · ${s.title}`, nextStamp(next)?.hint ?? '');
+    },
+    [persistProgress, store, toast, unlock],
+  );
   const cutRef = useRef(0);
-  const starsRef = useRef(0);
+  const starsRef = useRef(store.starsTaken.size);
+  const stampsRef = useRef<StampId[]>(progress.stamps);
+  const duiHintAt = useRef(-Infinity);
   const startedRef = useRef(false);
 
   const closeDialog = useCallback(() => {
@@ -392,11 +439,14 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       store.target = null;
       store.targetId = null;
       visited.current.add(id);
+      const stamp = stampFor(id);
+      if (stamp) grantStamp(stamp);
       if (id === 'daniel') danielTalks.current += 1;
       if (['daniel', 'board', 'garden', 'mailbox'].every((x) => visited.current.has(x as InteractableId))) unlock('vecino');
       if (id.startsWith('project:')) {
-        seenProjects.current.add(Number(id.split(':')[1]));
-        if (seenProjects.current.size === PROJECT_SIGNS.length) unlock('curioso');
+        store.seenProjects.add(Number(id.split(':')[1]));
+        persistProgress();
+        if (store.seenProjects.size === PROJECT_SIGNS.length) unlock('curioso');
       }
       sfx.open();
       (document.activeElement as HTMLElement | null)?.blur?.();
@@ -407,7 +457,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       setTyped(0);
       setChoiceIdx(0);
     },
-    [buildDialog, store, unlock],
+    [buildDialog, grantStamp, persistProgress, store, unlock],
   );
 
   const walkTo = useCallback(
@@ -439,7 +489,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       if (next >= 60) unlock('jardinero');
       if (next >= store.grassTotal * 0.35) unlock('cesped');
     },
-    onStar: () => {
+    onStar: (i) => {
+      store.starsTaken.add(i);
+      persistProgress();
       const next = (starsRef.current += 1);
       setStars(next);
       if (next === STAR_COUNT) unlock('estrellas');
@@ -453,6 +505,14 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       } else if (n === 10) {
         toast('🐾', 'Dui está feliz', 'Diez cariños. Ya te considera parte de la familia (y quiere comida).');
       }
+    },
+    onDuiGuide: () => {
+      const n = nextStamp(stampsRef.current);
+      const now = performance.now();
+      // Once in a while is a hint; every time would be nagging.
+      if (!n || now - duiHintAt.current < 45_000) return;
+      duiHintAt.current = now;
+      toast('🐾', 'Dui quiere mostrarte algo', n.hint);
     },
     onStarRevealed: () => {
       if (revealHint.current) return;
@@ -503,6 +563,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     setAudioMix(mix);
     initAudio(muted);
     setStarted(true);
+    grantStamp('llegada');
     if (!readStorage('island-tutorial-done', false)) {
       later(() => {
         if (busyRef.current || store.target) return;
@@ -512,7 +573,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         writeStorage('island-tutorial-done', true);
       }, 1300);
     }
-  }, [ambVol, later, mix, muted, noiseColor, openDialog]);
+  }, [ambVol, grantStamp, later, mix, muted, noiseColor, openDialog]);
 
   // Stop every sound and pending timer when leaving the island.
   useEffect(
@@ -803,7 +864,21 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 🏝️ Isla de Daniel Eduardo
               </span>
               <Stat>⭐ {stars}/{STAR_COUNT}</Stat>
-              <Stat>✂️ {cut}</Stat>
+              {/* The notebook is the goal, so it takes the cut-grass counter's
+                  place (that one now lives inside it). Visible on phones too. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setDialog(null);
+                  setSheet(null);
+                  setPanel('libreta');
+                  sfx.open();
+                }}
+                aria-label={`Libreta de Daniel: ${stamps.length} de ${STAMPS.length} sellos`}
+                className="inline-flex h-10 items-center gap-1 rounded-full bg-[#ffe3a3] px-3 md:px-3.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] tabular-nums ring-2 ring-[#f0a45d]/60 hover:-translate-y-0.5 active:translate-y-0.5 transition-transform"
+              >
+                📖 {stamps.length}/{STAMPS.length}
+              </button>
               <Stat title="Logros" className="hidden sm:inline-flex">
                 🏆 {unlocked.length}/{Object.keys(ACHIEVEMENTS).length}
               </Stat>
@@ -945,13 +1020,30 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         {panel && (
           <PanelShell
             key={panel}
-            title={panel === 'projects' ? '📌 Proyectos de Daniel' : '🌻 Huerto de habilidades'}
+            title={panel === 'projects' ? '📌 Proyectos de Daniel' : panel === 'skills' ? '🌻 Huerto de habilidades' : '📖 Libreta de Daniel'}
             onClose={() => {
               setPanel(null);
               sfx.close();
             }}
           >
-            {panel === 'projects' ? <ProjectsPanel /> : <SkillsPanel />}
+            {panel === 'projects' ? (
+              <ProjectsPanel />
+            ) : panel === 'skills' ? (
+              <SkillsPanel />
+            ) : (
+              <LibretaPanel
+                stamps={stamps}
+                stars={stars}
+                cut={cut}
+                projectsSeen={store.seenProjects.size}
+                pets={finiteOr(readStorage<unknown>('island-dui-pets', 0), 0)}
+                unlocked={unlocked}
+                onGo={(target) => {
+                  setPanel(null);
+                  walkTo(target);
+                }}
+              />
+            )}
           </PanelShell>
         )}
       </AnimatePresence>
@@ -1320,6 +1412,105 @@ function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, s
         )}
       </div>
     </motion.div>
+  );
+}
+
+function LibretaPanel({
+  stamps,
+  stars,
+  cut,
+  projectsSeen,
+  pets,
+  unlocked,
+  onGo,
+}: {
+  stamps: StampId[];
+  stars: number;
+  cut: number;
+  projectsSeen: number;
+  pets: number;
+  unlocked: AchievementId[];
+  onGo: (target: InteractableId) => void;
+}) {
+  const next = nextStamp(stamps);
+  return (
+    <div className="space-y-6">
+      <p className="text-sm font-bold leading-relaxed text-[#6b4f3a]">
+        {next
+          ? 'Junta los cinco sellos recorriendo la isla. Cada uno es una parte del portafolio. Si te quedas quiet@, Dui te muestra adónde ir.'
+          : '¡Libreta completa! Ya conoces a Daniel, su trabajo y cómo escribirle. Gracias por recorrer la isla. 🧡'}
+      </p>
+
+      <ol className="space-y-2.5">
+        {STAMPS.map((s, i) => {
+          const done = stamps.includes(s.id);
+          const isNext = next?.id === s.id;
+          return (
+            <li
+              key={s.id}
+              className={`flex items-center gap-3 rounded-2xl px-3.5 py-3 ${done ? 'bg-[#e4f5dd]' : isNext ? 'bg-[#fff1cc] ring-2 ring-[#f0a45d]' : 'bg-[#f5ead6]'}`}
+            >
+              <span
+                aria-hidden="true"
+                className={`grid h-11 w-11 shrink-0 place-items-center rounded-full text-xl ${done ? 'bg-[#7ccf8a] shadow-[0_3px_0_#4f9c5d]' : 'bg-[#fff8e7] grayscale opacity-60'}`}
+              >
+                {done ? s.icon : i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-black text-[#5b4636]">
+                  {s.title}
+                  <span className="sr-only">{done ? ' (sellado)' : ' (pendiente)'}</span>
+                </p>
+                {!done && <p className="text-sm font-bold text-[#7a614c]">{s.hint}</p>}
+              </div>
+              {done ? (
+                <span aria-hidden="true" className="text-lg font-black text-[#3f8a4b]">✓</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onGo(s.target)}
+                  className="shrink-0 rounded-full bg-[#7ccf8a] px-3.5 py-2 text-sm font-extrabold text-[#1d4a26] shadow-[0_3px_0_#4f9c5d] hover:-translate-y-0.5 active:translate-y-0.5 transition-transform"
+                >
+                  Ir
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+
+      <section>
+        <h3 className="mb-2 text-sm font-black uppercase tracking-wider text-[#a4552c]">Para quien se queda un rato más</h3>
+        <ul className="grid grid-cols-2 gap-2 text-sm font-bold text-[#6b4f3a]">
+          <li className="rounded-xl bg-[#f5ead6] px-3 py-2">📌 Letreros leídos {projectsSeen}/{PROJECT_SIGNS.length}</li>
+          <li className="rounded-xl bg-[#f5ead6] px-3 py-2">⭐ Estrellitas {stars}/{STAR_COUNT}</li>
+          <li className="rounded-xl bg-[#f5ead6] px-3 py-2">🐾 Cariños a Dui {pets}</li>
+          <li className="rounded-xl bg-[#f5ead6] px-3 py-2">✂️ Pasto cortado {cut}</li>
+        </ul>
+      </section>
+
+      <section>
+        <h3 className="mb-2 text-sm font-black uppercase tracking-wider text-[#a4552c]">
+          Logros {unlocked.length}/{Object.keys(ACHIEVEMENTS).length}
+        </h3>
+        <ul className="space-y-1.5">
+          {(Object.keys(ACHIEVEMENTS) as AchievementId[]).map((id) => {
+            const a = ACHIEVEMENTS[id];
+            const got = unlocked.includes(id);
+            return (
+              <li key={id} className={`flex items-start gap-2.5 text-sm ${got ? 'text-[#5b4636]' : 'text-[#9b8672]'}`}>
+                <span aria-hidden="true" className={got ? '' : 'grayscale opacity-50'}>{got ? a.icon : '🔒'}</span>
+                <span>
+                  <span className="font-black">{got ? a.title : 'Logro escondido'}</span>
+                  {got && <span className="font-bold"> · {a.text}</span>}
+                  <span className="sr-only">{got ? ' (conseguido)' : ' (pendiente)'}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
+    </div>
   );
 }
 

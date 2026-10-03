@@ -22,6 +22,12 @@ const MAX_SPEED = 3.6;
 // Closer than this and the player is stepping on it, so it shuffles aside.
 const PERSONAL = 0.7;
 const PET_TIME = 0.7;
+// Guiding: after the player has stood still this long, Dui trots towards the
+// next notebook stamp and waits there, a little short of it. Showing beats
+// telling for visitors who have never played a game.
+const GUIDE_AFTER = 6;
+const GUIDE_MIN_DIST = 5;
+const GUIDE_SHORT = 2.2;
 const SIT_TILT = 0.38;
 
 // Diagonal pairs swing together (front-left with back-right), like a real trot.
@@ -46,11 +52,13 @@ type DuiProps = {
   reduceMotion: boolean;
   // Fired on click/tap with Dui's world position: the host plays the purr / spawns hearts there.
   onPet?: (x: number, z: number) => void;
+  // Fired once when Dui reaches the spot it is guiding the player to.
+  onGuideArrive?: () => void;
   // The model is built ~0.72 tall to the ear tips; 1.15 lands it around the player's thigh and above most grass.
   scale?: number;
 };
 
-export function Dui({ store, reduceMotion, onPet, scale = 1.15 }: DuiProps) {
+export function Dui({ store, reduceMotion, onPet, onGuideArrive, scale = 1.15 }: DuiProps) {
   const root = useRef<THREE.Group>(null);
   const pose = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
@@ -76,9 +84,16 @@ export function Dui({ store, reduceMotion, onPet, scale = 1.15 }: DuiProps) {
       blinkT: 2,
       blink: 0,
       eyeOpen: 1,
+      playerIdle: 0,
+      guide: false,
+      guideArrived: false,
+      guideTo: new THREE.Vector3(),
     }),
     [],
   );
+  // Same dev-only hook as window.__island in IslandGame: lets tests watch Dui's
+  // state. import.meta.env.DEV is false in production builds, so it's stripped.
+  if (import.meta.env.DEV) (store as unknown as { dui?: typeof st }).dui = st;
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -88,18 +103,50 @@ export function Dui({ store, reduceMotion, onPet, scale = 1.15 }: DuiProps) {
     const dz = store.pos.z - p.z;
     const d = Math.hypot(dx, dz);
 
+    // Guide mode starts after the player has stood still for a while (dialogs
+    // and panels freeze the player, so reading never triggers it) and ends as
+    // soon as they move again.
+    const goal = store.duiGoal;
+    st.playerIdle = store.started && !store.frozen && store.speed < 0.1 ? st.playerIdle + dt : 0;
+    if (st.guide && (store.speed > 0.3 || !goal)) {
+      st.guide = false;
+      st.guideArrived = false;
+    } else if (!st.guide && goal && st.playerIdle > GUIDE_AFTER) {
+      const gx = store.pos.x - goal.x;
+      const gz = store.pos.z - goal.z;
+      const gd = Math.hypot(gx, gz);
+      if (gd > GUIDE_MIN_DIST) {
+        // Wait a little short of the place, on the player's side, so the
+        // player sees both Dui and where it is pointing.
+        st.guideTo.set(goal.x + (gx / gd) * GUIDE_SHORT, 0, goal.z + (gz / gd) * GUIDE_SHORT);
+        st.guide = true;
+        st.guideArrived = false;
+        st.moving = true;
+      }
+    }
+
+    // Where it walks to: the player (stopping at the follow ring) or the guide spot.
+    const tx = (st.guide ? st.guideTo.x : store.pos.x) - p.x;
+    const tz = (st.guide ? st.guideTo.z : store.pos.z) - p.z;
+    const td = Math.hypot(tx, tz);
+    const stopAt = st.guide ? 0.25 : FOLLOW;
+
     if (st.moving) {
-      if (d < FOLLOW) st.moving = false;
-    } else if (d > FOLLOW + SLACK) st.moving = true;
+      if (td < stopAt) st.moving = false;
+    } else if (td > stopAt + SLACK) st.moving = true;
     // Speed grows with the gap, so it trots to catch up and eases in as it arrives.
-    const want = st.moving ? Math.min(MAX_SPEED, (d - FOLLOW) * 2.4 + 0.6) : 0;
+    const want = st.moving ? Math.min(MAX_SPEED, (td - stopAt) * 2.4 + 0.6) : 0;
     st.speed += (want - st.speed) * (1 - Math.exp(-5 * dt));
-    if (st.speed > 0.02 && d > 1e-3) {
-      // Never step past the follow ring while braking.
-      const step = Math.min(st.speed * dt, Math.max(0, d - FOLLOW * 0.9));
-      p.x += (dx / d) * step;
-      p.z += (dz / d) * step;
+    if (st.speed > 0.02 && td > 1e-3) {
+      // Never step past the stopping ring while braking.
+      const step = Math.min(st.speed * dt, Math.max(0, td - stopAt * 0.9));
+      p.x += (tx / td) * step;
+      p.z += (tz / td) * step;
       resolveCollisions(p);
+    }
+    if (st.guide && !st.guideArrived && td < stopAt + 0.15) {
+      st.guideArrived = true;
+      onGuideArrive?.();
     }
     if (d < PERSONAL && d > 1e-3) {
       const push = (PERSONAL - d) * (1 - Math.exp(-10 * dt));
@@ -109,9 +156,12 @@ export function Dui({ store, reduceMotion, onPet, scale = 1.15 }: DuiProps) {
     }
     p.y += (groundHeight(p.x, p.z) - p.y) * (1 - Math.exp(-14 * dt));
 
-    // Always ends up looking at the player; turns quickly while walking, lazily while sitting.
-    if (d > 1e-3) {
-      let diff = Math.atan2(dx, dz) - st.facing;
+    // Faces where it walks while trotting (when guiding that's away from the
+    // player; looking back would make it walk backwards), and the player once
+    // it stops. Turns quickly while walking, lazily while sitting.
+    const walking = st.speed > 0.2 && td > 1e-3;
+    if (walking || d > 1e-3) {
+      let diff = (walking ? Math.atan2(tx, tz) : Math.atan2(dx, dz)) - st.facing;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       st.facing += diff * (1 - Math.exp(-(st.speed > 0.2 ? 8 : 2.5) * dt));
     }

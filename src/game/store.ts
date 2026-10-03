@@ -30,6 +30,12 @@ export type GameStore = {
   cutAt: (x: number, z: number, r: number) => number;
   // Set by <Stars>; reveals stars hidden under freshly cut grass.
   revealAt: (x: number, z: number, r: number) => void;
+  // Notebook progress the scene draws: read project signs light up green,
+  // collected stars stay gone after a reload.
+  seenProjects: Set<number>;
+  starsTaken: Set<number>;
+  // Where Dui leads an idle player: the next missing notebook stamp.
+  duiGoal: THREE.Vector3 | null;
 };
 
 export function createStore(): GameStore {
@@ -55,6 +61,9 @@ export function createStore(): GameStore {
     meteo: null,
     cutAt: () => 0,
     revealAt: () => {},
+    seenProjects: new Set(),
+    starsTaken: new Set(),
+    duiGoal: null,
   };
 }
 
@@ -68,4 +77,6 @@ export type GameEvents = {
   onStarRevealed: () => void;
   // Dui was petted.
   onPet: () => void;
+  // Dui reached the place it was leading the player to.
+  onDuiGuide: () => void;
 };

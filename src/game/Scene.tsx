@@ -158,7 +158,7 @@ export default function Scene({ store, events, quality, rich, onWalkTo, weather,
       </Clickable>
       {PROJECT_SIGNS.map((s) => (
         <Clickable key={s.project.id} id={`project:${s.project.id}`} onWalkTo={onWalkTo}>
-          <ProjectSign x={s.x} z={s.z} rot={s.rot} color={s.color} soon={!!s.project.comingSoon} />
+          <ProjectSign x={s.x} z={s.z} rot={s.rot} color={s.color} soon={!!s.project.comingSoon} projectId={s.project.id} store={store} />
         </Clickable>
       ))}
       <Clickable id="garden" onWalkTo={onWalkTo}>
@@ -189,6 +189,10 @@ export default function Scene({ store, events, quality, rich, onWalkTo, weather,
           if (Math.random() < 0.35) sfx.meow();
           store.burst('hearts', x, z);
           events.current.onPet?.();
+        }}
+        onGuideArrive={() => {
+          sfx.meow();
+          events.current.onDuiGuide?.();
         }}
       />
       <CameraRig store={store} reduceMotion={reduceMotion} />
@@ -1011,10 +1015,22 @@ function ProjectBoard() {
   );
 }
 
-function ProjectSign({ x, z, rot, color, soon }: { x: number; z: number; rot: number; color: string; soon: boolean }) {
+const LANTERN_SEEN = new THREE.Color('#7ce08a');
+
+function ProjectSign({ x, z, rot, color, soon, projectId, store }: { x: number; z: number; rot: number; color: string; soon: boolean; projectId: number; store: GameStore }) {
   const lantern = useRef<THREE.Mesh>(null);
+  const lit = useRef(false);
   useFrame(({ clock }) => {
-    if (lantern.current) lantern.current.scale.setScalar(1 + Math.sin(clock.elapsedTime * 2 + x) * 0.08);
+    const l = lantern.current;
+    if (!l) return;
+    // Read signs turn green and stop pulsing, so walking the plaza visibly
+    // fills it in. A Set lookup, no allocation, every frame.
+    const seen = store.seenProjects.has(projectId);
+    if (seen !== lit.current) {
+      lit.current = seen;
+      if (seen) (l.material as THREE.MeshBasicMaterial).color.copy(LANTERN_SEEN);
+    }
+    l.scale.setScalar(seen ? 1.15 : 1 + Math.sin(clock.elapsedTime * 2 + x) * 0.08);
   });
   return (
     <group position={[x, 0, z]} rotation-y={rot}>
@@ -2044,7 +2060,9 @@ export const STAR_SPOTS = (() => {
 function Stars({ store, events }: { store: GameStore; events: MutableRefObject<GameEvents> }) {
   const geo = useMemo(makeStarGeometry, []);
   const refs = useRef<(THREE.Group | null)[]>([]);
-  const state = useRef(STAR_SPOTS.map(() => ({ revealed: false, taken: false, t: 0 })));
+  // Stars collected on an earlier visit start taken and past their exit
+  // animation (t >= 0.7 hides them), so they don't come back on reload.
+  const state = useRef(STAR_SPOTS.map((_, i) => (store.starsTaken.has(i) ? { revealed: true, taken: true, t: 1 } : { revealed: false, taken: false, t: 0 })));
 
   useEffect(() => {
     store.revealAt = (x, z, r) => {
