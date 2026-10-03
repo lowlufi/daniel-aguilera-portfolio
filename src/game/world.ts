@@ -210,6 +210,14 @@ export function resolveCollisions(p: THREE.Vector3) {
   if (onDock(p.x, p.z)) return;
   const r = Math.hypot(p.x, p.z);
   if (r > WALK_R) {
+    // Stepping off the side or the end of the dock put the point past WALK_R,
+    // and the radial clamp below snapped the player 3-4 m back to the island
+    // rim. Next to the dock, keep them on the planks instead.
+    if (p.z > DOCK.z0 && Math.abs(p.x - DOCK.x) < DOCK.halfW + 1.2) {
+      p.x = Math.min(Math.max(p.x, DOCK.x - DOCK.halfW + 0.05), DOCK.x + DOCK.halfW - 0.05);
+      p.z = Math.min(p.z, DOCK.z1 - 0.05);
+      return;
+    }
     p.x *= WALK_R / r;
     p.z *= WALK_R / r;
   }

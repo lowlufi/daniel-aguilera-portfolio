@@ -759,9 +759,16 @@ function Tree({ x, z, scale, kind, fruit, seed, store }: (typeof TREES)[number] 
     root.current?.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
       if (!m) return;
-      m.transparent = fade.current < 0.99;
+      const transparent = fade.current < 0.99;
+      // three compiles opaque materials with `#define OPAQUE`, which forces alpha
+      // to 1. Flipping `transparent` alone doesn't recompile, so the tree stayed
+      // solid; the shader has to be rebuilt whenever the flag changes.
+      if (m.transparent !== transparent) {
+        m.transparent = transparent;
+        m.needsUpdate = true;
+      }
       m.opacity = fade.current;
-      m.depthWrite = fade.current > 0.99;
+      m.depthWrite = !transparent;
     });
   });
   const leaf = kind === 'blossom' ? '#ff9ec4' : kind === 'pine' ? '#35a06a' : seed % 2 ? '#4fbf4c' : '#62cc55';
@@ -1227,8 +1234,11 @@ function WeatherStation({ store }: { store: GameStore }) {
 const BURST_N = 260;
 function Bursts({ store }: { store: GameStore }) {
   const ref = useRef<THREE.InstancedMesh>(null);
+  // Starts non-idle on purpose: InstancedMesh creates every instance with the
+  // identity matrix, so until the first frame scales them to zero all 260 sat
+  // as one white sphere at the island centre.
   const st = useMemo(
-    () => ({ p: new Float32Array(BURST_N * 3), v: new Float32Array(BURST_N * 3), life: new Float32Array(BURST_N), size: new Float32Array(BURST_N), next: 0, idle: true }),
+    () => ({ p: new Float32Array(BURST_N * 3), v: new Float32Array(BURST_N * 3), life: new Float32Array(BURST_N), size: new Float32Array(BURST_N), next: 0, idle: false }),
     [],
   );
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -1534,6 +1544,10 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
   const anim = useRef<Anim>({ phase: 0, amt: 0, swing: 0 });
   const dir = useRef(new THREE.Vector2(0, 1));
   const stuck = useRef({ t: 0, d: Infinity });
+  // The stuck timer compares against the distance to the target it started
+  // with; a new, farther target looked like "not getting closer" and the walk
+  // was aborted after 1.2 s. It restarts whenever the target object changes.
+  const stuckTarget = useRef<THREE.Vector3 | null>(null);
   const nearCheck = useRef(0);
   const lastStep = useRef(0);
 
@@ -1580,17 +1594,28 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
         dir.current.set(dx / d, dz / d);
         want = Math.min(5.2, d * 3 + 1.2);
         // Give up if something blocks the way for too long.
-        if (d < stuck.current.d - 0.05) stuck.current = { t: 0, d };
+        if (stuckTarget.current !== s.target) {
+          stuckTarget.current = s.target;
+          stuck.current.t = 0;
+          stuck.current.d = d;
+        }
+        if (d < stuck.current.d - 0.05) {
+          stuck.current.t = 0;
+          stuck.current.d = d;
+        }
         else if ((stuck.current.t += dt) > 1.2) {
           const id = s.targetId;
           s.target = null;
           s.targetId = null;
-          stuck.current = { t: 0, d: Infinity };
+          stuck.current.t = 0;
+          stuck.current.d = Infinity;
           if (id && d < 3) events.current.onArrive(id);
         }
       }
     } else {
-      stuck.current = { t: 0, d: Infinity };
+      stuck.current.t = 0;
+      stuck.current.d = Infinity;
+      stuckTarget.current = null;
     }
 
     s.speed += (want - s.speed) * (1 - Math.exp(-12 * dt));

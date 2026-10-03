@@ -59,6 +59,21 @@ function islandWeatherFor(m: Meteo): WeatherId {
 }
 type AchievementId = keyof typeof ACHIEVEMENTS;
 
+/**
+ * Movement keys by physical position (e.code), so keydown and keyup always
+ * agree: e.key changes with modifiers and layouts (Option+W gives '∑' on a
+ * Mac, AZERTY has no W where WASD expects it), and the key would never be
+ * released. Everything else keeps using e.key.
+ */
+const CODE_TO_KEY: Record<string, string> = {
+  KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd',
+  ArrowUp: 'arrowup', ArrowDown: 'arrowdown', ArrowLeft: 'arrowleft', ArrowRight: 'arrowright',
+  ShiftLeft: 'shift', ShiftRight: 'shift',
+};
+function movementKey(e: KeyboardEvent): string {
+  return CODE_TO_KEY[e.code] ?? e.key.toLowerCase();
+}
+
 const TRAVEL: { id: InteractableId; emoji: string; label: string }[] = [
   { id: 'daniel', emoji: '🧑‍💻', label: 'Sobre mí' },
   { id: 'board', emoji: '📌', label: 'Proyectos' },
@@ -81,7 +96,10 @@ const SOUND_PRESETS: { label: string; emoji: string; mix: Mix }[] = [
 type Sheet = 'weather' | 'sound' | null;
 
 function fullMix(m: Mix): Record<AmbientId, number> {
-  return Object.fromEntries(AMBIENTS.map((a) => [a.id, m[a.id] ?? 0])) as Record<AmbientId, number>;
+  // The mix comes from localStorage: anything that isn't a finite number
+  // would reach setTargetAtTime and throw inside audio start-up.
+  const src: Partial<Record<AmbientId, unknown>> = m && typeof m === 'object' ? m : {};
+  return Object.fromEntries(AMBIENTS.map((a) => [a.id, finiteOr(src[a.id], 0)])) as Record<AmbientId, number>;
 }
 
 function readStorage<T>(key: string, fallback: T): T {
@@ -91,6 +109,10 @@ function readStorage<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+/** A stored number, or the fallback if it's missing, corrupt or not finite (NaN breaks the audio graph). */
+function finiteOr(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 }
 function writeStorage(key: string, value: unknown) {
   try {
@@ -139,8 +161,8 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     return w in WEATHER_CONFIG ? w : 'atardecer';
   });
   const [mix, setMixState] = useState<Record<AmbientId, number>>(() => fullMix(readStorage<Mix>('island-mix', WEATHER_CONFIG[weather].mix)));
-  const [ambVol, setAmbVol] = useState(() => readStorage('island-ambvol-v2', 0.5));
-  const [noiseColor, setNoiseColor] = useState(() => readStorage('island-noise-color', 1));
+  const [ambVol, setAmbVol] = useState(() => finiteOr(readStorage<unknown>('island-ambvol-v2', 0.5), 0.5));
+  const [noiseColor, setNoiseColor] = useState(() => finiteOr(readStorage<unknown>('island-noise-color', 1), 1));
   const [sheet, setSheet] = useState<Sheet>(null);
   const reduceMotion = useReducedMotion() ?? false;
   const timers = useRef<number[]>([]);
@@ -474,7 +496,11 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     setStarted(true);
     if (!readStorage('island-tutorial-done', false)) {
       later(() => {
-        if (!busyRef.current) openDialog('welcome');
+        if (busyRef.current || store.target) return;
+        openDialog('welcome');
+        // Seen counts as done: closing it with Esc or by tapping a travel
+        // button never reached finishTutorial, so it opened on every visit.
+        writeStorage('island-tutorial-done', true);
       }, 1300);
     }
   }, [ambVol, later, mix, muted, noiseColor, openDialog]);
@@ -573,6 +599,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
     };
     const down = (e: KeyboardEvent) => {
+      if (e.metaKey) store.keys.clear();
       if (paused || isTyping(e) || e.metaKey || e.ctrlKey) return;
       const key = e.key.toLowerCase();
       // A focused button keeps Enter (and Space inside menus) for itself. Out on the
@@ -626,9 +653,15 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         unlock('secreto');
         toast('🎉', '¡Fiesta en la isla!', 'Encontraste el código secreto.');
       }
-      store.keys.add(key);
+      // Cmd/Option change e.key (Option+W is '∑') and macOS sends no keyup for
+      // letters while Cmd is held, so a held key could stay "down" forever.
+      if (e.metaKey || e.altKey) {
+        store.keys.clear();
+        return;
+      }
+      store.keys.add(movementKey(e));
     };
-    const up = (e: KeyboardEvent) => store.keys.delete(e.key.toLowerCase());
+    const up = (e: KeyboardEvent) => store.keys.delete(movementKey(e));
     const blur = () => store.keys.clear();
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -641,7 +674,11 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   }, [advance, choiceIdx, closeDialog, dialog, openDialog, panel, paused, sheet, showChoices, start, started, store, toast, unlock]);
 
   useEffect(() => {
-    if (dialog || panel) store.keys.clear();
+    if (!dialog && !panel) return;
+    store.keys.clear();
+    // Opening a dialog can unmount the scissors button mid-press, so its
+    // pointerup never fires and the player kept cutting after closing it.
+    store.cutHeld = false;
   }, [dialog, panel, store]);
 
   const nearItem = near ? INTERACTABLES.find((x) => x.id === near) : null;
@@ -712,6 +749,10 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         dpr={dpr}
         camera={{ fov: 50, position: [30, 17, 30], near: 0.1, far: 900 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }}
+        // Nothing moves behind the contact composer; no reason to keep
+        // rendering (and running post-processing) at full rate under it.
+        frameloop={paused ? 'never' : 'always'}
+        onContextMenu={(e) => e.preventDefault()}
         style={{ touchAction: 'none' }}
       >
         <PerformanceMonitor
@@ -744,7 +785,10 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
 
       {started && (
         <>
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-3 md:p-4">
+          {/* index.html sets viewport-fit=cover, so on notched phones the HUD,
+              joystick, scissors and dialog sat under the notch or home bar
+              until they were offset by the safe-area insets. */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-3 md:p-4 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
             <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 md:gap-2">
               <span className="hidden md:inline-flex rounded-full bg-[#fff8e7]/95 px-4 py-2 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)]">
                 🏝️ Isla de Daniel Eduardo
@@ -779,16 +823,21 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             </div>
           </div>
 
+          {/* On narrow screens the four buttons wrap to a second row instead of
+              scrolling sideways: as a hidden scroll strip, "Contacto" (the one
+              that matters most) was the button left out of view. On desktop the
+              row sits at the bottom, where an open dialog covers it, so it hides
+              while one is open instead of peeking out and taking keyboard focus. */}
           <nav
             aria-label="Ir a"
-            className="absolute z-20 left-1/2 -translate-x-1/2 top-[60px] md:top-auto md:bottom-4 flex gap-1.5 md:gap-2 max-w-[calc(100%-24px)] overflow-x-auto no-scrollbar px-1 py-1"
+            className={`absolute z-20 left-1/2 -translate-x-1/2 top-[60px] md:top-auto md:bottom-4 flex flex-wrap justify-center gap-1.5 md:gap-2 w-max max-w-[calc(100%-24px)] px-1 py-1 ${dialog || panel ? 'md:hidden' : ''}`}
           >
             {TRAVEL.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => walkTo(t.id)}
-                className="shrink-0 rounded-full bg-[#7ccf8a] px-3.5 md:px-4 py-2 text-[13px] md:text-sm font-extrabold text-[#1d4a26] shadow-[0_3px_0_#4f9c5d] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_1px_0_#4f9c5d] transition-transform"
+                className="shrink-0 rounded-full bg-[#7ccf8a] px-3 md:px-4 py-2 text-[12.5px] md:text-sm font-extrabold text-[#1d4a26] shadow-[0_3px_0_#4f9c5d] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_1px_0_#4f9c5d] transition-transform"
               >
                 <span className="mr-1">{t.emoji}</span>
                 {t.label}
@@ -796,7 +845,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             ))}
           </nav>
 
-          {!coarse && (
+          {!coarse && !dialog && !panel && (
             <div className="pointer-events-none absolute bottom-4 left-4 z-10 hidden lg:block rounded-2xl bg-[#fff8e7]/85 px-4 py-3 text-xs font-bold leading-relaxed text-[#6b4f3a]">
               <Kbd>WASD</Kbd> caminar · <Kbd>Shift</Kbd> correr
               <br />
@@ -835,7 +884,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 }}
                 onPointerUp={() => (store.cutHeld = false)}
                 onPointerCancel={() => (store.cutHeld = false)}
-                className="absolute z-20 bottom-8 right-6 grid h-20 w-20 place-items-center rounded-full bg-[#fff8e7] text-3xl shadow-[0_5px_0_rgba(91,70,54,0.25)] active:translate-y-1 active:shadow-[0_1px_0_rgba(91,70,54,0.25)]"
+                className="absolute z-20 bottom-[calc(2rem+env(safe-area-inset-bottom))] right-[calc(1.5rem+env(safe-area-inset-right))] grid h-20 w-20 place-items-center rounded-full bg-[#fff8e7] text-3xl shadow-[0_5px_0_rgba(91,70,54,0.25)] active:translate-y-1 active:shadow-[0_1px_0_rgba(91,70,54,0.25)]"
                 style={{ touchAction: 'none' }}
               >
                 ✂️
@@ -908,6 +957,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.97 }}
             transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+            data-lenis-prevent
             className="absolute right-3 top-[112px] md:right-4 md:top-[68px] z-30 w-[min(340px,calc(100%-24px))] max-h-[calc(100svh-190px)] md:max-h-[calc(100svh-150px)] overflow-y-auto rounded-[1.75rem] bg-[#fff8e7] p-4 text-[#5b4636] shadow-[0_6px_0_rgba(91,70,54,0.22),0_20px_50px_rgba(60,30,40,0.25)]"
           >
             <div className="mb-3 flex items-center justify-between">
@@ -1193,7 +1243,7 @@ function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, s
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.97 }}
       transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-      className="absolute inset-x-0 bottom-3 md:bottom-6 z-40 mx-auto w-[min(680px,calc(100%-24px))]"
+      className="absolute inset-x-0 bottom-[calc(0.75rem+env(safe-area-inset-bottom))] md:bottom-6 z-40 mx-auto w-[min(680px,calc(100%-24px))]"
     >
       <AnimatePresence>
         {showChoices && dialog.choices && (
@@ -1314,7 +1364,7 @@ function PanelShell({ title, onClose, children }: { title: string; onClose: () =
             <X size={18} strokeWidth={3} />
           </button>
         </div>
-        <div className="overflow-y-auto p-4 md:p-6">{children}</div>
+        <div data-lenis-prevent className="overflow-y-auto p-4 md:p-6">{children}</div>
       </motion.div>
     </motion.div>
   );
@@ -1414,7 +1464,7 @@ function Joystick({ store }: { store: ReturnType<typeof createStore> }) {
       }}
       onPointerUp={end}
       onPointerCancel={end}
-      className="absolute z-20 bottom-8 left-6 h-32 w-32 rounded-full bg-[#fff8e7]/55 shadow-[inset_0_2px_8px_rgba(91,70,54,0.25)]"
+      className="absolute z-20 bottom-[calc(2rem+env(safe-area-inset-bottom))] left-[calc(1.5rem+env(safe-area-inset-left))] h-32 w-32 rounded-full bg-[#fff8e7]/55 shadow-[inset_0_2px_8px_rgba(91,70,54,0.25)]"
       style={{ touchAction: 'none' }}
     >
       <div

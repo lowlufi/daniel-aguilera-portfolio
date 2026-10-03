@@ -37,6 +37,16 @@ button:focus-visible {
   outline-color: rgba(255, 255, 255, 0.8);
 }
 
+/* The island UI is cream (#fff8e7): a white ring disappears on it, so
+   keyboard users couldn't see where focus was on the HUD, dialogs or sheets.
+   Dark brown reads on cream and on the 3D scene alike. */
+.font-cozy :focus-visible,
+.font-cozy a:focus-visible,
+.font-cozy button:focus-visible {
+  outline: 3px solid #6b4f3a;
+  outline-offset: 2px;
+}
+
 /* Subtle text-shadow on copy so it stays readable when the background
    video swings to a bright sunset frame. */
 .text-readable {

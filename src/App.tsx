@@ -1119,7 +1119,7 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-2 overscroll-contain">
+            <div data-lenis-prevent className="flex-1 overflow-y-auto py-2 overscroll-contain">
               {filtered.length === 0 && (
                 <p className="text-center text-white/45 text-sm py-10 px-4">
                   Sin resultados para «{query}».
@@ -1279,7 +1279,7 @@ function ContactComposer({ open, onClose }: { open: boolean; onClose: () => void
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 md:px-6 py-5 space-y-5 overscroll-contain">
+            <div data-lenis-prevent className="flex-1 overflow-y-auto px-5 md:px-6 py-5 space-y-5 overscroll-contain">
               <div>
                 <label className="block text-[10.5px] tracking-[0.2em] uppercase text-white/40 mb-2.5">Motivo</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -1400,6 +1400,7 @@ export default function App() {
   const routeRef = useRef<string>('home');
   const [theme, setTheme] = useState<Theme>(() => loadStoredTheme() ?? 'night');
   const [pathname, setPathname] = useState<string>(getInitialPath);
+  const [gameSupported] = useState(canRunGame);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
   const openComposer = useCallback(() => setComposerOpen(true), []);
@@ -1414,13 +1415,21 @@ export default function App() {
     aurora: auroraRef,
   };
 
+  // On the island there is nothing to scroll, and Lenis would still run its
+  // RAF loop and eat every wheel event.
+  const onGameRoute = pathname === '/' && gameSupported;
   useEffect(() => {
-    if (reduceMotion) return;
+    if (reduceMotion || onGameRoute) return;
     const lenis = new Lenis({
       duration: 1.15,
       easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       smoothWheel: true,
       touchMultiplier: 1.4,
+      // Lenis calls preventDefault on every wheel event, even while stopped, so
+      // panels with their own scroll (sheets, palette, composer) couldn't scroll
+      // with a mouse wheel or trackpad. They opt out with data-lenis-prevent.
+      allowNestedScroll: true,
+      prevent: (node) => !!node.closest?.('[data-lenis-prevent]'),
     });
     lenisRef.current = lenis;
     let raf = 0;
@@ -1434,7 +1443,7 @@ export default function App() {
       lenis.destroy();
       lenisRef.current = null;
     };
-  }, [reduceMotion]);
+  }, [reduceMotion, onGameRoute]);
 
   useEffect(() => {
     if (!lenisRef.current) return;
@@ -1541,7 +1550,6 @@ export default function App() {
     aurora: 'bg-gradient-to-br from-violet-900 via-indigo-950 to-black',
   };
 
-  const [gameSupported] = useState(canRunGame);
   type Route = 'game' | 'home' | 'projects' | 'about' | 'privacy' | '404';
   const route: Route =
     pathname === '/' ? (gameSupported ? 'game' : 'home') :
