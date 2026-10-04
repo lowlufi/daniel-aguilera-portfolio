@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import type { GameStore } from './store';
+import type { InteractableId } from './world';
 import { DANIEL, DOCK_END, GARDEN, HOUSE, MAILBOX, PLAZA, PROJECT_SIGNS, STATION, WELCOME, WORKSHOP } from './world';
 
 // Floating name tags. They live in one plain DOM layer on top of the canvas and
@@ -17,16 +18,18 @@ type LabelDef = {
   // Only visible when the player stands within this distance.
   nearOnly?: number;
   bob?: boolean;
+  // The place this tag names, so it can light up when it's the next notebook stamp.
+  goal?: InteractableId;
 };
 
 export const LABELS: LabelDef[] = [
   { text: 'Casa de Daniel', x: HOUSE.x, y: 4.7, z: HOUSE.z, tone: 'cream', size: 20 },
   { text: 'Taller', x: WORKSHOP.x, y: 5.2, z: WORKSHOP.z, tone: 'cream', size: 20 },
-  { text: '📌 Proyectos', x: PLAZA.x, y: 2.7, z: PLAZA.z, tone: 'orange', size: 20 },
-  { text: '🌻 Huerto de habilidades', x: GARDEN.x, y: 2.6, z: GARDEN.z, tone: 'orange', size: 20 },
-  { text: '✉️ Buzón', x: MAILBOX.x, y: 2.1, z: MAILBOX.z, tone: 'orange', size: 20 },
+  { text: '📌 Proyectos', x: PLAZA.x, y: 2.7, z: PLAZA.z, tone: 'orange', size: 20, goal: 'board' },
+  { text: '🌻 Huerto de habilidades', x: GARDEN.x, y: 2.6, z: GARDEN.z, tone: 'orange', size: 20, goal: 'garden' },
+  { text: '✉️ Buzón', x: MAILBOX.x, y: 2.1, z: MAILBOX.z, tone: 'orange', size: 20, goal: 'mailbox' },
   { text: '👋 ¡Bienvenid@!', x: WELCOME.x, y: 1.85, z: WELCOME.z, tone: 'cream', size: 20 },
-  { text: '💬 Daniel', x: DANIEL.x, y: 1.95, z: DANIEL.z, tone: 'orange', size: 20, bob: true },
+  { text: '💬 Daniel', x: DANIEL.x, y: 1.95, z: DANIEL.z, tone: 'orange', size: 20, bob: true, goal: 'daniel' },
   { text: '📡 Estación ESP32', x: STATION.x, y: 2.05, z: STATION.z, tone: 'cream', size: 16 },
   { text: '🌊 Muelle', x: DOCK_END.x, y: 1.2, z: DOCK_END.z, tone: 'cream', size: 16, nearOnly: 4 },
   ...PROJECT_SIGNS.map((s) => ({ text: s.project.title, x: s.x, y: 2.15, z: s.z, tone: 'cream' as const, size: 14, nearOnly: 2.2 })),
@@ -63,6 +66,13 @@ export function LabelProjector({ store }: { store: GameStore }) {
     LABELS.forEach((l, i) => {
       const el = els[i];
       if (!el) return;
+      // The next notebook stamp's tag gets a paw and a pulse (.label-meta in
+      // index.css). Toggled only when it changes, not written every frame.
+      const isGoal = !!l.goal && l.goal === store.goalId;
+      if ((el.dataset.meta === '1') !== isGoal) {
+        el.dataset.meta = isGoal ? '1' : '0';
+        el.classList.toggle('label-meta', isGoal);
+      }
       const y = l.bob ? l.y + Math.sin(t * 3) * 0.06 : l.y;
       v.set(l.x, y, l.z);
       const dist = camera.position.distanceTo(v);
@@ -73,7 +83,8 @@ export function LabelProjector({ store }: { store: GameStore }) {
       if (!visible && v.z >= 1) return;
       const sx = (v.x * 0.5 + 0.5) * size.width;
       const sy = (-v.y * 0.5 + 0.5) * size.height;
-      const scale = Math.min(1.35, Math.max(0.4, (l.size / dist) * 0.9));
+      // The goal tag reads a little bigger, and never shrinks out of sight in the distance.
+      const scale = Math.min(isGoal ? 1.5 : 1.35, Math.max(isGoal ? 0.75 : 0.4, (l.size / dist) * (isGoal ? 1.1 : 0.9)));
       el.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -50%) scale(${scale.toFixed(3)})`;
     });
   });

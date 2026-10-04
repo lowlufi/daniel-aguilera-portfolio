@@ -192,3 +192,24 @@ button:focus-visible {
   border: 3px solid #fff8e7;
   box-shadow: 0 2px 0 #c97d3c;
 }
+
+/* Name tag of the next notebook stamp in the island game (labels.tsx). Its
+   position comes from an inline transform written every frame, so the pulse
+   animates the glow, never the transform. */
+.label-meta {
+  box-shadow: 0 0 0 3px #fff8e7, 0 0 0 6px #ff8a3c, 0 3px 0 rgba(91, 70, 54, 0.25);
+  animation: label-meta-pulse 1.2s ease-in-out infinite;
+}
+.label-meta::before {
+  content: '🐾 ';
+}
+@keyframes label-meta-pulse {
+  50% {
+    box-shadow: 0 0 0 3px #fff8e7, 0 0 0 10px rgba(255, 138, 60, 0.45), 0 3px 0 rgba(91, 70, 54, 0.25);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .label-meta {
+    animation: none;
+  }
+}

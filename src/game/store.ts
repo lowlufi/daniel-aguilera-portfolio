@@ -34,8 +34,11 @@ export type GameStore = {
   // collected stars stay gone after a reload.
   seenProjects: Set<number>;
   starsTaken: Set<number>;
-  // Where Dui leads an idle player: the next missing notebook stamp.
+  // The next missing notebook stamp: its name tag lights up with a paw.
   duiGoal: THREE.Vector3 | null;
+  goalId: InteractableId | null;
+  // Seconds left of the current grass swipe (Dui pounces while it's > 0).
+  swing: number;
 };
 
 export function createStore(): GameStore {
@@ -54,7 +57,8 @@ export function createStore(): GameStore {
     grassTotal: 1,
     camYaw: 0,
     camPitch: 0.5,
-    camDist: 13,
+    // Framed for Dui, who is smaller than the villagers the island was built around.
+    camDist: 9,
     dragged: false,
     garden: { growth: 1, wateredAt: -99, harvestedAt: -99 },
     burst: () => {},
@@ -64,6 +68,8 @@ export function createStore(): GameStore {
     seenProjects: new Set(),
     starsTaken: new Set(),
     duiGoal: null,
+    goalId: null,
+    swing: 0,
   };
 }
 
@@ -77,6 +83,6 @@ export type GameEvents = {
   onStarRevealed: () => void;
   // Dui was petted.
   onPet: () => void;
-  // Dui reached the place it was leading the player to.
-  onDuiGuide: () => void;
+  // The player has stood still for a while: time for a hint.
+  onIdleHint: () => void;
 };

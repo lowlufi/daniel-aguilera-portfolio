@@ -180,21 +180,7 @@ export default function Scene({ store, events, quality, rich, onWalkTo, weather,
 
       <Grass store={store} events={events} quality={quality} />
       <Stars store={store} events={events} />
-      <Player store={store} events={events} />
-      <Dui
-        store={store}
-        reduceMotion={reduceMotion}
-        onPet={(x, z) => {
-          sfx.purr();
-          if (Math.random() < 0.35) sfx.meow();
-          store.burst('hearts', x, z);
-          events.current.onPet?.();
-        }}
-        onGuideArrive={() => {
-          sfx.meow();
-          events.current.onDuiGuide?.();
-        }}
-      />
+      <Player store={store} events={events} reduceMotion={reduceMotion} />
       <CameraRig store={store} reduceMotion={reduceMotion} />
       <LabelProjector store={store} />
 
@@ -1574,7 +1560,6 @@ function Villager({ look, anim, showTool = false }: { look: Look; anim: MutableR
   );
 }
 
-const PLAYER_LOOK: Look = { shirt: '#7cc6e8', pants: '#5a7bb5', skin: '#ffd9b8', hat: { color: '#f2cf7a', band: '#e76f51' } };
 const DANIEL_LOOK: Look = { shirt: '#f28c6b', pants: '#4b5563', skin: '#f1c7a1', hair: '#3b2a22', glasses: true, beard: '#8a4b2d', beardLight: '#a8613b' };
 
 function DanielNpc({ store }: { store: GameStore }) {
@@ -1600,7 +1585,7 @@ function DanielNpc({ store }: { store: GameStore }) {
   );
 }
 
-function Player({ store, events }: { store: GameStore; events: MutableRefObject<GameEvents> }) {
+function Player({ store, events, reduceMotion }: { store: GameStore; events: MutableRefObject<GameEvents>; reduceMotion: boolean }) {
   const ref = useRef<THREE.Group>(null);
   const anim = useRef<Anim>({ phase: 0, amt: 0, swing: 0 });
   const dir = useRef(new THREE.Vector2(0, 1));
@@ -1611,6 +1596,8 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
   const stuckTarget = useRef<THREE.Vector3 | null>(null);
   const nearCheck = useRef(0);
   const lastStep = useRef(0);
+  // Seconds standing still, for the idle hint; -1 once it fired this stretch.
+  const idle = useRef(0);
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
@@ -1716,6 +1703,18 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
       }
     }
 
+    s.swing = a.swing;
+
+    // Standing still for a while (not reading a dialog) earns one hint per stretch.
+    if (s.started && !s.frozen && s.speed < 0.1) {
+      if (idle.current >= 0 && (idle.current += dt) > IDLE_HINT_AFTER) {
+        idle.current = -1;
+        events.current.onIdleHint?.();
+      }
+    } else if (s.speed > 0.3) {
+      idle.current = 0;
+    }
+
     if (ref.current) {
       ref.current.position.copy(s.pos);
       ref.current.rotation.y = s.facing;
@@ -1741,10 +1740,22 @@ function Player({ store, events }: { store: GameStore; events: MutableRefObject<
 
   return (
     <group ref={ref} position={SPAWN.toArray()}>
-      <Villager look={PLAYER_LOOK} anim={anim} showTool />
+      <Dui
+        store={store}
+        reduceMotion={reduceMotion}
+        scale={1.45}
+        onPet={() => {
+          sfx.purr();
+          if (Math.random() < 0.35) sfx.meow();
+          store.burst('hearts', store.pos.x, store.pos.z);
+          events.current.onPet?.();
+        }}
+      />
     </group>
   );
 }
+
+const IDLE_HINT_AFTER = 8;
 
 function CameraRig({ store, reduceMotion }: { store: GameStore; reduceMotion: boolean }) {
   const { camera, size } = useThree();
@@ -1763,10 +1774,11 @@ function CameraRig({ store, reduceMotion }: { store: GameStore; reduceMotion: bo
       const yaw = store.camYaw;
       const pitch = store.camPitch;
       const flat = Math.cos(pitch) * d;
-      desired.set(store.pos.x + Math.sin(yaw) * flat, store.pos.y + 0.8 + Math.sin(pitch) * d, store.pos.z + Math.cos(yaw) * flat);
+      // Heights are for Dui (about 1 unit tall), not the 1.5-unit villagers.
+      desired.set(store.pos.x + Math.sin(yaw) * flat, store.pos.y + 0.5 + Math.sin(pitch) * d, store.pos.z + Math.cos(yaw) * flat);
       // Look a little ahead of the player so more of the island (and sky) is in view.
       const ahead = 6 * Math.cos(pitch);
-      lookWant.set(store.pos.x - Math.sin(yaw) * ahead, store.pos.y + 1.2, store.pos.z - Math.cos(yaw) * ahead);
+      lookWant.set(store.pos.x - Math.sin(yaw) * ahead, store.pos.y + 0.7, store.pos.z - Math.cos(yaw) * ahead);
     }
     const f = 1 - Math.exp(-(store.started ? (store.dragged ? 12 : 3.2) : 1.2) * dt);
     camera.position.lerp(desired, f);

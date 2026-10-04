@@ -2,9 +2,8 @@ import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import type { GameStore } from './store';
-import { SPAWN, groundHeight, resolveCollisions } from './world';
 
-/* ---------------- Dui (Daniel's cat) ---------------- */
+/* ---------------- Dui (Daniel's cat), the player character ---------------- */
 
 const FUR = '#f0913a';
 const STRIPE = '#c4601d';
@@ -13,22 +12,10 @@ const NOSE = '#f08f95';
 const EAR_IN = '#f6b5a8';
 const EYE = '#2b1d16';
 
-// Keeps this far from the player; only starts walking again once the gap passes FOLLOW + SLACK,
-// so tiny player shuffles don't make it twitch back and forth.
-const FOLLOW = 1.2;
-const SLACK = 0.35;
-// The player walks at 3.8 and runs at 6.4: topping out just under the walk means it trails, never overtakes.
-const MAX_SPEED = 3.6;
-// Closer than this and the player is stepping on it, so it shuffles aside.
-const PERSONAL = 0.7;
 const PET_TIME = 0.7;
-// Guiding: after the player has stood still this long, Dui trots towards the
-// next notebook stamp and waits there, a little short of it. Showing beats
-// telling for visitors who have never played a game.
-const GUIDE_AFTER = 6;
-const GUIDE_MIN_DIST = 5;
-const GUIDE_SHORT = 2.2;
 const SIT_TILT = 0.38;
+// Sits after the player has been still this long.
+const SIT_AFTER = 0.8;
 
 // Diagonal pairs swing together (front-left with back-right), like a real trot.
 const LEGS = [
@@ -50,16 +37,19 @@ const STRIPES = [
 type DuiProps = {
   store: GameStore;
   reduceMotion: boolean;
-  // Fired on click/tap with Dui's world position: the host plays the purr / spawns hearts there.
-  onPet?: (x: number, z: number) => void;
-  // Fired once when Dui reaches the spot it is guiding the player to.
-  onGuideArrive?: () => void;
-  // The model is built ~0.72 tall to the ear tips; 1.15 lands it around the player's thigh and above most grass.
+  // Fired on click/tap: the host plays the purr and spawns hearts.
+  onPet?: () => void;
+  // The model is built ~0.72 tall to the ear tips.
   scale?: number;
 };
 
-export function Dui({ store, reduceMotion, onPet, onGuideArrive, scale = 1.15 }: DuiProps) {
-  const root = useRef<THREE.Group>(null);
+/**
+ * Dui as the player character. The parent <Player> group owns position,
+ * facing and collisions; this only animates the cat from the player's state:
+ * a waddle that speeds up with store.speed, sitting when still, a pounce when
+ * cutting grass (store.swing) and a happy squish when petted.
+ */
+export function Dui({ store, reduceMotion, onPet, scale = 1 }: DuiProps) {
   const pose = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
   const head = useRef<THREE.Group>(null);
@@ -70,115 +60,30 @@ export function Dui({ store, reduceMotion, onPet, onGuideArrive, scale = 1.15 }:
   const legs = useRef<(THREE.Group | null)[]>([]);
   const shins = useRef<(THREE.Mesh | null)[]>([]);
   const st = useMemo(
-    () => ({
-      pos: new THREE.Vector3(SPAWN.x + 1.1, 0, SPAWN.z + 0.4),
-      facing: 0,
-      speed: 0,
-      moving: false,
-      phase: 0,
-      amt: 0,
-      breath: 0,
-      sit: 1,
-      idleT: 1,
-      pet: 0,
-      blinkT: 2,
-      blink: 0,
-      eyeOpen: 1,
-      playerIdle: 0,
-      guide: false,
-      guideArrived: false,
-      guideTo: new THREE.Vector3(),
-    }),
+    () => ({ phase: 0, amt: 0, breath: 0, sit: 1, idleT: 1, pet: 0, blinkT: 2, blink: 0, eyeOpen: 1 }),
     [],
   );
-  // Same dev-only hook as window.__island in IslandGame: lets tests watch Dui's
-  // state. import.meta.env.DEV is false in production builds, so it's stripped.
-  if (import.meta.env.DEV) (store as unknown as { dui?: typeof st }).dui = st;
 
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.05);
     const m = reduceMotion ? 0 : 1;
-    const p = st.pos;
-    const dx = store.pos.x - p.x;
-    const dz = store.pos.z - p.z;
-    const d = Math.hypot(dx, dz);
+    const speed = store.speed;
 
-    // Guide mode starts after the player has stood still for a while (dialogs
-    // and panels freeze the player, so reading never triggers it) and ends as
-    // soon as they move again.
-    const goal = store.duiGoal;
-    st.playerIdle = store.started && !store.frozen && store.speed < 0.1 ? st.playerIdle + dt : 0;
-    if (st.guide && (store.speed > 0.3 || !goal)) {
-      st.guide = false;
-      st.guideArrived = false;
-    } else if (!st.guide && goal && st.playerIdle > GUIDE_AFTER) {
-      const gx = store.pos.x - goal.x;
-      const gz = store.pos.z - goal.z;
-      const gd = Math.hypot(gx, gz);
-      if (gd > GUIDE_MIN_DIST) {
-        // Wait a little short of the place, on the player's side, so the
-        // player sees both Dui and where it is pointing.
-        st.guideTo.set(goal.x + (gx / gd) * GUIDE_SHORT, 0, goal.z + (gz / gd) * GUIDE_SHORT);
-        st.guide = true;
-        st.guideArrived = false;
-        st.moving = true;
-      }
-    }
-
-    // Where it walks to: the player (stopping at the follow ring) or the guide spot.
-    const tx = (st.guide ? st.guideTo.x : store.pos.x) - p.x;
-    const tz = (st.guide ? st.guideTo.z : store.pos.z) - p.z;
-    const td = Math.hypot(tx, tz);
-    const stopAt = st.guide ? 0.25 : FOLLOW;
-
-    if (st.moving) {
-      if (td < stopAt) st.moving = false;
-    } else if (td > stopAt + SLACK) st.moving = true;
-    // Speed grows with the gap, so it trots to catch up and eases in as it arrives.
-    const want = st.moving ? Math.min(MAX_SPEED, (td - stopAt) * 2.4 + 0.6) : 0;
-    st.speed += (want - st.speed) * (1 - Math.exp(-5 * dt));
-    if (st.speed > 0.02 && td > 1e-3) {
-      // Never step past the stopping ring while braking.
-      const step = Math.min(st.speed * dt, Math.max(0, td - stopAt * 0.9));
-      p.x += (tx / td) * step;
-      p.z += (tz / td) * step;
-      resolveCollisions(p);
-    }
-    if (st.guide && !st.guideArrived && td < stopAt + 0.15) {
-      st.guideArrived = true;
-      onGuideArrive?.();
-    }
-    if (d < PERSONAL && d > 1e-3) {
-      const push = (PERSONAL - d) * (1 - Math.exp(-10 * dt));
-      p.x -= (dx / d) * push;
-      p.z -= (dz / d) * push;
-      resolveCollisions(p);
-    }
-    p.y += (groundHeight(p.x, p.z) - p.y) * (1 - Math.exp(-14 * dt));
-
-    // Faces where it walks while trotting (when guiding that's away from the
-    // player; looking back would make it walk backwards), and the player once
-    // it stops. Turns quickly while walking, lazily while sitting.
-    const walking = st.speed > 0.2 && td > 1e-3;
-    if (walking || d > 1e-3) {
-      let diff = (walking ? Math.atan2(tx, tz) : Math.atan2(dx, dz)) - st.facing;
-      diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      st.facing += diff * (1 - Math.exp(-(st.speed > 0.2 ? 8 : 2.5) * dt));
-    }
-
-    // Sits once the player has been still for a moment.
-    st.idleT = store.speed < 0.1 && st.speed < 0.15 ? st.idleT + dt : 0;
-    const sitWant = st.idleT > 0.8 ? 1 : 0;
+    st.idleT = speed < 0.1 ? st.idleT + dt : 0;
+    const sitWant = st.idleT > SIT_AFTER && store.swing <= 0 ? 1 : 0;
     st.sit += (sitWant - st.sit) * (1 - Math.exp(-(sitWant ? 3 : 9) * dt));
 
-    st.amt += (Math.min(st.speed / 2.5, 1) - st.amt) * (1 - Math.exp(-10 * dt));
-    st.phase += dt * (5 + st.speed * 3.2) * (st.amt > 0.03 ? 1 : 0);
+    // Walk is 3.8 and run 6.4: the stride saturates around a brisk walk.
+    st.amt += (Math.min(speed / 3, 1.2) - st.amt) * (1 - Math.exp(-10 * dt));
+    st.phase += dt * (5 + speed * 2.6) * (st.amt > 0.03 ? 1 : 0);
     // Accumulated (not clock * freq) so slowing the breath while sitting doesn't jump its phase.
     st.breath += dt * (2.4 - 0.9 * st.sit);
 
     st.pet = Math.max(0, st.pet - dt);
     const k = 1 - st.pet / PET_TIME;
     const squish = st.pet > 0 ? Math.sin(k * Math.PI * 3) * (1 - k) * 0.18 * m : 0;
+    // Cutting grass is a pounce: a quick lean onto the front paws.
+    const pounce = store.swing > 0 ? Math.sin((1 - store.swing / 0.32) * Math.PI) * m : 0;
 
     st.blinkT -= dt;
     if (st.blinkT < 0) {
@@ -192,11 +97,7 @@ export function Dui({ store, reduceMotion, onPet, onGuideArrive, scale = 1.15 }:
 
     const s = Math.sin(st.phase);
     const a = st.amt * m;
-    if (root.current) {
-      root.current.position.copy(p);
-      root.current.rotation.y = st.facing;
-    }
-    if (pose.current) pose.current.rotation.x = -SIT_TILT * st.sit;
+    if (pose.current) pose.current.rotation.x = -SIT_TILT * st.sit + pounce * 0.35;
     if (body.current) {
       const breath = 1 + Math.sin(st.breath) * 0.018 * m;
       body.current.position.y = Math.abs(s) * 0.035 * a;
@@ -206,7 +107,7 @@ export function Dui({ store, reduceMotion, onPet, onGuideArrive, scale = 1.15 }:
     }
     if (head.current) {
       // Counter the sitting tilt so the face stays level.
-      head.current.rotation.x = SIT_TILT * st.sit + Math.sin(st.phase * 2) * 0.04 * a;
+      head.current.rotation.x = SIT_TILT * st.sit + Math.sin(st.phase * 2) * 0.04 * a - pounce * 0.2;
       head.current.rotation.z = st.pet > 0 ? Math.sin(k * Math.PI) * 0.25 * m : 0;
     }
     if (eyes.current) eyes.current.scale.y = st.eyeOpen;
@@ -214,7 +115,7 @@ export function Dui({ store, reduceMotion, onPet, onGuideArrive, scale = 1.15 }:
       const g = legs.current[i];
       if (!g) continue;
       const sw = s * LEGS[i].side * a;
-      g.position.z = LEGS[i].z + sw * 0.06;
+      g.position.z = LEGS[i].z + sw * 0.06 + (LEGS[i].front ? pounce * 0.08 : 0);
       g.position.y = Math.max(0, sw) * 0.04;
       // Front legs straighten to prop the chest up while sitting.
       const shin = shins.current[i];
@@ -236,13 +137,11 @@ export function Dui({ store, reduceMotion, onPet, onGuideArrive, scale = 1.15 }:
     e.stopPropagation();
     if (!store.started || e.delta > 6) return; // that was a camera drag
     st.pet = PET_TIME;
-    onPet?.(st.pos.x, st.pos.z);
+    onPet?.();
   };
 
   return (
     <group
-      ref={root}
-      position={st.pos.toArray()}
       scale={scale}
       onClick={onClick}
       onPointerOver={() => store.started && (document.body.style.cursor = 'pointer')}

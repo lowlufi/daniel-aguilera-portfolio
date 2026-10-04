@@ -35,7 +35,7 @@ const ACHIEVEMENTS = {
   meteo: { icon: '📡', title: 'Meteorólogo', text: 'Sincronizaste la isla con el clima real de San Antonio.' },
   muelle: { icon: '🌊', title: 'Contemplativo', text: 'Te sentaste a mirar el mar desde el muelle.' },
   secreto: { icon: '🎉', title: 'Código secreto', text: '↑ ↑ ↓ ↓ ← → ← → B A. ¡Eres de los buenos!' },
-  dui: { icon: '🐾', title: 'Amigo de Dui', text: 'Le hiciste cariño a Dui, el gato de Daniel.' },
+  dui: { icon: '🐾', title: 'Gato regalón', text: 'Le hiciste cariño a Dui. Ronronea de puro feliz.' },
   libreta: { icon: '📖', title: 'Libreta completa', text: 'Juntaste los cinco sellos: ya conoces a Daniel, su trabajo y cómo escribirle.' },
 } as const;
 
@@ -191,11 +191,12 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   if (import.meta.env.DEV) (window as unknown as { __island?: unknown }).__island = { store, walkTo: (id: InteractableId) => walkToRef.current(id), snapWeather: () => stepAtmosphere(1) };
   const walkToRef = useRef<(id: InteractableId) => void>(() => {});
 
-  // Dui leads idle players to the next missing stamp; none left, no guiding.
+  // The next missing stamp's name tag lights up with a paw; none left, no highlight.
   useEffect(() => {
     const n = nextStamp(stamps);
     const it = n ? INTERACTABLES.find((x) => x.id === n.target) : undefined;
     store.duiGoal = it ? new THREE.Vector3(it.x, 0, it.z) : null;
+    store.goalId = it ? it.id : null;
   }, [stamps, store]);
 
   const busyRef = useRef(false);
@@ -334,9 +335,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         return {
           speaker: 'Daniel',
           lines: [
-            '¡Hola! Soy Daniel, Ingeniero en Informática de la Universidad de Playa Ancha. Hago webs, e-commerce, plataformas educativas y sistemas IoT. 👋',
-            'Me obsesiona que el código sea simple y que cada detalle de la interfaz tenga una razón de ser.',
-            'Ah, y ese gordito naranjo que te sigue es Dui, mi gato. Está a dieta, así que comida no… pero cariño, todo el que quieras. 🐾',
+            '¡Dui! ¿Te escapaste otra vez? 😄 Y trajiste visita… ¡hola a quien sea que esté jugando!',
+            'Soy Daniel, Ingeniero en Informática de la Universidad de Playa Ancha. Hago webs, e-commerce, plataformas educativas y sistemas IoT.',
+            'Este gordito naranjo es Dui, mi gato, y hoy te toca recorrer la isla con sus patitas. Está a dieta: si pide comida, no le creas. 🐾',
           ],
           choices: [
             { label: 'Ver tus proyectos', run: () => { setDialog(null); setPanel('projects'); sfx.open(); } },
@@ -506,13 +507,13 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         toast('🐾', 'Dui está feliz', 'Diez cariños. Ya te considera parte de la familia (y quiere comida).');
       }
     },
-    onDuiGuide: () => {
+    onIdleHint: () => {
       const n = nextStamp(stampsRef.current);
       const now = performance.now();
       // Once in a while is a hint; every time would be nagging.
       if (!n || now - duiHintAt.current < 45_000) return;
       duiHintAt.current = now;
-      toast('🐾', 'Dui quiere mostrarte algo', n.hint);
+      toast('🐾', 'Dui huele algo por allá', `${n.hint} Busca el letrero con la huellita 🐾.`);
     },
     onStarRevealed: () => {
       if (revealHint.current) return;
@@ -1437,7 +1438,7 @@ function LibretaPanel({
     <div className="space-y-6">
       <p className="text-sm font-bold leading-relaxed text-[#6b4f3a]">
         {next
-          ? 'Junta los cinco sellos recorriendo la isla. Cada uno es una parte del portafolio. Si te quedas quiet@, Dui te muestra adónde ir.'
+          ? 'Junta los cinco sellos recorriendo la isla con Dui. Cada uno es una parte del portafolio. El letrero con la huellita 🐾 marca el próximo lugar.'
           : '¡Libreta completa! Ya conoces a Daniel, su trabajo y cómo escribirle. Gracias por recorrer la isla. 🧡'}
       </p>
 
