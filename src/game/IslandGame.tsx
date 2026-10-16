@@ -81,6 +81,15 @@ const TRAVEL: { id: InteractableId; emoji: string; label: string }[] = [
   { id: 'mailbox', emoji: '✉️', label: 'Contacto' },
 ];
 
+// The other places on the map, for a keyboard or screen reader player: the
+// "Ir a" bar only has the four that matter most, and the map itself is
+// hidden from screen readers.
+const MORE_PLACES: { id: InteractableId; label: string }[] = [
+  { id: 'welcome', label: 'Letrero de bienvenida' },
+  { id: 'station', label: 'Estación ESP32' },
+  { id: 'dock', label: 'Muelle' },
+];
+
 const CROP_EMOJI = ['🌻', '🍅', '🥕', '🥬'];
 
 const SOUND_PRESETS: { label: string; emoji: string; mix: Mix }[] = [
@@ -752,6 +761,10 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         <h1>Daniel Eduardo — Ingeniero en Informática</h1>
         <p>Portafolio interactivo: una isla en ASCII para explorar. Desarrollo web full stack, IoT y soluciones a medida.</p>
         <a href="/clasico">Versión clásica del portafolio</a> · <a href="/proyectos">Proyectos</a> · <a href="/sobre-mi">Sobre mí</a>
+        <p>
+          Cómo jugar con teclado: las flechas o WASD mueven a Dui, el gato de Daniel; E o Enter conversa con lo que tengas cerca; Espacio corta el
+          pasto. Los botones «Ir a» y «Más lugares» llevan a Dui directo a cada sitio. Lo que hay cerca se anuncia solo.
+        </p>
       </div>
 
       <AnimatePresence>{!started && <StartScreen onStart={start} onClassic={() => navigate('/clasico')} coarse={coarse} />}</AnimatePresence>
@@ -832,6 +845,33 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             ))}
           </nav>
 
+          {/* Hidden until it takes focus with Tab (it follows "Ir a"), so it
+              helps keyboard players without crowding the screen. */}
+          {!dialog && !panel && (
+            <div className="absolute z-30 left-1/2 -translate-x-1/2 top-[150px] md:top-auto md:bottom-20">
+              <nav aria-label="Más lugares" className="sr-only focus-within:not-sr-only flex flex-wrap justify-center gap-1.5 rounded-full bg-[#fff8e7] p-1.5 shadow-[0_4px_0_rgba(91,70,54,0.25)]">
+                {MORE_PLACES.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => walkTo(p.id)}
+                    className="shrink-0 rounded-full bg-[#f0e2c8] px-3 py-1.5 text-[12.5px] md:text-sm font-extrabold text-[#6b4f3a] hover:bg-[#ead6b3]"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </nav>
+            </div>
+          )}
+
+          {/* The map is aria-hidden, so say what Dui is next to. Not while he
+              walks there on his own: the dialog opens by itself on arrival. */}
+          <p className="sr-only" aria-live="polite" aria-atomic="true">
+            {nearItem && !dialog && !panel && store.targetId !== nearItem.id
+              ? `Cerca: ${nearItem.label}. ${coarse ? 'Toca el botón' : 'Presiona E'} para ${nearItem.verb.charAt(0).toLowerCase()}${nearItem.verb.slice(1)} ${nearItem.label}.`
+              : ''}
+          </p>
+
           {!coarse && !dialog && !panel && (
             <div className="pointer-events-none absolute bottom-4 left-4 z-10 hidden lg:block rounded-2xl bg-[#fff8e7]/85 px-4 py-3 text-xs font-bold leading-relaxed text-[#6b4f3a]">
               <Kbd>WASD</Kbd> caminar · <Kbd>Shift</Kbd> correr
@@ -879,7 +919,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             </>
           )}
 
-          <div className="pointer-events-none absolute z-30 left-1/2 -translate-x-1/2 top-[110px] md:top-20 flex w-[min(360px,calc(100%-24px))] flex-col items-center gap-2">
+          <div role="status" aria-live="polite" className="pointer-events-none absolute z-30 left-1/2 -translate-x-1/2 top-[110px] md:top-20 flex w-[min(360px,calc(100%-24px))] flex-col items-center gap-2">
             <AnimatePresence>
               {toasts.map((t) => (
                 <motion.div
@@ -890,7 +930,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                   exit={{ opacity: 0, y: -10, scale: 0.95 }}
                   className="flex w-full items-center gap-3 rounded-2xl bg-[#fff8e7] px-4 py-2.5 text-[#6b4f3a] shadow-[0_4px_0_rgba(91,70,54,0.2)]"
                 >
-                  <span className="text-2xl">{t.icon}</span>
+                  <span aria-hidden="true" className="text-2xl">{t.icon}</span>
                   <div className="min-w-0">
                     <div className="text-sm font-black leading-tight">{t.title}</div>
                     <div className="text-xs font-bold opacity-75 leading-snug">{t.text}</div>

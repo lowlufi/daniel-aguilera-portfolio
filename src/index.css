@@ -88,10 +88,12 @@ button:focus-visible {
   overflow: hidden;
 }
 
-/* Chromium desktop: refractive distortion replaces the blur entirely. */
+/* Chromium desktop: refractive distortion replaces the blur entirely.
+   Not on modest devices (html.lite, set by the classic site): the SVG filter
+   re-runs on every video frame behind every card. */
 @supports (backdrop-filter: url(#test)) {
   @media (min-width: 769px) {
-    .liquid-glass-strong {
+    html:not(.lite) .liquid-glass-strong {
       backdrop-filter: url(#liquid-glass-distortion) saturate(200%);
       -webkit-backdrop-filter: saturate(200%);
     }
@@ -148,6 +150,9 @@ button:focus-visible {
   .liquid-glass-strong::before {
     animation: none;
   }
+}
+html.lite .liquid-glass-strong::before {
+  animation: none;
 }
 
 @media (max-width: 768px) {
@@ -224,6 +229,7 @@ button:focus-visible {
   --a-glint: #fff6c0; --a-red: #ff7a6b; --a-cyan: #6fe0f0; --a-yellow: #ffd23f; --a-orange: #ff9a3c;
   --a-pink: #ff8fb1; --a-white: #ffffff; --a-label: #fff8e7; --a-goal: #1d1206; --a-goal-bg: #ffd23f;
   --a-seen: #8ff08a; --a-rain: #9cc9ff; --a-dim: #4a6272;
+  --a-dui2: #ffcf9a; --a-smoke: #aebccb; --a-foam: #e6f6ff;
   background: var(--a-bg);
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Roboto Mono", "Droid Sans Mono", monospace;
   font-weight: 700;
@@ -242,6 +248,8 @@ button:focus-visible {
 .a-star { --c: var(--a-star); text-shadow: 0 0 6px var(--a-star); } .a-glint { --c: var(--a-glint); }
 .a-red { --c: var(--a-red); } .a-cyan { --c: var(--a-cyan); } .a-yellow { --c: var(--a-yellow); }
 .a-orange { --c: var(--a-orange); } .a-pink { --c: var(--a-pink); } .a-white { --c: var(--a-white); }
+/* Dui parpadeando, humo de la chimenea y espuma de las olas. */
+.a-dui2 { --c: var(--a-dui2); } .a-smoke { --c: var(--a-smoke); } .a-foam { --c: var(--a-foam); }
 .a-label { --c: var(--a-label); } .a-seen { --c: var(--a-seen); } .a-rain { --c: var(--a-rain); } .a-dim { --c: var(--a-dim); }
 /* La próxima meta de la libreta: resaltada, con un pulso suave. */
 .a-goal { --c: var(--a-goal); background: var(--a-goal-bg); animation: ascii-meta 1.4s ease-in-out infinite; }

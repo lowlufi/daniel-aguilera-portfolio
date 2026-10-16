@@ -68,7 +68,7 @@ const cellZ = (r: number) => Z0 + (r + 0.5) * CZ;
 type Ink =
   | 'sea' | 'sea2' | 'sand' | 'grass' | 'cut' | 'path' | 'wood' | 'tree' | 'pine' | 'bloom'
   | 'wall' | 'roof' | 'dui' | 'daniel' | 'star' | 'glint' | 'red' | 'cyan' | 'yellow' | 'orange'
-  | 'pink' | 'white' | 'label' | 'goal' | 'seen' | 'rain' | 'dim'
+  | 'pink' | 'white' | 'label' | 'goal' | 'seen' | 'rain' | 'dim' | 'dui2' | 'smoke' | 'foam'
   | `p${number}`;
 
 type Cell = { ch: string; ink: Ink };
@@ -82,15 +82,46 @@ function put(c: number, r: number, ch: string, ink: Ink) {
   if (c < 0 || r < 0 || c >= COLS || r >= ROWS) return;
   base[r * COLS + c] = { ch, ink };
 }
+// Top-left cell of a piece of art, so animated details can be placed on it.
+const artOrigin = (x: number, z: number, lines: string[]) => ({
+  c: toCol(x) - Math.floor(lines[0].length / 2),
+  r: toRow(z) - Math.floor(lines.length / 2),
+});
 function art(x: number, z: number, lines: string[], ink: Ink, roofInk?: Ink) {
-  const c0 = toCol(x) - Math.floor(lines[0].length / 2);
-  const r0 = toRow(z) - Math.floor(lines.length / 2);
-  lines.forEach((line, dr) =>
+  const { c: c0, r: r0 } = artOrigin(x, z, lines);
+  lines.forEach((line, dr) => {
+    // Spaces outside the drawing let the ground show through; spaces inside it
+    // are solid (grass used to sprout inside the workshop's sign).
+    const first = line.search(/\S/);
+    const last = line.length - 1 - [...line].reverse().join('').search(/\S/);
     [...line].forEach((ch, dc) => {
-      if (ch !== ' ') put(c0 + dc, r0 + dr, ch, dr < 2 && roofInk ? roofInk : ink);
-    }),
-  );
+      if (ch !== ' ' || (dc > first && dc < last)) put(c0 + dc, r0 + dr, ch, dr < 2 && roofInk ? roofInk : ink);
+    });
+  });
 }
+
+// Buildings. Same footprint as their colliders in world.ts (about ±3.4 m).
+const HOUSE_ART = ['  ____[]_  ', ' /       \\ ', '/_________\\', '| [+] [+] |', '|____n____|'];
+const WORKSHOP_ART = ['  _________  ', ' /=========\\ ', '/___________\\', '| TALLER {o}|', '|__[___]____|'];
+const CHIMNEY = (() => {
+  const o = artOrigin(HOUSE.x, HOUSE.z, HOUSE_ART);
+  return { c: o.c + HOUSE_ART[0].indexOf('['), r: o.r };
+})();
+const GEAR = (() => {
+  const o = artOrigin(WORKSHOP.x, WORKSHOP.z, WORKSHOP_ART);
+  return { c: o.c + WORKSHOP_ART[3].indexOf('{') + 1, r: o.r + 3 };
+})();
+
+// Sea cells, shared so the draw allocates nothing for them.
+const SEA: Cell = { ch: '~', ink: 'sea' };
+const SEA_LIGHT: Cell = { ch: '~', ink: 'sea2' };
+const SWELL: Cell = { ch: '-', ink: 'sea2' };
+const SEA_CALM: Cell = { ch: ' ', ink: 'sea' };
+const FOAM: Cell = { ch: '~', ink: 'foam' };
+const FOAM_DOT: Cell = { ch: '.', ink: 'foam' };
+
+// A fixed per-cell hash: breaks up the sea's pattern without random flicker.
+const hash = (c: number, r: number) => (((c * 73856093) ^ (r * 19349663)) >>> 0) % 251;
 
 (function buildBase() {
   for (let r = 0; r < ROWS; r++)
@@ -125,8 +156,8 @@ function art(x: number, z: number, lines: string[], ink: Ink, roofInk?: Ink) {
       put(c + 1, r, ch, ink);
     }
   }
-  art(HOUSE.x, HOUSE.z, ['  ______  ', ' /      \\ ', '/________\\', '| [] [] |', '|___##___|'], 'wall', 'roof');
-  art(WORKSHOP.x, WORKSHOP.z, ['  _______  ', ' /=======\\ ', '/_________\\', '| TALLER  |', '|___[_]___|'], 'wall', 'roof');
+  art(HOUSE.x, HOUSE.z, HOUSE_ART, 'wall', 'roof');
+  art(WORKSHOP.x, WORKSHOP.z, WORKSHOP_ART, 'wall', 'roof');
   art(PLAZA.x, PLAZA.z, ['[===]'], 'wood');
   art(WELCOME.x, WELCOME.z, ['T'], 'label');
   art(STATION.x, STATION.z, ['!'], 'cyan');
@@ -143,10 +174,19 @@ function art(x: number, z: number, lines: string[], ink: Ink, roofInk?: Ink) {
   }
 })();
 
+// Sea cells close to the sand, where the waves break.
+const shore = new Uint8Array(COLS * ROWS);
+for (let r = 0; r < ROWS; r++)
+  for (let c = 0; c < COLS; c++) {
+    const i = r * COLS + c;
+    if (base[i].ink === 'sea' && Math.hypot(cellX(c), cellZ(r)) < ISLAND_R + 1.7) shore[i] = 1;
+  }
+
 type Label = { text: string; x: number; z: number; goal?: InteractableId; nearOnly?: number };
 const LABELS: Label[] = [
-  { text: 'Casa de Daniel', x: HOUSE.x, z: HOUSE.z - 3.6 },
-  { text: 'Taller', x: WORKSHOP.x, z: WORKSHOP.z - 3.6 },
+  // Two rows above the roof: the row in between is the chimney's smoke.
+  // The workshop needs no label, its sign says TALLER.
+  { text: 'Casa de Daniel', x: HOUSE.x, z: HOUSE.z - 4.8 },
   { text: 'Proyectos', x: PLAZA.x, z: PLAZA.z - 1.2, goal: 'board' },
   { text: 'Huerto de habilidades', x: GARDEN.x, z: GARDEN.z - 4.4, goal: 'garden' },
   { text: 'Buzón', x: MAILBOX.x, z: MAILBOX.z - 1.2, goal: 'mailbox' },
@@ -160,6 +200,15 @@ const LABELS: Label[] = [
 
 const IDLE_HINT_AFTER = 8;
 const REGROW_AFTER = 45;
+// Dui curls up for a nap after this long without moving.
+const NAP_AFTER = 20;
+
+// What Daniel mutters while he works. ASCII only, like the rest of the map.
+const MUTTERS = ['hola!', 'cafe?', 'compilando...', 'Dui, ven!', 'npm run dev', 'ya casi...', 'y si lo hago en Rust?', 'commit y a dormir', 'funciona en mi PC'];
+// Small steps Daniel takes around his spot (columns); 0 is the real spot.
+const PACE = [0, 1, 0, -1, 0, 0, 1];
+// The gear in the workshop spins like a terminal spinner.
+const SPIN = ['-', '\\', '|', '/'];
 
 const esc = (ch: string) => (ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '&' ? '&amp;' : ch);
 
@@ -183,6 +232,16 @@ export default function AsciiScene({ store, events, onWalkTo, weather, reduceMot
     lastDraw: 0,
     dirty: true,
     time: 0,
+    // Dui: steps walked (drives the tail) and time standing still.
+    walked: 0,
+    still: 0,
+    tailSide: -1,
+    // Daniel: where he stands now and what he says, if anything.
+    pace: 0,
+    paceAt: 6,
+    sayAt: 5,
+    say: '',
+    sayUntil: 0,
   });
 
   /* Hooks the UI calls into: cutting, stars, particle bursts. */
@@ -357,6 +416,38 @@ export default function AsciiScene({ store, events, onWalkTo, weather, reduceMot
       }
       if (want > 0) st.facing = Math.atan2(s.dir.x, s.dir.y);
 
+      // Dui's tail wags once per step, and trails on the side he walks away
+      // from. A step does not ask for a draw of its own: walking already
+      // redraws on every new cell, and extra draws cost more than a late wag.
+      if (st.speed > 0.3) {
+        s.walked += st.speed * dt;
+        if (Math.abs(s.dir.x) > 0.3) s.tailSide = s.dir.x > 0 ? -1 : 1;
+        if (s.still >= NAP_AFTER) s.dirty = true;
+        s.still = 0;
+      } else s.still += dt;
+
+      // Daniel paces near his door and mutters now and then, but stands still
+      // facing you while you talk to him (or when motion should be reduced).
+      const calm = props.current.reduceMotion;
+      if (s.time > s.paceAt) {
+        s.paceAt = s.time + 6 + Math.random() * 6;
+        const next = calm || st.nearId === 'daniel' ? 0 : (s.pace + 1) % PACE.length;
+        if (PACE[next] !== PACE[s.pace]) s.dirty = true;
+        s.pace = next;
+      }
+      if (s.say && (s.time > s.sayUntil || st.frozen)) {
+        s.say = '';
+        s.dirty = true;
+      } else if (!s.say && s.time > s.sayAt && !st.frozen) {
+        s.sayAt = s.time + 11 + Math.random() * 9;
+        // Only worth saying if Dui is around to hear it.
+        if (Math.hypot(DANIEL.x - st.pos.x, DANIEL.z - st.pos.z) < 16) {
+          s.say = MUTTERS[Math.floor(Math.random() * MUTTERS.length)];
+          s.sayUntil = s.time + 3.5;
+          s.dirty = true;
+        }
+      }
+
       // Cutting: hold Space / F or the on-screen scissors.
       st.swing = Math.max(0, st.swing - dt);
       const cutting = !st.frozen && (k.has(' ') || k.has('f') || st.cutHeld);
@@ -461,15 +552,38 @@ export default function AsciiScene({ store, events, onWalkTo, weather, reduceMot
       // Project signs: read ones turn green.
       PROJECT_SIGNS.forEach((sg, i) => at(toCol(sg.x), toRow(sg.z), 'T', st.seenProjects.has(sg.project.id) ? 'seen' : (`p${i % 8}` as Ink)));
 
-      // Stars: hidden ones glint now and then through the grass.
+      // Stars. Revealed ones twinkle and throw a sparkle to each side now and
+      // then; hidden ones glint through the grass, '.' then '+' then '.'.
       s.stars.forEach((sp, i) => {
         if (sp.taken) return;
         const p = STAR_SPOTS[i];
-        if (sp.revealed) at(toCol(p.x), toRow(p.z), '*', (t + i) % 2 ? 'star' : 'yellow');
-        else if (!still && Math.sin(s.time * 2.2 + i * 1.7) > 0.93) at(toCol(p.x), toRow(p.z), '+', 'glint');
+        const c = toCol(p.x);
+        const r = toRow(p.z);
+        if (sp.revealed) {
+          const f = (t + i) % 4;
+          at(c, r, f === 3 ? '+' : '*', f === 1 ? 'glint' : 'star');
+          if (f === 2) {
+            at(c - 1, r, '.', 'glint');
+            at(c + 1, r, '.', 'glint');
+          }
+        } else if (!still) {
+          const g = Math.sin(s.time * 2.2 + i * 1.7);
+          if (g > 0.8) at(c, r, g > 0.93 ? '+' : '.', 'glint');
+        }
       });
 
-      at(toCol(DANIEL.x), toRow(DANIEL.z), 'D', 'daniel');
+      // Daniel, a step off his spot now and then.
+      const dc = toCol(DANIEL.x) + PACE[s.pace];
+      const dr = toRow(DANIEL.z);
+      at(dc, dr, 'D', 'daniel');
+
+      // Smoke from the chimney and the workshop's spinning gear.
+      if (!still) {
+        const f = t % 4;
+        if (f < 2) at(CHIMNEY.c + f, CHIMNEY.r - 1, f ? ')' : '(', 'smoke');
+        else if (f === 2) at(CHIMNEY.c + 1, CHIMNEY.r - 1, '~', 'smoke');
+        at(GEAR.c, GEAR.r, SPIN[t % 4], 'cyan');
+      }
 
       for (const p of s.particles) at(toCol(p.x), toRow(p.z), p.ch, p.ink);
 
@@ -485,20 +599,60 @@ export default function AsciiScene({ store, events, onWalkTo, weather, reduceMot
         for (const d of s.drops) at(d.c, d.r, w === 'lluvia' ? '/' : '.', w === 'lluvia' ? 'rain' : 'white');
       } else s.drops.length = 0;
 
-      // Labels: always for landmarks, near-only for project signs and the dock.
-      for (const l of LABELS) {
-        const d = Math.hypot(l.x - st.pos.x, l.z - st.pos.z);
-        if (l.nearOnly && d > l.nearOnly) continue;
-        const isGoal = !!l.goal && l.goal === st.goalId;
-        const text = isGoal ? `> ${l.text} <` : l.text;
-        const c0 = toCol(l.x) - Math.floor(text.length / 2);
-        const r = toRow(l.z);
-        [...text].forEach((ch, j) => at(c0 + j, r, ch, isGoal ? 'goal' : 'label'));
+      /*
+       * Labels. They used to be stamped in list order, so two close ones
+       * overwrote each other ("Huerto" over "Estación"), and on a 360 px phone
+       * a label by the screen's edge was cut in half. Now the most useful go
+       * first (the notebook's goal, then what is near), each slides inside the
+       * screen when its place is on screen, and one that would cover another
+       * moves a row up or down, or waits until there is room.
+       */
+      const taken: { r: number; a: number; b: number }[] = [];
+      const label = (text: string, col: number, row: number, ink: Ink, start?: number) => {
+        const n = text.length;
+        let a = start ?? col - Math.floor(n / 2);
+        // A place off screen shows no label: half of one ("Cas") only confused.
+        if (col < v.c0 || col >= v.c0 + v.cols) return;
+        if (n <= v.cols) a = Math.min(Math.max(a, v.c0), v.c0 + v.cols - n);
+        for (const r of [row, row - 1, row + 1]) {
+          if (taken.some((o) => o.r === r && a <= o.b + 1 && a + n - 1 >= o.a - 1)) continue;
+          taken.push({ r, a, b: a + n - 1 });
+          for (let j = 0; j < n; j++) at(a + j, r, text[j], ink);
+          return;
+        }
+      };
+      const shown = LABELS.filter((l) => !l.nearOnly || Math.hypot(l.x - st.pos.x, l.z - st.pos.z) <= l.nearOnly);
+      const rank = (l: Label) => (l.goal && l.goal === st.goalId ? 0 : l.nearOnly ? 1 : 2);
+      shown.sort((a, b) => rank(a) - rank(b));
+      for (const l of shown) {
+        const isGoal = rank(l) === 0;
+        const col = l.goal === 'daniel' ? dc : toCol(l.x);
+        label(isGoal ? `> ${l.text} <` : l.text, col, toRow(l.z), isGoal ? 'goal' : 'label');
+      }
+      // Daniel's speech bubble, beside him (above is his label and his house).
+      // On his right, or on his left when the screen ends first.
+      if (s.say) {
+        const text = `(${s.say})`;
+        label(text, dc, dr, 'white', dc + 2 + text.length <= v.c0 + v.cols ? dc + 2 : dc - 1 - text.length);
       }
 
-      // Dui last, so no label or raindrop ever hides him; and the swipe in
-      // front of him while cutting.
-      at(pc, pr, '@', 'dui');
+      // Dui last, so no label or raindrop ever hides him. His tail goes only on
+      // open ground: it must never cover Daniel, a sign or a label.
+      const tc = pc + s.tailSide;
+      const ti = pr * COLS + tc;
+      if (tc >= 0 && tc < COLS && !over.has(ti) && ' ":,.='.includes(base[ti].ch)) {
+        const moving = st.speed > 0.3;
+        const wag = still ? 0 : moving ? Math.floor(s.walked / 0.7) % 2 : Math.floor(s.time / 1.4) % 3 === 2 ? 1 : 0;
+        at(tc, pr, wag ? '-' : '~', 'dui');
+      }
+      // Asleep after a long while still: a 'z' floats up, then a 'Z'.
+      if (!still && s.still > NAP_AFTER) {
+        const f = Math.floor(s.time * 1.5) % 3;
+        if (f < 2) at(pc - s.tailSide * (f + 1), pr - 1 - f, f ? 'Z' : 'z', 'white');
+      }
+      // Blinks: a short dim frame every few seconds while he stands still.
+      const blink = !still && st.speed < 0.3 && s.time % 4.3 < 0.2;
+      at(pc, pr, '@', blink ? 'dui2' : 'dui');
       if (st.swing > 0) {
         const fx = st.pos.x + Math.sin(st.facing) * 1;
         const fz = st.pos.z + Math.cos(st.facing) * 1.2;
@@ -508,19 +662,33 @@ export default function AsciiScene({ store, events, onWalkTo, weather, reduceMot
       // Fog: only what is close to Dui keeps its color.
       const fogR = w === 'niebla' ? 11 : Infinity;
 
+      /*
+       * The sea. A fixed hash per cell breaks the old diagonal stripes into
+       * swells that drift past; next to the sand the waves break in foam.
+       */
+      const sea = (c: number, r: number, near: boolean): Cell => {
+        const h = hash(c, r);
+        if (near) {
+          const f = (h + t) % 6;
+          return f === 0 ? FOAM_DOT : f === 1 ? FOAM : SEA_LIGHT;
+        }
+        const k = (c + r * 2 + (h & 3) + t) % 11;
+        return k === 0 ? SWELL : k === 1 ? SEA_LIGHT : k === 6 && h % 5 === 0 ? SEA_CALM : SEA;
+      };
+
       let html = '';
       for (let r = v.r0; r < v.r0 + v.rows; r++) {
         let run = '';
         let runInk: Ink | '' = '';
         for (let c = v.c0; c < v.c0 + v.cols; c++) {
           let cell: Cell;
-          if (c < 0 || r < 0 || c >= COLS || r >= ROWS) cell = { ch: (c + r + t) % 3 ? '~' : '-', ink: 'sea' };
+          if (c < 0 || r < 0 || c >= COLS || r >= ROWS) cell = sea(c, r, false);
           else {
             const i = r * COLS + c;
             cell = over.get(i) ?? base[i];
             if (cell === base[i]) {
               if (cell.ch === '"' && s.cutAt[i] >= 0) cell = { ch: ',', ink: 'cut' };
-              else if (cell.ink === 'sea') cell = (c * 7 + r * 3 + t) % 5 === 0 ? { ch: '-', ink: 'sea2' } : cell;
+              else if (cell.ink === 'sea') cell = sea(c, r, shore[i] === 1);
             }
           }
           let ink = cell.ink;
