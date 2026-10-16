@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type WheelEvent as ReactWheelEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import * as THREE from 'three';
-import { Canvas } from '@react-three/fiber';
-import { PerformanceMonitor } from '@react-three/drei';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, X } from 'lucide-react';
 import { PROJECTS, SKILLS, SOCIAL } from '../data';
-import Scene from './Scene';
-import { LabelsOverlay } from './labels';
+import AsciiScene from './AsciiScene';
 import { AMBIENTS, NOISE_COLORS, initAudio, setNoiseColor as setAudioNoiseColor, pauseAudio, setAmbient, setAmbientVolume, setMix as setAudioMix, setMuted as setAudioMuted, sfx, type AmbientId, type Mix } from './audio';
 import { WEATHERS, WEATHER_CONFIG, stepAtmosphere, type WeatherId } from './weather';
 import { createStore, type GameEvents, type Meteo } from './store';
@@ -148,15 +144,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     for (const i of p.stars) store.starsTaken.add(i);
     return p;
   }, [store]);
-  const quality = useMemo<'high' | 'low'>(() => {
-    const coarse = window.matchMedia('(pointer: coarse)').matches;
-    return coarse || (navigator.hardwareConcurrency || 4) <= 4 ? 'low' : 'high';
-  }, []);
   const coarse = useCoarsePointer();
-  // Adaptive quality: sharper and richer while the frame rate holds, lighter when it doesn't.
-  const maxDpr = quality === 'high' ? 2 : 1.5;
-  const [dpr, setDpr] = useState(Math.min(maxDpr, window.devicePixelRatio || 1));
-  const [rich, setRich] = useState(true);
 
   const [started, setStarted] = useState(false);
   const [near, setNear] = useState<InteractableId | null>(null);
@@ -195,7 +183,6 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   useEffect(() => {
     const n = nextStamp(stamps);
     const it = n ? INTERACTABLES.find((x) => x.id === n.target) : undefined;
-    store.duiGoal = it ? new THREE.Vector3(it.x, 0, it.z) : null;
     store.goalId = it ? it.id : null;
   }, [stamps, store]);
 
@@ -754,101 +741,16 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
 
   const nearItem = near ? INTERACTABLES.find((x) => x.id === near) : null;
 
-  // Hold and drag on the island to orbit the camera; wheel or pinch to zoom.
-  // A short press without movement still counts as a click (walk there).
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef(0);
-  const onCanvasPointerDown = (e: ReactPointerEvent) => {
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    store.dragged = false;
-    if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      pinch.current = Math.hypot(a.x - b.x, a.y - b.y);
-    }
-  };
-  useEffect(() => {
-    const move = (e: PointerEvent) => {
-      const p = pointers.current.get(e.pointerId);
-      if (!p || !startedRef.current) return;
-      const dx = e.clientX - p.x;
-      const dy = e.clientY - p.y;
-      p.x = e.clientX;
-      p.y = e.clientY;
-      if (pointers.current.size === 2) {
-        const [a, b] = [...pointers.current.values()];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinch.current > 0) store.camDist = Math.min(26, Math.max(6, store.camDist * (pinch.current / d)));
-        pinch.current = d;
-        store.dragged = true;
-        return;
-      }
-      if (!store.dragged && Math.abs(dx) + Math.abs(dy) < 3) return;
-      store.dragged = true;
-      document.body.style.cursor = 'grabbing';
-      store.camYaw -= dx * 0.0065;
-      store.camPitch = Math.min(1.25, Math.max(0.12, store.camPitch + dy * 0.0045));
-    };
-    const up = (e: PointerEvent) => {
-      pointers.current.delete(e.pointerId);
-      pinch.current = 0;
-      if (document.body.style.cursor === 'grabbing') document.body.style.cursor = '';
-      // Let the click handler see `dragged` before it resets.
-      window.setTimeout(() => (store.dragged = false), 0);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-    return () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
-    };
-  }, [store]);
-  const onWheel = (e: ReactWheelEvent) => {
-    if (!startedRef.current) return;
-    store.camDist = Math.min(26, Math.max(6, store.camDist * (1 + e.deltaY * 0.0012)));
-  };
-
   return (
     <MotionConfig reducedMotion="user">
     <div className="absolute inset-0 font-cozy select-none">
-      <Canvas
-        onPointerDown={onCanvasPointerDown}
-        onWheel={onWheel}
-        shadows={quality === 'high'}
-        flat
-        dpr={dpr}
-        camera={{ fov: 50, position: [30, 17, 30], near: 0.1, far: 900 }}
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
-        // Nothing moves behind the contact composer; no reason to keep
-        // rendering (and running post-processing) at full rate under it.
-        frameloop={paused ? 'never' : 'always'}
-        onContextMenu={(e) => e.preventDefault()}
-        style={{ touchAction: 'none' }}
-      >
-        <PerformanceMonitor
-          flipflops={3}
-          onIncline={() => {
-            setDpr(Math.min(maxDpr, window.devicePixelRatio || 1));
-            setRich(true);
-          }}
-          onDecline={() => {
-            setDpr(1);
-            setRich(false);
-          }}
-          onFallback={() => {
-            setDpr(1);
-            setRich(false);
-          }}
-        />
-        <Scene store={store} events={events} quality={quality} rich={rich} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} />
-      </Canvas>
-      <LabelsOverlay />
+      {/* La isla en ASCII: corre en cualquier equipo, sin WebGL. */}
+      <AsciiScene store={store} events={events} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} paused={paused} />
 
       {/* Crawlable summary for search engines and screen readers. */}
       <div className="sr-only">
         <h1>Daniel Eduardo — Ingeniero en Informática</h1>
-        <p>Portafolio interactivo: una isla 3D para explorar. Desarrollo web full stack, IoT y soluciones a medida.</p>
+        <p>Portafolio interactivo: una isla en ASCII para explorar. Desarrollo web full stack, IoT y soluciones a medida.</p>
         <a href="/clasico">Versión clásica del portafolio</a> · <a href="/proyectos">Proyectos</a> · <a href="/sobre-mi">Sobre mí</a>
       </div>
 
@@ -936,7 +838,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               <br />
               <Kbd>Espacio</Kbd> cortar pasto · <Kbd>E</Kbd> interactuar
               <br />
-              <span className="opacity-80">Clic en el suelo: caminar · Arrastra: girar cámara · Rueda: zoom</span>
+              <span className="opacity-80">Clic en el mapa: caminar · Clic en Dui (@): cariño</span>
             </div>
           )}
 

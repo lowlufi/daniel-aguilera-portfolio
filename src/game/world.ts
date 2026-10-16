@@ -237,3 +237,22 @@ export function groundHeight(x: number, z: number) {
 }
 
 export const STAR_COUNT = 12;
+
+// Where the stars hide under the grass. Same seed, same spots on every visit,
+// so progress saved by index still points at the right star.
+export const STAR_SPOTS = (() => {
+  const rnd = mulberry32(2024);
+  const out: { x: number; z: number }[] = [];
+  let guard = 0;
+  while (out.length < STAR_COUNT && guard++ < 5000) {
+    const a = rnd() * Math.PI * 2;
+    const r = 5 + Math.sqrt(rnd()) * 18.5;
+    const x = Math.cos(a) * r;
+    const z = Math.sin(a) * r;
+    if (blocksGrass(x, z)) continue;
+    if (COLLIDERS.some((c) => (c.x - x) ** 2 + (c.z - z) ** 2 < (c.r + 1.2) ** 2)) continue;
+    if (out.some((p) => (p.x - x) ** 2 + (p.z - z) ** 2 < 36)) continue;
+    out.push({ x, z });
+  }
+  return out;
+})();

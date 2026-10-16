@@ -35,14 +35,10 @@ function setMeta(selector: string, attr: string, value: string) {
   if (el) el.setAttribute(attr, value);
 }
 
+// The island is drawn with text now, so any browser runs it: no more WebGL
+// check sending some visitors straight to the classic version.
 function canRunGame() {
-  if (typeof window === 'undefined') return false;
-  try {
-    const c = document.createElement('canvas');
-    return !!(c.getContext('webgl2') || c.getContext('webgl'));
-  } catch {
-    return false;
-  }
+  return typeof window !== 'undefined';
 }
 import {
   Github,
@@ -964,7 +960,7 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
 
   const items = useMemo<CommandItem[]>(() => {
     const pages: CommandItem[] = [
-      { id: 'p:game', group: 'Páginas', label: 'Modo juego (isla)', icon: Gamepad2, keywords: 'juego isla 3d', action: () => navigate('/') },
+      { id: 'p:game', group: 'Páginas', label: 'Modo juego (isla)', icon: Gamepad2, keywords: 'juego isla ascii', action: () => navigate('/') },
       { id: 'p:home', group: 'Páginas', label: 'Inicio (versión clásica)', icon: Home, action: () => navigate('/clasico') },
       { id: 'p:projects', group: 'Páginas', label: 'Proyectos', icon: Folder, action: () => navigate('/proyectos') },
       { id: 'p:about', group: 'Páginas', label: 'Sobre mí', icon: User, action: () => navigate('/sobre-mi') },

@@ -39,7 +39,7 @@ button:focus-visible {
 
 /* The island UI is cream (#fff8e7): a white ring disappears on it, so
    keyboard users couldn't see where focus was on the HUD, dialogs or sheets.
-   Dark brown reads on cream and on the 3D scene alike. */
+   Dark brown reads on cream and on the island alike. */
 .font-cozy :focus-visible,
 .font-cozy a:focus-visible,
 .font-cozy button:focus-visible {
@@ -213,3 +213,39 @@ button:focus-visible {
     animation: none;
   }
 }
+
+/* ── Isla en ASCII (src/game/AsciiScene.tsx) ──────────────────────────────
+   Una paleta por clima. Los colores de texto cumplen 4,5:1 sobre su fondo. */
+.ascii-isla {
+  --a-bg: #0f2a3a;
+  --a-sea: #3f8fc0; --a-sea2: #8cc8ea; --a-sand: #e8d29a; --a-grass: #7fcf6a; --a-cut: #4f8a43;
+  --a-path: #c9b18a; --a-wood: #c8945c; --a-tree: #5fbf4f; --a-pine: #3fa66a; --a-bloom: #f3a6c8;
+  --a-wall: #f1e3c8; --a-roof: #e8875f; --a-dui: #ff9a3c; --a-daniel: #e0a07a; --a-star: #ffe066;
+  --a-glint: #fff6c0; --a-red: #ff7a6b; --a-cyan: #6fe0f0; --a-yellow: #ffd23f; --a-orange: #ff9a3c;
+  --a-pink: #ff8fb1; --a-white: #ffffff; --a-label: #fff8e7; --a-goal: #1d1206; --a-goal-bg: #ffd23f;
+  --a-seen: #8ff08a; --a-rain: #9cc9ff; --a-dim: #4a6272;
+  background: var(--a-bg);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Roboto Mono", "Droid Sans Mono", monospace;
+  font-weight: 700;
+}
+.ascii-isla.clima-atardecer { --a-bg: #2a1a2e; --a-sea: #d9826b; --a-sea2: #ffc39a; --a-grass: #b9c76a; --a-cut: #7f8a43; }
+.ascii-isla.clima-noche { --a-bg: #070b18; --a-sea: #2f5f9a; --a-sea2: #6f9fd8; --a-sand: #9a8c6c; --a-grass: #4f9a5f; --a-cut: #35663f; --a-tree: #3f8f4f; --a-pine: #2f7f5f; --a-wall: #b8b0a0; --a-path: #8a7c64; }
+.ascii-isla.clima-lluvia { --a-bg: #132026; --a-sea: #4f7f9a; --a-grass: #6fb07a; }
+.ascii-isla.clima-niebla { --a-bg: #2a3238; --a-dim: #5c6870; }
+.ascii-isla.clima-nieve { --a-bg: #1c2a38; --a-grass: #dfeef5; --a-cut: #9fb6c2; --a-tree: #8fcfa0; --a-pine: #7fbf9f; }
+.ascii-isla [class^="a-"] { color: var(--c); }
+.a-sea { --c: var(--a-sea); } .a-sea2 { --c: var(--a-sea2); } .a-sand { --c: var(--a-sand); }
+.a-grass { --c: var(--a-grass); } .a-cut { --c: var(--a-cut); } .a-path { --c: var(--a-path); }
+.a-wood { --c: var(--a-wood); } .a-tree { --c: var(--a-tree); } .a-pine { --c: var(--a-pine); }
+.a-bloom { --c: var(--a-bloom); } .a-wall { --c: var(--a-wall); } .a-roof { --c: var(--a-roof); }
+.a-dui { --c: var(--a-dui); text-shadow: 0 0 8px var(--a-dui); } .a-daniel { --c: var(--a-daniel); }
+.a-star { --c: var(--a-star); text-shadow: 0 0 6px var(--a-star); } .a-glint { --c: var(--a-glint); }
+.a-red { --c: var(--a-red); } .a-cyan { --c: var(--a-cyan); } .a-yellow { --c: var(--a-yellow); }
+.a-orange { --c: var(--a-orange); } .a-pink { --c: var(--a-pink); } .a-white { --c: var(--a-white); }
+.a-label { --c: var(--a-label); } .a-seen { --c: var(--a-seen); } .a-rain { --c: var(--a-rain); } .a-dim { --c: var(--a-dim); }
+/* La próxima meta de la libreta: resaltada, con un pulso suave. */
+.a-goal { --c: var(--a-goal); background: var(--a-goal-bg); animation: ascii-meta 1.4s ease-in-out infinite; }
+@keyframes ascii-meta { 50% { background: #ffe9a8; } }
+@media (prefers-reduced-motion: reduce) { .a-goal { animation: none; } }
+.a-p0 { --c: #f0a45d; } .a-p1 { --c: #7cc6e8; } .a-p2 { --c: #9fd67a; } .a-p3 { --c: #e37b8b; }
+.a-p4 { --c: #b28ee0; } .a-p5 { --c: #f2cf5b; } .a-p6 { --c: #6fd1c1; } .a-p7 { --c: #c9a27a; }

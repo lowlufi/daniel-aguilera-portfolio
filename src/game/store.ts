@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { SPAWN, type InteractableId } from './world';
 
-// Mutable per-frame state shared between the 3D scene and the HUD.
+// Mutable per-frame state shared between the island scene and the HUD.
 // Lives outside React state so the render loop never triggers re-renders.
 export type GameStore = {
   pos: THREE.Vector3;
@@ -16,11 +16,6 @@ export type GameStore = {
   started: boolean;
   nearId: InteractableId | null;
   grassTotal: number;
-  // Orbit camera around the player (radians / world units).
-  camYaw: number;
-  camPitch: number;
-  camDist: number;
-  dragged: boolean;
   // Garden: grows with each watering, resets on harvest.
   garden: { growth: number; wateredAt: number; harvestedAt: number };
   // Particle bursts requested by the UI (watering, harvest, party) or Dui (hearts).
@@ -34,8 +29,7 @@ export type GameStore = {
   // collected stars stay gone after a reload.
   seenProjects: Set<number>;
   starsTaken: Set<number>;
-  // The next missing notebook stamp: its name tag lights up with a paw.
-  duiGoal: THREE.Vector3 | null;
+  // The next missing notebook stamp: its name tag is highlighted on the map.
   goalId: InteractableId | null;
   // Seconds left of the current grass swipe (Dui pounces while it's > 0).
   swing: number;
@@ -55,11 +49,6 @@ export function createStore(): GameStore {
     started: false,
     nearId: null,
     grassTotal: 1,
-    camYaw: 0,
-    camPitch: 0.5,
-    // Framed for Dui, who is smaller than the villagers the island was built around.
-    camDist: 9,
-    dragged: false,
     garden: { growth: 1, wateredAt: -99, harvestedAt: -99 },
     burst: () => {},
     meteo: null,
@@ -67,7 +56,6 @@ export function createStore(): GameStore {
     revealAt: () => {},
     seenProjects: new Set(),
     starsTaken: new Set(),
-    duiGoal: null,
     goalId: null,
     swing: 0,
   };
