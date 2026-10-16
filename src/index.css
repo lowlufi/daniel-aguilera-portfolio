@@ -88,10 +88,12 @@ button:focus-visible {
   overflow: hidden;
 }
 
-/* Chromium desktop: refractive distortion replaces the blur entirely. */
+/* Chromium desktop: refractive distortion replaces the blur entirely.
+   Not on modest devices (html.lite, set by the classic site): the SVG filter
+   re-runs on every video frame behind every card. */
 @supports (backdrop-filter: url(#test)) {
   @media (min-width: 769px) {
-    .liquid-glass-strong {
+    html:not(.lite) .liquid-glass-strong {
       backdrop-filter: url(#liquid-glass-distortion) saturate(200%);
       -webkit-backdrop-filter: saturate(200%);
     }
@@ -148,6 +150,9 @@ button:focus-visible {
   .liquid-glass-strong::before {
     animation: none;
   }
+}
+html.lite .liquid-glass-strong::before {
+  animation: none;
 }
 
 @media (max-width: 768px) {
