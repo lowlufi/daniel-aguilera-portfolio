@@ -536,7 +536,16 @@ export default function AsciiScene({ store, events, onWalkTo, weather, reduceMot
       const pc = toCol(st.pos.x);
       const pr = toRow(st.pos.z);
       v.c0 = COLS <= v.cols ? Math.floor((COLS - v.cols) / 2) : Math.min(Math.max(0, pc - Math.floor(v.cols / 2)), COLS - v.cols);
-      v.r0 = ROWS <= v.rows ? Math.floor((ROWS - v.rows) / 2) : Math.min(Math.max(0, pr - Math.floor(v.rows / 2)), ROWS - v.rows);
+      // The HUD covers the top of the screen (two rows of buttons on a phone)
+      // and the joystick or nav the bottom: let the camera run past the map's
+      // edges by that much, so the workshop and the dock never end up under
+      // them. Past the edge it draws open sea.
+      const narrow = v.w < 768;
+      const padTop = Math.ceil((narrow ? 150 : 64) / v.ch);
+      const padBottom = Math.ceil((narrow ? 140 : 72) / v.ch);
+      v.r0 = ROWS + padTop + padBottom <= v.rows
+        ? Math.floor((ROWS - v.rows) / 2)
+        : Math.min(Math.max(-padTop, pr - Math.floor(v.rows / 2)), ROWS - v.rows + padBottom);
 
       const over = new Map<number, Cell>();
       const at = (c: number, r: number, ch: string, ink: Ink) => {
