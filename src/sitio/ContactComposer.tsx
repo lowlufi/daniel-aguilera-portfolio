@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ArrowUpRight, Mail, Sparkles, X, Zap, type LucideIcon } from 'lucide-react';
 import { SOCIAL } from '../data';
+import { trapTab } from './foco';
 
 type ContactReason = 'proyecto' | 'colaboracion' | 'saludo';
 
@@ -16,6 +17,7 @@ export default function ContactComposer({ open, onClose }: { open: boolean; onCl
   const [name, setName] = useState('');
   const [message, setMessage] = useState('');
   const [copied, setCopied] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) {
@@ -23,7 +25,15 @@ export default function ContactComposer({ open, onClose }: { open: boolean; onCl
       setName('');
       setMessage('');
       setCopied(false);
+      return;
     }
+    // El foco entra al diálogo al abrir y vuelve al botón que lo abrió al cerrar.
+    const opener = document.activeElement as HTMLElement | null;
+    const t = setTimeout(() => panelRef.current?.focus(), 30);
+    return () => {
+      clearTimeout(t);
+      if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+    };
   }, [open]);
 
   const subject = CONTACT_REASONS[reason].subject;
@@ -59,6 +69,8 @@ export default function ContactComposer({ open, onClose }: { open: boolean; onCl
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+      } else if (e.key === 'Tab') {
+        trapTab(e, panelRef.current);
       }
     }
     window.addEventListener('keydown', onKey);
@@ -95,8 +107,10 @@ export default function ContactComposer({ open, onClose }: { open: boolean; onCl
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            ref={panelRef}
+            tabIndex={-1}
             onClick={(e) => e.stopPropagation()}
-            className="liquid-glass-strong relative w-full max-w-lg rounded-2xl overflow-hidden flex flex-col max-h-[94svh]"
+            className="liquid-glass-strong relative w-full max-w-lg rounded-2xl overflow-hidden flex flex-col max-h-[94svh] outline-none"
           >
             <div className="flex items-start justify-between px-5 md:px-6 py-4 border-b border-white/10 shrink-0">
               <div>
