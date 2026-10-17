@@ -11,6 +11,7 @@ import {
 import Lenis from 'lenis';
 import { PROJECTS, SKILLS, SOCIAL, type Project } from '../data';
 import { isModestDevice, isSlowConnection } from './equipo';
+import { trapTab } from './foco';
 import {
   Github,
   Linkedin,
@@ -69,6 +70,8 @@ const THEME_LABELS: Record<Theme, string> = {
 
 const FADE_MS = 700;
 const SWAP_LEAD_S = 0.7;
+// Fecha fija de la política de privacidad: se cambia a mano cuando cambia el texto.
+const PRIVACY_UPDATED = 'octubre de 2026';
 
 
 function useCanHover() {
@@ -198,7 +201,7 @@ function ProjectCard({ project, index, reduceMotion, canHover, compact = false }
           </div>
 
           <h3 className={`relative ${titleClass} mb-3 font-display tracking-tight`}>{project.title}</h3>
-          <p className={`relative leading-relaxed font-light ${bodyClass} flex-1 text-white/75`}>
+          <p className={`relative leading-relaxed font-light ${bodyClass} flex-1 text-white/80`}>
             {project.description}
           </p>
 
@@ -259,7 +262,7 @@ function HomePage({ navigate, reduceMotion, canHover, openComposer }: PageProps)
           className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
           style={{ bottom: 'max(3rem, calc(env(safe-area-inset-bottom) + 1.5rem))' }}
         >
-          <span className="text-[10px] tracking-[0.24em] uppercase text-white/55">Desliza para explorar</span>
+          <span className="text-[10px] tracking-[0.24em] uppercase text-white/70">Desliza para explorar</span>
           <div className="w-[1px] h-12 bg-gradient-to-b from-white/40 to-transparent" />
         </motion.div>
       </motion.section>
@@ -274,8 +277,8 @@ function HomePage({ navigate, reduceMotion, canHover, openComposer }: PageProps)
           className="mb-16 md:mb-20"
         >
           <h2 className="text-3xl md:text-5xl font-display font-light flex flex-col md:flex-row md:items-baseline gap-3 md:gap-4 tracking-tight">
-            <span>Proyectos Destacados</span>
-            <span className="text-[10px] md:text-xs font-sans tracking-[0.24em] uppercase pb-1 md:flex-1 md:border-b text-white/55 border-white/15">Creativo y Técnico</span>
+            <span>Proyectos Destacados</span>{' '}
+            <span className="text-[10px] md:text-xs font-sans tracking-[0.24em] uppercase pb-1 md:flex-1 md:border-b text-white/70 border-white/15">Creativo y Técnico</span>
           </h2>
         </motion.div>
 
@@ -334,9 +337,9 @@ function HomePage({ navigate, reduceMotion, canHover, openComposer }: PageProps)
             className="font-display font-light tracking-tight"
             style={{ fontSize: 'clamp(2.25rem, 7vw, 4.5rem)', lineHeight: 1.05 }}
           >
-            Construyamos algo<br/> <span className="italic text-white/55">extraordinario</span>.
+            Construyamos algo<br/> <span className="italic text-white/70">extraordinario</span>.
           </h2>
-          <p className="max-w-md mx-auto text-white/60">
+          <p className="max-w-md mx-auto text-white/70">
             Actualmente abierto a nuevas oportunidades y proyectos interesantes.
           </p>
           <motion.button
@@ -362,20 +365,20 @@ function HomePage({ navigate, reduceMotion, canHover, openComposer }: PageProps)
           </div>
         </motion.div>
 
-        <div className="mt-32 pt-8 text-[10px] uppercase tracking-[0.24em] flex flex-col md:flex-row items-center justify-between gap-4 max-w-7xl mx-auto border-t relative z-10 text-white/55 border-white/5">
+        <div className="mt-32 pt-8 text-[10px] uppercase tracking-[0.24em] flex flex-col md:flex-row items-center justify-between gap-4 max-w-7xl mx-auto border-t relative z-10 text-white/70 border-white/5">
           <span>© {new Date().getFullYear()} Daniel Eduardo</span>
           <div className="flex items-center gap-5">
             <a
               href="/sobre-mi"
               onClick={(e) => { e.preventDefault(); navigate('/sobre-mi'); }}
-              className="hover:text-white/70 transition-colors"
+              className="inline-flex items-center py-4 -my-4 hover:text-white/70 transition-colors"
             >
               Sobre mí
             </a>
             <a
               href="/privacidad"
               onClick={(e) => { e.preventDefault(); navigate('/privacidad'); }}
-              className="hover:text-white/70 transition-colors"
+              className="inline-flex items-center py-4 -my-4 hover:text-white/70 transition-colors"
             >
               Privacidad
             </a>
@@ -398,7 +401,7 @@ function TagFilter({ active, onChange }: { active: string | null; onChange: (tag
         }`}
       >
         Todos
-        <span className="ml-1.5 text-white/55">{PROJECTS.length}</span>
+        <span className="ml-1.5 text-white/75">{PROJECTS.length}</span>
       </button>
       {ALL_TAGS.map((tag) => {
         const count = PROJECTS.filter((p) => p.tags.includes(tag)).length;
@@ -413,7 +416,7 @@ function TagFilter({ active, onChange }: { active: string | null; onChange: (tag
             }`}
           >
             {tag}
-            <span className="ml-1.5 text-white/55">{count}</span>
+            <span className="ml-1.5 text-white/75">{count}</span>
           </button>
         );
       })}
@@ -544,7 +547,7 @@ function AboutPage({ navigate, reduceMotion, openComposer }: PageProps) {
           <p className="mt-6 max-w-3xl text-base md:text-lg text-white/70 font-light leading-relaxed">
             Soy Daniel Eduardo, Ingeniero en Informática con mención en gestión de la información por la Universidad de Playa Ancha. Construyo experiencias web, plataformas educativas, e-commerce y sistemas IoT — uniendo el detalle artesanal con el rigor técnico.
           </p>
-          <p className="mt-4 max-w-3xl text-base md:text-lg text-white/55 font-light leading-relaxed">
+          <p className="mt-4 max-w-3xl text-base md:text-lg text-white/65 font-light leading-relaxed">
             Me obsesiona la artesanía digital: que el código sea simple, que la interfaz se sienta natural, y que cada microinteracción tenga una razón.
           </p>
         </motion.div>
@@ -559,7 +562,7 @@ function AboutPage({ navigate, reduceMotion, openComposer }: PageProps) {
           className="text-2xl md:text-3xl font-display font-light tracking-tight mb-8 flex items-baseline gap-3"
         >
           <span>Stack &amp; oficio</span>
-          <span className="text-[10px] tracking-[0.24em] uppercase text-white/55">Lo que uso</span>
+          <span className="text-[10px] tracking-[0.24em] uppercase text-white/70">Lo que uso</span>
         </motion.h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 md:gap-6">
@@ -599,7 +602,7 @@ function AboutPage({ navigate, reduceMotion, openComposer }: PageProps) {
           className="text-2xl md:text-3xl font-display font-light tracking-tight mb-8 flex items-baseline gap-3"
         >
           <span>Lo que me mueve</span>
-          <span className="text-[10px] tracking-[0.24em] uppercase text-white/55">Principios</span>
+          <span className="text-[10px] tracking-[0.24em] uppercase text-white/70">Principios</span>
         </motion.h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 md:gap-6">
@@ -674,12 +677,12 @@ function PrivacyPage({ navigate }: PageProps) {
         <h1 className="text-4xl md:text-5xl font-display font-light tracking-tight mb-4">
           Privacidad y Cookies
         </h1>
-        <p className="text-sm text-white/50 mb-10">Última actualización: {new Date().toLocaleDateString('es-CL', { year: 'numeric', month: 'long' })}</p>
+        <p className="text-sm text-white/50 mb-10">Última actualización: {PRIVACY_UPDATED}</p>
 
         <div className="space-y-8 text-white/75 leading-relaxed">
           <section>
             <h2 className="text-xl md:text-2xl font-display italic text-white/90 mb-3">Resumen</h2>
-            <p>Este sitio es un portafolio personal estático. <strong className="text-white">No recopilo datos personales, no uso analíticas, no rastreo a quienes lo visitan y no comparto información con terceros.</strong></p>
+            <p>Este sitio es un portafolio personal estático. <strong className="text-white">No recopilo datos personales, no rastreo a quienes lo visitan y no comparto información con terceros.</strong> Las únicas métricas son las de Cloudflare Web Analytics: conteos agregados de visitas, sin cookies ni identificadores.</p>
           </section>
 
           <section>
@@ -692,7 +695,7 @@ function PrivacyPage({ navigate }: PageProps) {
             <p>El sitio no instala cookies de marketing, analítica ni publicidad. Las únicas cookies presentes son:</p>
             <ul className="list-disc list-inside mt-3 space-y-2">
               <li><strong className="text-white">Cloudflare (<code className="text-white/80 text-sm">__cf_bm</code>):</strong> cookie técnica esencial para protección anti-bot. No identifica a la persona usuaria.</li>
-              <li><strong className="text-white">Preferencias locales:</strong> en <code className="text-white/80 text-sm">localStorage</code> se guarda el aviso de cookies dismissado y, opcionalmente, el tema visual elegido. No son cookies y no se envían a ningún servidor.</li>
+              <li><strong className="text-white">Preferencias locales:</strong> en <code className="text-white/80 text-sm">localStorage</code> se guarda que ya cerraste el aviso de cookies y, opcionalmente, el tema visual elegido. No son cookies y no se envían a ningún servidor.</li>
             </ul>
           </section>
 
@@ -701,8 +704,9 @@ function PrivacyPage({ navigate }: PageProps) {
             <p>Para funcionar, el sitio carga recursos desde:</p>
             <ul className="list-disc list-inside mt-3 space-y-2">
               <li><strong className="text-white">Cloudflare Pages</strong> — hosting y CDN.</li>
+              <li><strong className="text-white">Cloudflare Web Analytics</strong> — métricas agregadas de visitas, sin cookies ni huellas del navegador.</li>
               <li><strong className="text-white">Amazon CloudFront</strong> — entrega de los videos de fondo.</li>
-              <li><strong className="text-white">Google Fonts</strong> — tipografías (Inter, Playfair Display).</li>
+              <li><strong className="text-white">Google Fonts</strong> — tipografías (Inter, Playfair Display, Nunito).</li>
             </ul>
             <p className="mt-3">Estos servicios pueden registrar metadatos técnicos (IP, agente de usuario, hora) por motivos de seguridad y entrega de contenido. Consulta sus políticas para más detalle.</p>
           </section>
@@ -810,7 +814,7 @@ function CookieNotice({ navigate }: { navigate: (to: string) => void }) {
       </button>
 
       <p className="text-[12.5px] md:text-sm text-white/85 leading-relaxed">
-        Solo una cookie técnica de Cloudflare. <span className="text-white/55">Sin analíticas, sin rastreo.</span>
+        Solo una cookie técnica de Cloudflare. <span className="text-white/55">Sin rastreo ni cookies de analítica.</span>
       </p>
 
       <div className="mt-3 flex items-center justify-end gap-1.5">
@@ -863,12 +867,12 @@ function TopControls({ theme, setManualTheme, openPalette, isMac, onPlay }: TopC
       {onPlay && (
         <button
           onClick={onPlay}
-          aria-label="Abrir modo juego"
+          aria-label="Jugar: abrir el modo juego"
           title="Modo juego"
           className="liquid-glass group inline-flex items-center gap-2 h-11 px-3.5 rounded-full text-white/80 hover:text-white transition-colors"
         >
           <Gamepad2 size={16} strokeWidth={1.6} />
-          <span className="hidden md:inline text-[10.5px] tracking-[0.18em] uppercase text-white/55 group-hover:text-white/80 transition-colors">
+          <span className="hidden md:inline text-[10.5px] tracking-[0.18em] uppercase text-white/70 group-hover:text-white/80 transition-colors">
             Jugar
           </span>
         </button>
@@ -880,7 +884,7 @@ function TopControls({ theme, setManualTheme, openPalette, isMac, onPlay }: TopC
         className="liquid-glass group inline-flex items-center gap-2 h-11 pl-3.5 pr-3 md:pr-3.5 rounded-full text-white/80 hover:text-white transition-colors"
       >
         <Search size={15} strokeWidth={1.6} />
-        <span className="hidden md:inline text-[10.5px] tracking-[0.18em] uppercase text-white/55 group-hover:text-white/80 transition-colors">
+        <span className="hidden md:inline text-[10.5px] tracking-[0.18em] uppercase text-white/70 group-hover:text-white/80 transition-colors">
           {shortcut}
         </span>
       </button>
@@ -939,6 +943,7 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const items = useMemo<CommandItem[]>(() => {
     const pages: CommandItem[] = [
@@ -1006,8 +1011,13 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
     if (open) {
       setQuery('');
       setSelected(0);
+      // Al cerrar, el foco vuelve al botón (o atajo) que abrió el buscador.
+      const opener = document.activeElement as HTMLElement | null;
       const t = setTimeout(() => inputRef.current?.focus(), 30);
-      return () => clearTimeout(t);
+      return () => {
+        clearTimeout(t);
+        if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+      };
     }
   }, [open]);
 
@@ -1021,6 +1031,8 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+      } else if (e.key === 'Tab') {
+        trapTab(e, panelRef.current);
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         setSelected((s) => Math.min(filtered.length - 1, s + 1));
@@ -1072,6 +1084,7 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.98 }}
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            ref={panelRef}
             onClick={(e) => e.stopPropagation()}
             className="liquid-glass-strong relative w-full max-w-xl rounded-2xl overflow-hidden flex flex-col max-h-[88svh]"
           >
