@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent a
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
 import { ArrowUpRight, X } from 'lucide-react';
 import { PROJECTS, SKILLS, SOCIAL } from '../data';
-import AsciiScene from './AsciiScene';
+import PixelScene from './PixelScene';
 import { AMBIENTS, NOISE_COLORS, initAudio, setNoiseColor as setAudioNoiseColor, pauseAudio, setAmbient, setAmbientVolume, setMix as setAudioMix, setMuted as setAudioMuted, sfx, type AmbientId, type Mix } from './audio';
 import { WEATHERS, WEATHER_CONFIG, stepAtmosphere, type WeatherId } from './weather';
 import { createStore, type GameEvents, type Meteo } from './store';
@@ -308,8 +308,8 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
           speaker: 'Letrero',
           lines: [
             '¡Bienvenid@ a la isla de Daniel Eduardo! 🌅',
-            'Camina con WASD o las flechas (en el celular, con el joystick). Mantén Shift para correr.',
-            'Mantén Espacio (o ✂️) para cortar el pasto. Dicen que hay estrellitas escondidas entre el pasto alto…',
+            'Eres Dui, el gato de Daniel. Camina con A y D (o las flechas) y salta con Espacio o W. En el celular, usa el joystick: hacia arriba salta.',
+            'Con F (o 🐾) das un zarpazo: corta el pasto alto y cava la tierra. Dicen que hay estrellitas escondidas entre el pasto… y algunas bajo tierra.',
             'Acércate a las cosas y pulsa E para interactuar. ¡O usa los botones de abajo para ir directo!',
           ],
           choices: [{ label: '¡Vamos!', run: finishTutorial }],
@@ -514,7 +514,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     onStarRevealed: () => {
       if (revealHint.current) return;
       revealHint.current = true;
-      toast('✨', '¡Algo brilla!', 'Apareció una estrellita bajo el pasto. Camina hacia ella.');
+      toast('✨', '¡Algo brilla!', 'Apareció una estrellita. Camina hacia ella para tomarla.');
     },
   };
 
@@ -753,17 +753,18 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   return (
     <MotionConfig reducedMotion="user">
     <div className="absolute inset-0 font-cozy select-none">
-      {/* La isla en ASCII: corre en cualquier equipo, sin WebGL. */}
-      <AsciiScene store={store} events={events} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} paused={paused} />
+      {/* La isla en 2D, pixel art en un canvas: corre en cualquier equipo, sin WebGL. */}
+      <PixelScene store={store} events={events} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} paused={paused} />
 
       {/* Crawlable summary for search engines and screen readers. */}
       <div className="sr-only">
         <h1>Daniel Eduardo — Ingeniero en Informática</h1>
-        <p>Portafolio interactivo: una isla en ASCII para explorar. Desarrollo web full stack, IoT y soluciones a medida.</p>
+        <p>Portafolio interactivo: una isla en 2D, pixel art, para explorar con Dui, el gato de Daniel. Desarrollo web full stack, IoT y soluciones a medida.</p>
         <a href="/clasico">Versión clásica del portafolio</a> · <a href="/proyectos">Proyectos</a> · <a href="/sobre-mi">Sobre mí</a>
         <p>
-          Cómo jugar con teclado: las flechas o WASD mueven a Dui, el gato de Daniel; E o Enter conversa con lo que tengas cerca; Espacio corta el
-          pasto. Los botones «Ir a» y «Más lugares» llevan a Dui directo a cada sitio. Lo que hay cerca se anuncia solo.
+          Cómo jugar con teclado: A y D o las flechas mueven a Dui, el gato de Daniel; Espacio o W salta; F da un zarpazo que corta el pasto
+          y cava la tierra; E o Enter conversa con lo que tengas cerca. Los botones «Ir a» y «Más lugares» llevan a Dui directo a cada
+          sitio. Lo que hay cerca se anuncia solo.
         </p>
       </div>
 
@@ -874,11 +875,11 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
 
           {!coarse && !dialog && !panel && (
             <div className="pointer-events-none absolute bottom-4 left-4 z-10 hidden lg:block rounded-2xl bg-[#fff8e7]/85 px-4 py-3 text-xs font-bold leading-relaxed text-[#6b4f3a]">
-              <Kbd>WASD</Kbd> caminar · <Kbd>Shift</Kbd> correr
+              <Kbd>A</Kbd> <Kbd>D</Kbd> caminar · <Kbd>Shift</Kbd> correr · <Kbd>Espacio</Kbd> saltar
               <br />
-              <Kbd>Espacio</Kbd> cortar pasto · <Kbd>E</Kbd> interactuar
+              <Kbd>F</Kbd> zarpazo (pasto y tierra) · <Kbd>S</Kbd>+<Kbd>F</Kbd> cavar abajo · <Kbd>E</Kbd> interactuar
               <br />
-              <span className="opacity-80">Clic en el mapa: caminar · Clic en Dui (@): cariño</span>
+              <span className="opacity-80">Clic: caminar, cavar un bloque cercano o hacerle cariño a Dui</span>
             </div>
           )}
 
@@ -904,7 +905,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               <Joystick store={store} />
               <button
                 type="button"
-                aria-label="Cortar pasto"
+                aria-label="Zarpazo: cortar pasto o cavar"
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
                   store.cutHeld = true;
@@ -914,7 +915,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 className="absolute z-20 bottom-[calc(2rem+env(safe-area-inset-bottom))] right-[calc(1.5rem+env(safe-area-inset-right))] grid h-20 w-20 place-items-center rounded-full bg-[#fff8e7] text-3xl shadow-[0_5px_0_rgba(91,70,54,0.25)] active:translate-y-1 active:shadow-[0_1px_0_rgba(91,70,54,0.25)]"
                 style={{ touchAction: 'none' }}
               >
-                ✂️
+                🐾
               </button>
             </>
           )}
@@ -1253,7 +1254,7 @@ function StartScreen({ onStart, onClassic, coarse }: { onStart: () => void; onCl
           ▶ Entrar a la isla
         </motion.button>
         <p className="mt-4 text-xs font-bold opacity-80">
-          {coarse ? 'Usa el joystick para caminar y ✂️ para cortar el pasto.' : 'WASD para caminar · Espacio para cortar el pasto · E para hablar'}
+          {coarse ? 'Joystick para caminar (arriba salta) y 🐾 para el zarpazo.' : 'A/D para caminar · Espacio salta · F zarpazo · E para hablar'}
         </p>
         <button type="button" onClick={onClassic} className="mt-5 text-sm font-extrabold underline decoration-2 underline-offset-4 opacity-70 hover:opacity-100">
           Prefiero la versión clásica

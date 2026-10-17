@@ -1,4 +1,3 @@
-import * as THREE from 'three';
 import type { Mix } from './audio';
 
 export type WeatherId = 'soleado' | 'atardecer' | 'lluvia' | 'niebla' | 'noche' | 'nieve';
@@ -247,82 +246,73 @@ export const WEATHER_CONFIG: Record<WeatherId, Config> = {
   },
 };
 
-// Sky colors go straight to the screen (the shader skips color management),
-// so keep them as raw sRGB components.
-const srgb = (hex: string) => new THREE.Color().setStyle(hex, THREE.LinearSRGBColorSpace);
+/* The live, blended atmosphere. The scene reads from it every frame. Colors
+   are [r, g, b] in 0..255; `css()` turns one into a CSS color. */
+export type Rgb = [number, number, number];
 
-// The live, blended atmosphere. Scene components read from it every frame.
+function hexToRgb(hex: string): Rgb {
+  const c = hex.replace('#', '');
+  const n = c.length === 3 ? c.split('').map((x) => x + x).join('') : c;
+  return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
+}
+export const css = (c: Rgb, a = 1) => (a >= 1 ? `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})` : `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`);
+
+const rgb = (): Rgb => [0, 0, 0];
 export const atmo = {
   target: 'atardecer' as WeatherId,
-  sky: [0, 1, 2, 3, 4].map(() => new THREE.Color()),
-  sunDir: new THREE.Vector3(),
-  sunColor: new THREE.Color(),
+  sky: [rgb(), rgb(), rgb(), rgb(), rgb()] as Rgb[],
+  sunDir: [0, 1, 0] as [number, number, number],
+  sunColor: rgb(),
   sunAmt: 0,
   stars: 0,
-  fog: new THREE.Color(),
+  fog: rgb(),
   fogNear: 0,
   fogFar: 0,
-  hemiSky: new THREE.Color(),
-  hemiGround: new THREE.Color(),
-  hemi: 0,
-  lightColor: new THREE.Color(),
   light: 0,
-  lightPos: new THREE.Vector3(),
-  ambientColor: new THREE.Color(),
-  ambient: 0,
-  cloud: new THREE.Color(),
-  cloudGlow: new THREE.Color(),
+  cloud: rgb(),
+  cloudGlow: rgb(),
   cloudGlowAmt: 0,
-  water: new THREE.Color(),
-  waterGlow: new THREE.Color(),
+  water: rgb(),
+  waterGlow: rgb(),
   glitter: 0,
-  glitterColor: new THREE.Color(),
-  ground: new THREE.Color(),
-  env: 0,
-  windows: new THREE.Color(),
+  ground: rgb(),
+  windows: rgb(),
   rain: 0,
   snow: 0,
   mist: 0,
+  fireflies: 0,
   flash: 0,
 };
 
-const tmp = new THREE.Color();
-const tmpV = new THREE.Vector3();
-
-function lerpColor(c: THREE.Color, hex: string, k: number, raw = false) {
-  c.lerp(raw ? srgb(hex) : tmp.set(hex), k);
+function lerpColor(c: Rgb, hex: string, k: number) {
+  const t = hexToRgb(hex);
+  c[0] += (t[0] - c[0]) * k;
+  c[1] += (t[1] - c[1]) * k;
+  c[2] += (t[2] - c[2]) * k;
 }
 
 // k = 1 snaps instantly (first frame); otherwise blends toward the target.
 export function stepAtmosphere(k: number) {
   const t = WEATHER_CONFIG[atmo.target];
-  t.sky.forEach((hex, i) => lerpColor(atmo.sky[i], hex, k, true));
-  atmo.sunDir.lerp(tmpV.set(...t.sunDir).normalize(), k).normalize();
-  lerpColor(atmo.sunColor, t.sunColor, k, true);
+  t.sky.forEach((hex, i) => lerpColor(atmo.sky[i], hex, k));
+  for (let i = 0; i < 3; i++) atmo.sunDir[i] += (t.sunDir[i] - atmo.sunDir[i]) * k;
+  lerpColor(atmo.sunColor, t.sunColor, k);
   atmo.sunAmt += (t.sunAmt - atmo.sunAmt) * k;
   atmo.stars += (t.stars - atmo.stars) * k;
   lerpColor(atmo.fog, t.fog, k);
   atmo.fogNear += (t.fogNear - atmo.fogNear) * k;
   atmo.fogFar += (t.fogFar - atmo.fogFar) * k;
-  lerpColor(atmo.hemiSky, t.hemiSky, k);
-  lerpColor(atmo.hemiGround, t.hemiGround, k);
-  atmo.hemi += (t.hemi - atmo.hemi) * k;
-  lerpColor(atmo.lightColor, t.lightColor, k);
   atmo.light += (t.light - atmo.light) * k;
-  atmo.lightPos.lerp(tmpV.set(...t.lightPos), k);
-  lerpColor(atmo.ambientColor, t.ambientColor, k);
-  atmo.ambient += (t.ambient - atmo.ambient) * k;
   lerpColor(atmo.cloud, t.cloud, k);
   lerpColor(atmo.cloudGlow, t.cloudGlow, k);
   atmo.cloudGlowAmt += (t.cloudGlowAmt - atmo.cloudGlowAmt) * k;
   lerpColor(atmo.water, t.water, k);
   lerpColor(atmo.waterGlow, t.waterGlow, k);
   atmo.glitter += (t.glitter - atmo.glitter) * k;
-  lerpColor(atmo.glitterColor, t.glitterColor, k, true);
   lerpColor(atmo.ground, t.ground, k);
-  atmo.env += (t.env - atmo.env) * k;
   lerpColor(atmo.windows, t.windows, k);
   atmo.rain += (t.rain - atmo.rain) * k;
   atmo.snow += (t.snow - atmo.snow) * k;
   atmo.mist += (t.mist - atmo.mist) * k;
+  atmo.fireflies += (t.fireflies - atmo.fireflies) * k;
 }

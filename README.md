@@ -13,7 +13,7 @@ Sitio personal de Daniel Eduardo Aguilera Campusano, Ingeniero en Informática c
 - **Lenis** para inercia de scroll (solo escritorio, se apaga en equipos modestos)
 - **lucide-react** para los íconos
 - Router SPA hecho a mano con `history.pushState`
-- **Sin WebGL**: la isla del juego se dibuja con texto (ASCII). Hasta octubre de 2026 era 3D con three.js/R3F y andaba lenta en celulares modestos.
+- **Sin WebGL ni three.js**: la isla es un juego 2D de plataformas en pixel art, dibujado en un canvas chico y agrandado por un entero. Hasta octubre de 2026 era 3D con three.js/R3F y andaba lenta en celulares modestos; pasó por una versión ASCII antes de esta.
 
 ## Estructura
 
@@ -23,8 +23,9 @@ src/
 ├── data.ts              ← Proyectos, habilidades y redes
 ├── game/                ← La isla (ruta /)
 │   ├── IslandGame.tsx   ← Interfaz: libreta, diálogos, logros, clima, sonido, accesibilidad
-│   ├── AsciiScene.tsx   ← El mundo dibujado en un <pre>: movimiento, colisiones, pasto, estrellas
-│   ├── world.ts         ← Mapa: lugares, árboles, caminos, colisiones, estrellas
+│   ├── PixelScene.tsx   ← La escena: cámara, física (gravedad, salto, agua), cavar, pasto, estrellas, clima, luz
+│   ├── sprites.ts       ← Pixel art dibujado con código: Dui, Daniel, bloques, plantas, letreros
+│   ├── world.ts         ← El mundo de bloques: superficie, casas, árboles, huerto, muelle, cuevas, estrellas
 │   ├── store.ts         ← Estado por cuadro compartido entre escena e interfaz
 │   ├── progress.ts      ← Libreta de 5 sellos, guardada en localStorage
 │   ├── weather.ts       ← Climas y mezcla de sonido de cada uno
@@ -46,7 +47,7 @@ public/
 
 | Ruta | Página |
 |---|---|
-| `/` | Isla de Daniel en ASCII: Dui (el gato, `@`) recorre la isla y junta los 5 sellos de la libreta |
+| `/` | Isla de Daniel en 2D, estilo Terraria: Dui (el gato) recorre la isla, cava, salta y junta los 5 sellos de la libreta |
 | `/clasico` | Hero + proyectos destacados + contacto |
 | `/proyectos` | Catálogo completo con filtro por tags |
 | `/sobre-mi` | Bio extendida, stack y valores |
@@ -55,12 +56,14 @@ public/
 
 ## La isla
 
-- **Controles:** WASD o flechas para caminar, Shift para correr, Espacio para cortar pasto, E para interactuar. En celular, joystick y tijeras; tocar el mapa hace caminar a Dui y tocar a Dui le hace cariño.
-- **Leyenda:** `@` Dui · `D` Daniel · `T` letreros · `Y` `^` árboles · `"` pasto (`,` cortado) · `*` estrellas · `~` mar · `M` buzón.
-- **Solo ASCII puro** en el mapa: símbolos como ♣ ★ ≈ caen a otra fuente en Android y rompen la grilla.
+- **Controles:** A/D o flechas para caminar, Shift para correr, Espacio o W para saltar, F para el zarpazo (corta pasto alto y cava tierra; con S cava bajo las patas), E para interactuar. En celular, joystick (hacia arriba salta) y botón 🐾; tocar el mapa hace caminar a Dui, tocar un bloque cercano lo cava y tocar a Dui le hace cariño.
+- **Mundo:** 220 × 80 bloques (`world.ts`). Colinas suaves que se caminan sin saltar, casas de bloques con techo escalonado (se puede subir), huerto con cerca, estación con LED, tablón y 12 letreros de proyectos, muelle sobre el mar y cinco cuevas bajo tierra. Lo cavado se rellena solo al minuto y el pasto vuelve a crecer a los 45 s.
+- **Estrellas:** 12. Ocho bajo el pasto alto (zarpazo) y cuatro en cuevas (hay que cavar). Las tomadas se guardan por índice en `localStorage`.
+- **Coordenadas:** x en bloques; la vertical va en `pos.z` (pies), así `IslandGame` sigue midiendo distancias con `hypot(dx, dz)` sin saber que el mundo es 2D.
+- **Clima:** `weather.ts` mezcla cielo, nubes, lluvia, nieve, niebla y estrellas; de noche y bajo tierra una capa oscura deja luz alrededor de Dui, las ventanas y las estrellas reveladas.
+- **Rendimiento:** el terreno se pinta una vez en un canvas del tamaño del mundo y se copia cada cuadro; solo se repintan los bloques que cambian. 60 fps con la CPU 6 veces más lenta; el chunk de la isla pesa ~35 KB gzip (antes 447 KB en 3D).
 - **Accesible:** región `aria-live` que anuncia qué hay cerca, barra "Ir a / Más lugares" con teclado y avisos con `role="status"`.
-- **Rendimiento:** dibuja solo cuando algo cambia (~7 veces por segundo caminando); 60 fps con la CPU 6 veces más lenta. El chunk de la isla pesa ~39 KB gzip (antes 447 KB en 3D).
-- En desarrollo existen `window.__island` (estado y `walkTo`) y `window.__ascii` (métricas de la grilla) para pruebas.
+- En desarrollo existen `window.__island` (estado y `walkTo`), `window.__pixel` (cámara y escala) y `window.__pixelSpots` (estrellas) para pruebas.
 
 ## Features del sitio clásico
 
