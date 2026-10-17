@@ -230,3 +230,28 @@ html.lite .liquid-glass-strong::before {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
+
+/* Island focus ring: hugging the control (no gap) so the dark ring always
+   meets the cream button, and stays visible over the night sky or a cave,
+   where a ring floating 2px out over the background faded away. */
+.font-cozy :focus-visible,
+.font-cozy a:focus-visible,
+.font-cozy button:focus-visible {
+  outline-offset: 0;
+}
+
+/* More contrast asked for by the system: island labels and Daniel's speech
+   bubble go fully opaque with a dark edge, and the focus ring gets thicker. */
+@media (prefers-contrast: more) {
+  .pixel-isla .font-cozy > div {
+    background-color: #fff8e7;
+    color: #3d2410;
+    outline: 2px solid #3d2410;
+  }
+  .font-cozy :focus-visible,
+  .font-cozy a:focus-visible,
+  .font-cozy button:focus-visible {
+    outline-width: 4px;
+    outline-color: #3d2410;
+  }
+}

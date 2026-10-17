@@ -365,7 +365,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     s.labelEls = LABELS.map((l) => {
       const el = document.createElement('div');
       el.textContent = l.text;
-      el.className = `absolute left-0 top-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] ${
+      // The thin dark ring keeps the cream box visible on a pale sky (clear
+      // day, fog), where box and sky measured under 1.5:1.
+      el.className = `absolute left-0 top-0 whitespace-nowrap rounded-full px-2.5 py-1 text-[12px] font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-1 ring-[#5b4636]/40 ${
         l.tone === 'orange' ? 'bg-[#ffe3a3]/95' : 'bg-[#fff8e7]/95'
       }`;
       el.style.display = 'none';
@@ -373,7 +375,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       return el;
     });
     const bubble = document.createElement('div');
-    bubble.className = 'absolute left-0 top-0 whitespace-nowrap rounded-2xl rounded-bl-sm bg-[#fff8e7] px-2.5 py-1 text-[12px] font-bold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)]';
+    bubble.className = 'absolute left-0 top-0 whitespace-nowrap rounded-2xl rounded-bl-sm bg-[#fff8e7] px-2.5 py-1 text-[12px] font-bold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-1 ring-[#5b4636]/40';
     bubble.style.display = 'none';
     root.appendChild(bubble);
     s.bubbleEl = bubble;

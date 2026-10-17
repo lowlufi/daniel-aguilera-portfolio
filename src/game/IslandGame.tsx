@@ -104,6 +104,8 @@ const SOUND_PRESETS: { label: string; emoji: string; mix: Mix }[] = [
 
 type Sheet = 'weather' | 'sound' | null;
 
+const SKIP_LINK = 'sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-full focus:bg-[#fff8e7] focus:px-4 focus:py-2 focus:text-sm focus:font-black focus:text-[#6b4f3a] focus:shadow-[0_3px_0_rgba(91,70,54,0.25)]';
+
 function fullMix(m: Mix): Record<AmbientId, number> {
   // The mix comes from localStorage: anything that isn't a finite number
   // would reach setTargetAtTime and throw inside audio start-up.
@@ -206,6 +208,19 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     setToasts((t) => [...t.slice(-2), { key, icon, title, text }]);
     later(() => setToasts((t) => t.filter((x) => x.key !== key)), 3600);
   }, [later]);
+
+  // A tip shown once per player (kept in localStorage), the first time they
+  // try a move: the tutorial text is easy to skip, the moment of use is not.
+  const hintOnce = useCallback(
+    (id: string, icon: string, title: string, text: string) => {
+      const seen = readStorage<unknown>('island-hints', []);
+      const list = Array.isArray(seen) ? (seen as string[]) : [];
+      if (list.includes(id)) return;
+      writeStorage('island-hints', [...list, id]);
+      toast(icon, title, text);
+    },
+    [toast],
+  );
 
   const unlockedRef = useRef(unlocked);
   const unlock = useCallback(
@@ -669,12 +684,16 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       if (e.metaKey) store.keys.clear();
       if (paused || isTyping(e) || e.metaKey || e.ctrlKey) return;
       const key = e.key.toLowerCase();
-      // A focused button keeps Enter (and Space inside menus) for itself. Out on the
-      // island, Space always means "cut", so drop focus from the HUD button.
+      // A focused button keeps Enter (and Space inside menus) for itself.
       const onControl = (e.target as HTMLElement | null)?.closest?.('button, a') as HTMLElement | null;
       if (onControl && key === 'enter') return;
       if (onControl && key === ' ') {
         if (!started || dialog || panel || sheet) return;
+        // Keyboard focus (the ring is showing): Space presses the button, as
+        // everywhere else on the web, and must not also make Dui jump. Focus
+        // left behind by a mouse click: drop it and let Space jump, or one
+        // click on a HUD button would press it again on every jump.
+        if (onControl.matches(':focus-visible')) return;
         onControl.blur();
       }
       if (key === 'escape' && sheet) {
@@ -712,6 +731,10 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         openDialog(store.nearId);
         return;
       }
+      if (!e.repeat) {
+        if (key === ' ' || key === 'w' || key === 'arrowup') hintOnce('salto', '⬆️', '¡Salto!', 'Mantén la tecla para saltar más alto y subir los cerros.');
+        if (key === 'f') hintOnce('zarpazo', '🐾', '¡Zarpazo!', 'Corta el pasto alto: ahí se esconden estrellitas. Con S + F cavas hacia abajo.');
+      }
       konami.current = [...konami.current, key].slice(-KONAMI.length);
       if (konami.current.join() === KONAMI.join()) {
         konami.current = [];
@@ -738,7 +761,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, [advance, choiceIdx, closeDialog, dialog, openDialog, panel, paused, sheet, showChoices, start, started, store, toast, unlock]);
+  }, [advance, choiceIdx, closeDialog, dialog, hintOnce, openDialog, panel, paused, sheet, showChoices, start, started, store, toast, unlock]);
 
   useEffect(() => {
     if (!dialog && !panel) return;
@@ -750,6 +773,21 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
 
   const nearItem = near ? INTERACTABLES.find((x) => x.id === near) : null;
 
+  // The weather and sound sheets open from a HUD button: focus goes to their
+  // close button so keyboard and screen reader users land inside, and back
+  // to the button that opened them when they close.
+  const sheetRef = useRef<HTMLElement>(null);
+  const sheetOpener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!sheet) {
+      sheetOpener.current?.focus?.({ preventScroll: true });
+      sheetOpener.current = null;
+      return;
+    }
+    sheetOpener.current = document.activeElement as HTMLElement | null;
+    sheetRef.current?.querySelector('button')?.focus({ preventScroll: true });
+  }, [sheet]);
+
   return (
     <MotionConfig reducedMotion="user">
     <div className="absolute inset-0 font-cozy select-none">
@@ -760,13 +798,22 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
       <div className="sr-only">
         <h1>Daniel Eduardo — Ingeniero en Informática</h1>
         <p>Portafolio interactivo: una isla en 2D, pixel art, para explorar con Dui, el gato de Daniel. Desarrollo web full stack, IoT y soluciones a medida.</p>
-        <a href="/clasico">Versión clásica del portafolio</a> · <a href="/proyectos">Proyectos</a> · <a href="/sobre-mi">Sobre mí</a>
         <p>
           Cómo jugar con teclado: A y D o las flechas mueven a Dui, el gato de Daniel; Espacio o W salta; F da un zarpazo que corta el pasto
           y cava la tierra; E o Enter conversa con lo que tengas cerca. Los botones «Ir a» y «Más lugares» llevan a Dui directo a cada
           sitio. Lo que hay cerca se anuncia solo.
         </p>
       </div>
+      {/* These links come first in the Tab order. Each one is hidden until it
+          takes focus, like a skip link, so a sighted keyboard player sees
+          where focus went instead of three invisible stops before the HUD.
+          They sit outside the sr-only block above: inside it they'd stay
+          clipped to 1px even while focused. */}
+      <nav aria-label="Otras páginas">
+        <a href="/clasico" className={SKIP_LINK}>Versión clásica del portafolio</a>
+        <a href="/proyectos" className={SKIP_LINK}>Proyectos</a>
+        <a href="/sobre-mi" className={SKIP_LINK}>Sobre mí</a>
+      </nav>
 
       <AnimatePresence>{!started && <StartScreen onStart={start} onClassic={() => navigate('/clasico')} coarse={coarse} />}</AnimatePresence>
 
@@ -801,7 +848,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               </Stat>
             </div>
             <div className="pointer-events-auto flex items-center gap-1.5 md:gap-2">
-              <IconButton label="Clima" active={sheet === 'weather'} onClick={() => setSheet((v) => (v === 'weather' ? null : 'weather'))}>
+              <IconButton label={`Clima: ${WEATHERS.find((w) => w.id === weather)?.label ?? ''}`} active={sheet === 'weather'} onClick={() => setSheet((v) => (v === 'weather' ? null : 'weather'))}>
                 {WEATHERS.find((w) => w.id === weather)?.emoji}
               </IconButton>
               <IconButton label="Sonidos ambiente" active={sheet === 'sound'} onClick={() => setSheet((v) => (v === 'sound' ? null : 'sound'))}>
@@ -869,7 +916,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               walks there on his own: the dialog opens by itself on arrival. */}
           <p className="sr-only" aria-live="polite" aria-atomic="true">
             {nearItem && !dialog && !panel && store.targetId !== nearItem.id
-              ? `Cerca: ${nearItem.label}. ${coarse ? 'Toca el botón' : 'Presiona E'} para ${nearItem.verb.charAt(0).toLowerCase()}${nearItem.verb.slice(1)} ${nearItem.label}.`
+              ? `${nearItem.verb} ${nearItem.label}: ${coarse ? 'toca el botón de abajo' : 'presiona E'}.`
               : ''}
           </p>
 
@@ -879,7 +926,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               <br />
               <Kbd>F</Kbd> zarpazo (pasto y tierra) · <Kbd>S</Kbd>+<Kbd>F</Kbd> cavar abajo · <Kbd>E</Kbd> interactuar
               <br />
-              <span className="opacity-80">Clic: caminar, cavar un bloque cercano o hacerle cariño a Dui</span>
+              <span className="text-[#7a614c]">Clic: caminar, cavar un bloque cercano o hacerle cariño a Dui</span>
             </div>
           )}
 
@@ -909,6 +956,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
                   store.cutHeld = true;
+                  hintOnce('zarpazo', '🐾', '¡Zarpazo!', 'Corta el pasto alto: ahí se esconden estrellitas. Joystick hacia abajo + 🐾 cava.');
                 }}
                 onPointerUp={() => (store.cutHeld = false)}
                 onPointerCancel={() => (store.cutHeld = false)}
@@ -934,7 +982,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                   <span aria-hidden="true" className="text-2xl">{t.icon}</span>
                   <div className="min-w-0">
                     <div className="text-sm font-black leading-tight">{t.title}</div>
-                    <div className="text-xs font-bold opacity-75 leading-snug">{t.text}</div>
+                    <div className="text-xs font-bold text-[#7a614c] leading-snug">{t.text}</div>
                   </div>
                 </motion.div>
               ))}
@@ -996,6 +1044,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         {started && sheet && (
           <motion.aside
             key={sheet}
+            ref={sheetRef}
             role="dialog"
             aria-label={sheet === 'weather' ? 'Elegir clima' : 'Sonidos ambiente'}
             initial={{ opacity: 0, y: -10, scale: 0.97 }}
@@ -1041,7 +1090,7 @@ function NoiseColorPicker({ value, onChange }: { value: number; onChange: (c: nu
     <div className="mt-2.5">
       <div className="flex items-center justify-between text-[11px] font-extrabold">
         <span>Tono: {nearest.label}</span>
-        <span className="opacity-70">grave ← → agudo</span>
+        <span className="text-[#7a614c]">grave ← → agudo</span>
       </div>
       <input
         type="range"
@@ -1194,7 +1243,7 @@ function IconButton({
   children,
   label,
   onClick,
-  active = false,
+  active,
   className = 'grid',
 }: {
   children: ReactNode;
@@ -1207,6 +1256,8 @@ function IconButton({
     <button
       type="button"
       aria-label={label}
+      // Only a real toggle (the sheet buttons) announces pressed/not pressed;
+      // "Ayuda, toggle button, not pressed" was wrong for a plain button.
       aria-pressed={active}
       title={label}
       onClick={onClick}
@@ -1240,7 +1291,7 @@ function StartScreen({ onStart, onClassic, coarse }: { onStart: () => void; onCl
       >
         <div className="text-sm font-extrabold uppercase tracking-[0.25em] text-[#a4552c]">🏝️ Bienvenid@ a la isla de</div>
         <h1 className="mt-2 text-4xl md:text-5xl font-black leading-none text-[#5b4636]">Daniel Eduardo</h1>
-        <p className="mt-3 text-[15px] font-bold leading-snug opacity-80">
+        <p className="mt-3 text-[15px] font-bold leading-snug text-[#7a614c]">
           Ingeniero en Informática. Desarrollo web full stack, IoT y soluciones a medida.
         </p>
         <motion.button
@@ -1253,10 +1304,10 @@ function StartScreen({ onStart, onClassic, coarse }: { onStart: () => void; onCl
         >
           ▶ Entrar a la isla
         </motion.button>
-        <p className="mt-4 text-xs font-bold opacity-80">
+        <p className="mt-4 text-xs font-bold text-[#7a614c]">
           {coarse ? 'Joystick para caminar (arriba salta) y 🐾 para el zarpazo.' : 'A/D para caminar · Espacio salta · F zarpazo · E para hablar'}
         </p>
-        <button type="button" onClick={onClassic} className="mt-5 text-sm font-extrabold underline decoration-2 underline-offset-4 opacity-70 hover:opacity-100">
+        <button type="button" onClick={onClassic} className="mt-5 text-sm font-extrabold text-[#7a614c] underline decoration-2 underline-offset-4 hover:text-[#5b4636]">
           Prefiero la versión clásica
         </button>
       </motion.div>
@@ -1278,10 +1329,19 @@ type DialogBoxProps = {
 
 function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, setChoiceIdx, onAdvance, onSkip }: DialogBoxProps) {
   const list = useRef<HTMLUListElement>(null);
+  const box = useRef<HTMLDivElement>(null);
   // Keep keyboard focus on the highlighted choice so Enter/Space pick it.
   useEffect(() => {
     if (showChoices) list.current?.querySelectorAll('button')[choiceIdx]?.focus({ preventScroll: true });
   }, [showChoices, choiceIdx]);
+  // Until the choices show, focus sits on the box itself: a screen reader
+  // then hears who is talking and the lines as they complete, and Tab from
+  // here reaches "Saltar tutorial" instead of the HUD behind it.
+  // `dialog` is a dependency because reopening the same speaker right after
+  // closing reuses the exiting box (same key), so mount alone is not enough.
+  useEffect(() => {
+    if (!showChoices) box.current?.focus({ preventScroll: true });
+  }, [showChoices, dialog]);
   return (
     <motion.div
       initial={{ opacity: 0, y: 30, scale: 0.96 }}
@@ -1318,8 +1378,10 @@ function DialogBox({ dialog, text, fullText, lineDone, showChoices, choiceIdx, s
         )}
       </AnimatePresence>
       <div
+        ref={box}
         role="dialog"
         aria-label={dialog.speaker}
+        tabIndex={-1}
         onClick={onAdvance}
         className="relative cursor-pointer rounded-[2rem] bg-[#fff8e7] px-6 pb-7 pt-8 md:px-9 md:pt-9 text-[#5b4636] shadow-[0_6px_0_rgba(91,70,54,0.22),0_20px_50px_rgba(60,30,40,0.25)]"
       >
@@ -1442,7 +1504,7 @@ function LibretaPanel({
             const a = ACHIEVEMENTS[id];
             const got = unlocked.includes(id);
             return (
-              <li key={id} className={`flex items-start gap-2.5 text-sm ${got ? 'text-[#5b4636]' : 'text-[#9b8672]'}`}>
+              <li key={id} className={`flex items-start gap-2.5 text-sm ${got ? 'text-[#5b4636]' : 'text-[#7a614c]'}`}>
                 <span aria-hidden="true" className={got ? '' : 'grayscale opacity-50'}>{got ? a.icon : '🔒'}</span>
                 <span>
                   <span className="font-black">{got ? a.title : 'Logro escondido'}</span>
