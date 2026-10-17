@@ -175,6 +175,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     onGround: false,
     wasOnGround: false,
     inWater: false,
+    // Seconds since Dui was last in the water: a jump is still allowed then,
+    // so climbing out onto the shore works.
+    wet: 0,
     coyote: 0,
     jumpBuffer: 0,
     jumpHeld: false,
@@ -342,7 +345,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       s.light.width = v.vw;
       s.light.height = v.vh;
     }
-    if (import.meta.env.DEV) Object.assign(window as object, { __pixel: v, __pixelSpots: STAR_SPOTS, __pixelVec: Vec3 });
+    if (import.meta.env.DEV) Object.assign(window as object, { __pixel: v, __pixelSpots: STAR_SPOTS, __pixelVec: Vec3, __pixelTile: tileAt });
   }, []);
 
   useEffect(() => {
@@ -519,7 +522,10 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       /* Physics */
       const p = st.pos;
       s.inWater = tileAt(Math.floor(p.x), Math.floor(p.z - 0.5)) === T.WATER;
-      const top = s.inWater ? 3.2 : run ? RUN : WALK;
+      // Head under water too: fully submerged (no jumping out from here).
+      const submerged = s.inWater && tileAt(Math.floor(p.x), Math.floor(p.z - 1.4)) === T.WATER;
+      s.wet = s.inWater ? 0.22 : Math.max(0, s.wet - dt);
+      const top = s.inWater ? 3.4 : run ? RUN : WALK;
       const want = ix * top;
       s.vx += (want - s.vx) * (1 - Math.exp(-(s.onGround || s.inWater ? 14 : 6) * dt));
       if (Math.abs(ix) > 0.08) s.facing = ix > 0 ? 1 : -1;
@@ -527,9 +533,12 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       s.coyote = s.onGround ? COYOTE : Math.max(0, s.coyote - dt);
       s.jumpBuffer = jump && !s.jumpHeld ? JUMP_BUFFER : Math.max(0, s.jumpBuffer - dt);
       if (jump || autoJump) {
-        if (s.inWater) {
-          if (!s.jumpHeld || autoJump) s.vy = Math.min(s.vy, -5.5);
-        } else if ((s.jumpBuffer > 0 || autoJump) && s.coyote > 0) {
+        if (s.inWater && submerged) {
+          // Deep down: holding jump swims up (handled with the buoyancy below).
+        } else if ((s.jumpBuffer > 0 || autoJump) && (s.coyote > 0 || s.wet > 0)) {
+          // On the ground, or at the water's surface: a real jump. That is how
+          // Dui gets back onto the shore; before, leaving the water took his
+          // jump away and he stayed stuck against the beach.
           s.vy = JUMP_V;
           s.coyote = 0;
           s.jumpBuffer = 0;
@@ -542,7 +551,14 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       // Letting go early cuts the jump short, like a platformer should.
       if (!jump && s.vy < -4 && !s.inWater && !s.autoJumping) s.vy += 30 * dt;
 
-      s.vy += (s.inWater ? 10 : GRAVITY) * dt;
+      if (s.inWater && s.vy > -6) {
+        // Cats float: Dui bobs up to the surface on his own, swims up while
+        // jump is held and only sinks when pushing down.
+        const want = jump ? -4.5 : down ? 2.5 : submerged ? -1.2 : 0.35;
+        s.vy += (want - s.vy) * (1 - Math.exp(-7 * dt));
+      } else {
+        s.vy += GRAVITY * dt;
+      }
       s.vy = Math.min(s.vy, s.inWater ? 3.5 : MAX_FALL);
 
       // X, with a one-block step-up so hills are walkable.
@@ -551,6 +567,10 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         if ((s.onGround || s.inWater) && !collide(nx, p.z - 1) && !collide(p.x, p.z - 1)) {
           p.z -= 1;
           s.lift = 1;
+        } else if (s.inWater && !submerged && !collide(nx, p.z - 2) && !collide(p.x, p.z - 2)) {
+          // The shore sits two blocks above where Dui floats: climb out.
+          p.z -= 2;
+          s.lift = 2;
         } else {
           nx = s.vx > 0 ? Math.floor(nx + HW) - HW - 1e-3 : Math.ceil(nx - HW) + HW + 1e-3;
           s.vx = 0;
@@ -579,7 +599,11 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       if (s.lift > 0) s.lift = Math.max(0, s.lift - dt * 10);
       // Splash when entering water.
       const nowWater = tileAt(Math.floor(p.x), Math.floor(p.z - 0.5)) === T.WATER;
-      if (nowWater && !s.inWater && !still) for (let q = 0; q < 10; q++) spawn({ x: p.x + (Math.random() - 0.5) * 2, y: p.z - 0.5, vx: (Math.random() - 0.5) * 5, vy: -4 - Math.random() * 3, life: 0.6, kind: 'px', c: PAL.waterTop, s: 1, g: 20 });
+      if (nowWater && !s.inWater) {
+        if (!still) for (let q = 0; q < 10; q++) spawn({ x: p.x + (Math.random() - 0.5) * 2, y: p.z - 0.5, vx: (Math.random() - 0.5) * 5, vy: -4 - Math.random() * 3, life: 0.6, kind: 'px', c: PAL.waterTop, s: 1, g: 20 });
+        // A cat in the water has something to say about it.
+        if (s.vy > 2) sfx.meow();
+      }
       s.inWater = nowWater;
       st.speed = Math.abs(s.vx);
       st.facing = s.facing;
