@@ -325,10 +325,16 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     const cssW = box.clientWidth;
     const cssH = box.clientHeight;
     if (!cssW || !cssH) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // The real ratio, not capped at 2: the virtual frame is the same size
+    // either way (about `tilesWide` tiles across), and capping it made each
+    // virtual pixel 4.5 device pixels on a 3x phone, so the pixel art came
+    // out uneven and Dui shrank to 16 CSS px on a 320 px screen.
+    const dpr = Math.min(window.devicePixelRatio || 1, 4);
     // Fewer tiles across on a phone, so Dui and the blocks stay chunky.
     const tilesWide = cssW < 700 ? 17 : cssW < 1100 ? 28 : 38;
-    const scale = Math.max(2, Math.round((cssW * dpr) / (tilesWide * TILE)));
+    // A short viewport (a phone held sideways) would get only ~12 rows of
+    // blocks, a third of them under the HUD: cap the scale so 16 rows fit.
+    const scale = Math.max(2, Math.min(Math.round((cssW * dpr) / (tilesWide * TILE)), Math.floor((cssH * dpr) / (16 * TILE))));
     v.cssW = cssW;
     v.cssH = cssH;
     v.dpr = dpr;
@@ -427,7 +433,10 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       events.current.onCut(1);
       return true;
     };
-    const swipe = (down: boolean) => {
+    // `at`: the block a tap landed on. A finger points at one block, so dig
+    // that one; the paw's own rule (in front, then below) only knew about the
+    // blocks at body height, and a tap on the ground ahead did nothing.
+    const swipe = (down: boolean, at?: { tx: number; ty: number }) => {
       const st = store;
       st.swing = 0.3;
       s.still = 0;
@@ -440,6 +449,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         events.current.onCut(n);
         return;
       }
+      if (at && dig(at.tx, at.ty)) return;
       // Nothing to cut: dig the block in front (or below, when crouching).
       // Dui is wider than a block, so "below" means every block under his paws:
       // taking out just the middle one left him standing on the neighbours.
@@ -448,7 +458,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         for (let tx = Math.floor(st.pos.x - HW); tx <= Math.floor(st.pos.x + HW - 1e-4); tx++) dig(tx, ty);
       } else if (!dig(Math.floor(fx), Math.floor(fz))) dig(Math.floor(fx), Math.floor(st.pos.z - 1.5));
     };
-    (store as unknown as { __swipe?: (down: boolean) => void }).__swipe = swipe;
+    (store as unknown as { __swipe?: typeof swipe }).__swipe = swipe;
 
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
@@ -479,7 +489,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         ix += st.joy.x;
         ix = clamp(ix, -1, 1);
         jump = k.has(' ') || k.has('w') || k.has('arrowup') || st.joy.z < -0.55;
-        down = k.has('s') || k.has('arrowdown') || st.joy.z > 0.6;
+        // Only a clearly downward thumb digs below: walking with the paw held
+        // and the thumb drifting 35° down used to open a hole under Dui.
+        down = k.has('s') || k.has('arrowdown') || (st.joy.z > 0.6 && st.joy.z > Math.abs(st.joy.x));
         run = k.has('shift') || Math.abs(st.joy.x) > 0.92;
       }
       if (Math.abs(ix) > 0.08) {
@@ -1034,7 +1046,10 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         }
         if (el.style.display !== 'block') el.style.display = 'block';
         const bob = l.goal === 'daniel' && !still ? Math.sin(t * 2) * 3 : 0;
-        el.style.transform = `translate(${Math.round((l.x + 0.5) * TILE * toCss - camPx * toCss)}px, ${Math.round(l.z * TILE * toCss - camPy * toCss + bob)}px) translate(-50%, -100%)`;
+        // Only touch the style when it changed: a write per label per frame
+        // kept the style recalc busy even with the camera still.
+        const tf = `translate(${Math.round((l.x + 0.5) * TILE * toCss - camPx * toCss)}px, ${Math.round(l.z * TILE * toCss - camPy * toCss + bob)}px) translate(-50%, -100%)`;
+        if (el.style.transform !== tf) el.style.transform = tf;
         const isGoal = !!l.goal && l.goal === store.goalId;
         if (isGoal !== el.classList.contains('label-meta')) el.classList.toggle('label-meta', isGoal);
       });
@@ -1043,8 +1058,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         const show = s.daniel.mutterUntil > t && inView(DANIEL.x, 2);
         if (show) {
           if (b.textContent !== s.daniel.mutter) b.textContent = s.daniel.mutter;
-          b.style.display = 'block';
-          b.style.transform = `translate(${Math.round((DANIEL.x + 1.2) * TILE * toCss - camPx * toCss)}px, ${Math.round((DANIEL.z - 1.9) * TILE * toCss - camPy * toCss)}px) translate(0, -100%)`;
+          if (b.style.display !== 'block') b.style.display = 'block';
+          const tf = `translate(${Math.round((DANIEL.x + 1.2) * TILE * toCss - camPx * toCss)}px, ${Math.round((DANIEL.z - 1.9) * TILE * toCss - camPy * toCss)}px) translate(0, -100%)`;
+          if (b.style.transform !== tf) b.style.transform = tf;
         } else if (b.style.display !== 'none') b.style.display = 'none';
       }
     };
@@ -1092,9 +1108,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     if (reach < 2.4 && store.swing <= 0) {
       s.facing = tx + 0.5 >= p.x ? 1 : -1;
       store.facing = s.facing;
-      const swipe = (store as unknown as { __swipe?: (down: boolean) => void }).__swipe;
+      const swipe = (store as unknown as { __swipe?: (down: boolean, at?: { tx: number; ty: number }) => void }).__swipe;
       if (swipe) {
-        swipe(ty > p.z - 0.5 && Math.abs(tx + 0.5 - p.x) < 1);
+        swipe(ty > p.z - 0.5 && Math.abs(tx + 0.5 - p.x) < 1, { tx, ty });
         return;
       }
     }

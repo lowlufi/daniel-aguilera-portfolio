@@ -826,12 +826,14 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
 
           {/* On narrow screens the four buttons wrap to a second row instead of
               scrolling sideways: as a hidden scroll strip, "Contacto" (the one
-              that matters most) was the button left out of view. On desktop the
+              that matters most) was the button left out of view. Under 390 px
+              (iPhone SE, small Androids) the stats row above wraps too, so the
+              row moves down: it used to cover the notebook button. On desktop the
               row sits at the bottom, where an open dialog covers it, so it hides
               while one is open instead of peeking out and taking keyboard focus. */}
           <nav
             aria-label="Ir a"
-            className={`absolute z-20 left-1/2 -translate-x-1/2 top-[60px] md:top-auto md:bottom-4 flex flex-wrap justify-center gap-1.5 md:gap-2 w-max max-w-[calc(100%-24px)] px-1 py-1 ${dialog || panel ? 'md:hidden' : ''}`}
+            className={`absolute z-20 left-1/2 -translate-x-1/2 top-[60px] max-[389px]:top-[108px] md:top-auto md:bottom-4 flex flex-wrap justify-center gap-1.5 md:gap-2 w-max max-w-[calc(100%-24px)] px-1 py-1 ${dialog || panel ? 'md:hidden' : ''}`}
           >
             {TRAVEL.map((t) => (
               <button
@@ -849,7 +851,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
           {/* Hidden until it takes focus with Tab (it follows "Ir a"), so it
               helps keyboard players without crowding the screen. */}
           {!dialog && !panel && (
-            <div className="absolute z-30 left-1/2 -translate-x-1/2 top-[150px] md:top-auto md:bottom-20">
+            <div className="absolute z-30 left-1/2 -translate-x-1/2 top-[150px] max-[389px]:top-[196px] md:top-auto md:bottom-20">
               <nav aria-label="Más lugares" className="sr-only focus-within:not-sr-only flex flex-wrap justify-center gap-1.5 rounded-full bg-[#fff8e7] p-1.5 shadow-[0_4px_0_rgba(91,70,54,0.25)]">
                 {MORE_PLACES.map((p) => (
                   <button
@@ -892,7 +894,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.9 }}
                 onClick={() => openDialog(nearItem.id)}
-                className="absolute z-20 left-1/2 -translate-x-1/2 bottom-[150px] md:bottom-20 rounded-full bg-[#fff8e7] px-5 py-2.5 text-sm md:text-base font-extrabold text-[#6b4f3a] shadow-[0_4px_0_rgba(91,70,54,0.25)]"
+                // 12 px above the joystick (2rem + 128 px + home bar): at 150 px its
+                // bottom edge sat on the stick on narrow phones.
+                className="absolute z-20 left-1/2 -translate-x-1/2 bottom-[calc(172px+env(safe-area-inset-bottom))] md:bottom-20 rounded-full bg-[#fff8e7] px-5 py-2.5 text-sm md:text-base font-extrabold text-[#6b4f3a] shadow-[0_4px_0_rgba(91,70,54,0.25)]"
               >
                 {!coarse && <Kbd>E</Kbd>} {coarse && '💬 '}
                 {nearItem.verb} {nearItem.label}
@@ -920,7 +924,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             </>
           )}
 
-          <div role="status" aria-live="polite" className="pointer-events-none absolute z-30 left-1/2 -translate-x-1/2 top-[110px] md:top-20 flex w-[min(360px,calc(100%-24px))] flex-col items-center gap-2">
+          <div role="status" aria-live="polite" className="pointer-events-none absolute z-30 left-1/2 -translate-x-1/2 top-[110px] max-[389px]:top-[196px] md:top-20 flex w-[min(360px,calc(100%-24px))] flex-col items-center gap-2">
             <AnimatePresence>
               {toasts.map((t) => (
                 <motion.div
@@ -1575,6 +1579,9 @@ function Joystick({ store }: { store: ReturnType<typeof createStore> }) {
   const base = useRef<HTMLDivElement>(null);
   const [knob, setKnob] = useState({ x: 0, y: 0 });
   const R = 46;
+  // A thumb never lands exactly on the centre: inside this radius nothing
+  // moves, and past it the stick ramps up from 0 so there is no jolt.
+  const DEAD = 9;
   const move = (e: ReactPointerEvent) => {
     const el = base.current;
     if (!el) return;
@@ -1582,10 +1589,9 @@ function Joystick({ store }: { store: ReturnType<typeof createStore> }) {
     let dx = e.clientX - (r.left + r.width / 2);
     let dy = e.clientY - (r.top + r.height / 2);
     const d = Math.hypot(dx, dy);
-    if (d > R) {
-      dx = (dx / d) * R;
-      dy = (dy / d) * R;
-    }
+    const m = d < DEAD ? 0 : Math.min(1, (d - DEAD) / (R - DEAD));
+    dx = d ? (dx / d) * m * R : 0;
+    dy = d ? (dy / d) * m * R : 0;
     setKnob({ x: dx, y: dy });
     store.joy.x = dx / R;
     store.joy.z = dy / R;
