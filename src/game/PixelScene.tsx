@@ -418,7 +418,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       s.light.width = v.vw;
       s.light.height = v.vh;
     }
-    if (import.meta.env.DEV) Object.assign(window as object, { __pixel: v, __pixelSpots: STAR_SPOTS, __pixelVec: Vec3, __pixelTile: tileAt });
+    if (import.meta.env.DEV) Object.assign(window as object, { __pixel: v, __pixelSim: sim.current, __pixelSpots: STAR_SPOTS, __pixelVec: Vec3, __pixelTile: tileAt });
   }, []);
 
   useEffect(() => {
@@ -483,7 +483,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     const wallBeside = (x: number, z: number) => {
       const y0 = Math.floor(z - H);
       const y1 = Math.floor(z - 0.2);
-      for (const side of [x - HW - 0.12, x + HW + 0.12]) for (let ty = y0; ty <= y1; ty++) if (solidAt(Math.floor(side), ty)) return true;
+      // Reach of almost a block: in a shaft three blocks wide Dui, standing in
+      // the middle, touches neither wall, and could never climb out.
+      for (const side of [x - HW - 0.9, x + HW + 0.9]) for (let ty = y0; ty <= y1; ty++) if (solidAt(Math.floor(side), ty)) return true;
       return false;
     };
     const groundBelow = (x: number, z: number) => {
@@ -724,6 +726,12 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         // shaft dug deeper than a jump (~2.75 blocks) was a trap with no way out.
         s.vy += (-6.5 - s.vy) * (1 - Math.exp(-10 * dt));
         s.climbing = true;
+        // Head against an overhang (a shaft dug a little off-centre): slide
+        // toward the open side instead of pawing at the lip forever.
+        const row = Math.floor(p.z - H - 0.08);
+        const left = solidAt(Math.floor(p.x - HW), row);
+        const right = solidAt(Math.floor(p.x + HW - 1e-4), row);
+        if (left !== right) s.vx += (left ? 1 : -1) * 40 * dt;
       } else {
         s.vy += GRAVITY * dt;
       }
@@ -817,7 +825,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         if (!sp.revealed && q.cave && (p.x - (q.x + 0.5)) ** 2 + (p.z - q.z) ** 2 < 9) st.revealAt(q.x + 0.5, q.z - 0.5, 0);
         if (!sp.revealed || sp.taken) return;
         sp.t += dt;
-        if ((p.x - (q.x + 0.5)) ** 2 + (p.z - 0.5 - (q.z - 0.7)) ** 2 < 1.2) {
+        // A generous reach (~1.4 blocks): Dui is wider than a block, and a star
+        // over a step in the hillside sits where he can't stand right under it.
+        if ((p.x - (q.x + 0.5)) ** 2 + (p.z - 0.5 - (q.z - 0.7)) ** 2 < 2) {
           sp.taken = true;
           sp.t = 0;
           sfx.star();
