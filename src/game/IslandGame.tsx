@@ -181,7 +181,12 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const later = useCallback((fn: () => void, ms: number) => {
     timers.current.push(window.setTimeout(fn, ms));
   }, []);
-  const [unlocked, setUnlocked] = useState<AchievementId[]>(() => readStorage('island-achievements', [] as AchievementId[]));
+  const [unlocked, setUnlocked] = useState<AchievementId[]>(() => {
+    // Anything but a list of known ids (a corrupt value, an achievement that no
+    // longer exists) would throw off the "n/12" counter and the unlock check.
+    const v = readStorage<unknown>('island-achievements', []);
+    return Array.isArray(v) ? [...new Set(v.filter((id): id is AchievementId => typeof id === 'string' && id in ACHIEVEMENTS))] : [];
+  });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const visited = useRef(new Set<InteractableId>());
   const toastKey = useRef(0);
@@ -325,7 +330,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             '¡Bienvenid@ a la isla de Daniel Eduardo! 🌅',
             'Eres Dui, el gato de Daniel. Camina con A y D (o las flechas) y salta con Espacio o W. En el celular, usa el joystick: hacia arriba salta.',
             'Con F (o 🐾) das un zarpazo: corta el pasto alto y cava la tierra. Dicen que hay estrellitas escondidas entre el pasto… y algunas bajo tierra.',
-            'Acércate a las cosas y pulsa E para interactuar. ¡O usa los botones de abajo para ir directo!',
+            'Acércate a las cosas y pulsa E para interactuar. ¡O usa los botones «Ir a» para llegar directo!',
           ],
           choices: [{ label: '¡Vamos!', run: finishTutorial }],
           skippable: true,
@@ -498,7 +503,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     onCut: (n) => {
       const next = (cutRef.current += n);
       setCut(next);
-      if (next >= 60) unlock('jardinero');
+      // The 2D island keeps ~22 tufts of tall grass (the clearings have none),
+      // so the old 60 cuts took several regrowth cycles for a "first tufts" badge.
+      if (next >= 5) unlock('jardinero');
       if (next >= store.grassTotal * 0.35) unlock('cesped');
     },
     onStar: (i) => {
@@ -623,13 +630,17 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         if (!res.ok) return;
         const d = await res.json();
         if (!alive) return;
+        const c = d?.current ?? {};
+        // Open-Meteo can return null for a reading; the station dialog calls
+        // toFixed on these, which would crash the island.
+        if (![c.temperature_2m, c.relative_humidity_2m, c.wind_speed_10m, c.weather_code].every(Number.isFinite)) return;
         store.meteo = {
-          temp: d.current.temperature_2m,
-          hum: d.current.relative_humidity_2m,
-          wind: d.current.wind_speed_10m,
-          code: d.current.weather_code,
-          isDay: d.current.is_day === 1,
-          sunset: d.daily?.sunset?.[0] ?? 0,
+          temp: c.temperature_2m,
+          hum: c.relative_humidity_2m,
+          wind: c.wind_speed_10m,
+          code: c.weather_code,
+          isDay: c.is_day === 1,
+          sunset: finiteOr(d.daily?.sunset?.[0], 0),
         };
       } catch {
         // Offline or blocked: the station just keeps showing "wifi...".

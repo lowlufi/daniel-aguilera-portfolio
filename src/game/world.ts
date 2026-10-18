@@ -342,11 +342,16 @@ export const STAR_SPOTS: { x: number; z: number; cave: boolean }[] = (() => {
   for (const c of CAVES) if (c.star) out.push({ x: c.x, z: SURFACE[c.x] + c.depth + c.h - 1, cave: true });
   const tall: number[] = [];
   for (let x = 0; x < WORLD_W; x++) if (tiles[idx(x, SURFACE[x] - 1)] === T.TALLGRASS) tall.push(x);
-  let guard = 0;
-  while (out.length < STAR_COUNT && guard++ < 5000) {
-    const x = tall[Math.floor(rnd() * tall.length)];
-    if (out.some((s) => Math.abs(s.x - x) < 9)) continue;
-    out.push({ x, z: SURFACE[x], cave: false });
+  // The spacing shrinks when the island runs out of room: the clearings keep
+  // only ~22 tufts of tall grass, and nine tiles apart they held four stars,
+  // not eight, so the HUD's "/12" could never be reached.
+  for (const gap of [9, 7, 5, 3, 1]) {
+    let guard = 0;
+    while (out.length < STAR_COUNT && guard++ < 2000) {
+      const x = tall[Math.floor(rnd() * tall.length)];
+      if (out.some((s) => Math.abs(s.x - x) < gap)) continue;
+      out.push({ x, z: SURFACE[x], cave: false });
+    }
   }
   return out;
 })();

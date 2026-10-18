@@ -1,4 +1,5 @@
-import type { InteractableId } from './world';
+import { PROJECTS } from '../data';
+import { STAR_COUNT, type InteractableId } from './world';
 
 /*
  * Daniel's notebook: five stamps, one per section of the portfolio.
@@ -51,6 +52,7 @@ export type Progress = {
 const KEY = 'island-progress-v1';
 const EMPTY: Progress = { stamps: [], projects: [], stars: [] };
 const STAMP_IDS = new Set<string>(STAMPS.map((s) => s.id));
+const PROJECT_IDS = new Set(PROJECTS.map((p) => p.id));
 
 const ints = (v: unknown): number[] =>
   Array.isArray(v) ? [...new Set(v.filter((n): n is number => Number.isInteger(n) && n >= 0))] : [];
@@ -63,8 +65,10 @@ export function loadProgress(): Progress {
     const v = JSON.parse(raw) as Partial<Record<keyof Progress, unknown>>;
     return {
       stamps: Array.isArray(v.stamps) ? [...new Set(v.stamps.filter((s): s is StampId => typeof s === 'string' && STAMP_IDS.has(s)))] : [],
-      projects: ints(v.projects),
-      stars: ints(v.stars),
+      // Only ids that still exist: a stale or hand-edited entry would count
+      // toward "all signs read" / "all stars found" and block those for good.
+      projects: ints(v.projects).filter((id) => PROJECT_IDS.has(id)),
+      stars: ints(v.stars).filter((i) => i < STAR_COUNT),
     };
   } catch {
     return { ...EMPTY };
