@@ -139,7 +139,8 @@ const FLATS: { x0: number; x1: number }[] = [
   { x0: GARDEN.x - 9, x1: GARDEN.x + 9 },
   { x0: STATION.x - 2, x1: STATION.x + 2 },
   { x0: 75, x1: 109 },
-  { x0: WELCOME.x - 4, x1: WELCOME.x + 6 },
+  // Wide enough for the campfire and its log seats (ambiente.ts).
+  { x0: WELCOME.x - 4, x1: WELCOME.x + 10 },
   { x0: DANIEL.x - 3, x1: HOUSE.x + 8 },
   { x0: MAILBOX.x - 2, x1: MAILBOX.x + 2 },
 ];
@@ -189,7 +190,7 @@ const KEEP_CLEAR: { x0: number; x1: number }[] = [
   { x0: GARDEN.x - 10, x1: GARDEN.x + 10 },
   { x0: STATION.x - 3, x1: STATION.x + 3 },
   { x0: 75, x1: 110 },
-  { x0: WELCOME.x - 4, x1: WELCOME.x + 7 },
+  { x0: WELCOME.x - 4, x1: WELCOME.x + 11 },
   { x0: DANIEL.x - 4, x1: HOUSE.x + 9 },
   { x0: MAILBOX.x - 3, x1: MAILBOX.x + 3 },
 ];

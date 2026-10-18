@@ -40,9 +40,10 @@ export const PAL = {
   grass: '#5fb646',
   grassLight: '#7ccf5a',
   grassDark: '#3e8f36',
-  stone: '#6f6f78',
-  stoneDark: '#5c5c64',
-  stoneLight: '#84848c',
+  // A warm grey: the cold blue-grey made the underground feel like a parking lot.
+  stone: '#776d69',
+  stoneDark: '#62595a',
+  stoneLight: '#8a807a',
   sand: '#e8d59a',
   sandDark: '#d9c184',
   water: '#3b86b8',

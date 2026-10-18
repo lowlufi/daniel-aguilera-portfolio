@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, type MutableRefObject, type PointerEven
 import type { GameEvents, GameStore } from './store';
 import { sfx } from './audio';
 import { atmo, css, stepAtmosphere, type WeatherId } from './weather';
+import { CAMPFIRE, LANTERNS, cloudSprite, drawCampfire, drawGrade, drawLantern, drawMotes, drawSunRays, drawSwayingGrass, glow, moodFor, spawnMotes, stepMotes, type Mote } from './ambiente';
 import {
   CAVES,
   DANIEL,
@@ -199,6 +200,8 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     dug: new Map<number, { t: number; time: number }>(),
     stars: STAR_SPOTS.map((_, i) => ({ revealed: store.starsTaken.has(i), taken: store.starsTaken.has(i), t: 0 })),
     particles: [] as Particle[],
+    motes: [] as Mote[],
+    sparkT: 0,
     drops: [] as Drop[],
     flies: [] as { x: number; y: number; k: number }[],
     smokeT: 0,
@@ -238,6 +241,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           if (inIsland(x) && y > SURFACE[x]) drawEarthBg(t, px, py, x, y);
           continue;
         }
+        // Standing tall grass sways, so it is drawn every frame (ambiente.ts);
+        // only the stubble left after cutting is baked into the ground.
+        if (tile === T.TALLGRASS && !s.cut.has(i)) continue;
         drawTile(t, tile, px, py, x, y, tileAt(x, y - 1), tile === T.TALLGRASS && s.cut.has(i));
       }
     t.restore();
@@ -746,11 +752,27 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         }
       }
 
+      /* Ambient life: petals, leaves, butterflies, fireflies, campfire sparks. */
+      if (!still) {
+        const mood = moodFor(props.current.weather, s.dark);
+        const vx0 = v.camX;
+        const vx1 = v.camX + v.vw / TILE;
+        spawnMotes(s.motes, dt, vx0, vx1, v.camY, v.camY + v.vh / TILE, mood, props.current.weather);
+        stepMotes(s.motes, dt, s.time, mood.wind);
+        if (s.motes.length) s.motes = s.motes.filter((m) => m.life > 0);
+        if (CAMPFIRE.x > vx0 - 4 && CAMPFIRE.x < vx1 + 4 && (s.sparkT -= dt) <= 0) {
+          s.sparkT = 0.12 + Math.random() * 0.2;
+          spawn({ x: CAMPFIRE.x + 0.5 + (Math.random() - 0.5) * 0.4, y: SURFACE[CAMPFIRE.x] - 0.7, vx: (Math.random() - 0.5) * 0.6, vy: -1.6 - Math.random() * 1.2, life: 1 + Math.random() * 0.8, kind: 'px', c: Math.random() < 0.5 ? '#ffd23f' : '#ff8a3c', s: 1, g: -0.2 });
+          if (Math.random() < 0.25) spawn({ x: CAMPFIRE.x + 0.5, y: SURFACE[CAMPFIRE.x] - 1.1, vx: 0.2 + Math.random() * 0.3, vy: -0.7, life: 3, kind: 'smoke', c: '#cfc6bb', s: 2, g: -0.05 });
+        }
+      } else if (s.motes.length) s.motes.length = 0;
+
       /* Camera: a little ahead of where Dui looks, never past the world. */
       const vwT = v.vw / TILE;
       const vhT = v.vh / TILE;
       const tx = clamp(p.x + s.facing * 1.6 - vwT / 2, 0, Math.max(0, WORLD_W - vwT));
-      const tz = clamp(p.z - vhT * 0.58, 0, Math.max(0, WORLD_H - vhT));
+      // Dui sits low in the frame: more sky and island, less underground.
+      const tz = clamp(p.z - vhT * (s.under > 0.3 ? 0.55 : 0.66), 0, Math.max(0, WORLD_H - vhT));
       const ck = 1 - Math.exp(-5 * dt);
       v.camX += (tx - v.camX) * ck;
       v.camY += (tz - v.camY) * ck;
@@ -808,7 +830,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         circle(ctx, mx - 4, my - 3, 8);
         ctx.globalAlpha = 1;
       }
-      if (atmo.sunAmt > 0.02) {
+      // At night the 'sun' is pale moonlight for the 3D-era config: the moon is
+      // already drawn above, so no second disc.
+      if (atmo.sunAmt > 0.02 && atmo.stars < 0.5) {
         const sx = Math.round(vw * (0.5 + atmo.sunDir[0] * 0.45) - camPx * 0.04);
         const sy = Math.round(horizon - 30 - atmo.sunDir[1] * 150);
         ctx.globalAlpha = atmo.sunAmt * 0.25;
@@ -817,6 +841,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         ctx.globalAlpha = atmo.sunAmt;
         circle(ctx, sx, sy, 9);
         ctx.globalAlpha = 1;
+        if (!still && atmo.mist < 0.3) drawSunRays(ctx, sx, sy, vw, vh, atmo.sunAmt * 0.9, t, css(atmo.sunColor));
       }
 
       // Far and near hills, clouds between them.
@@ -832,14 +857,12 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           const drift = still ? 0 : t * 5;
           const x = Math.round(((cl.x + drift - camPx * 0.35) % span + span) % span - 150);
           const y = Math.round(horizon - cl.y - camPy * 0.1);
-          if (x > vw || x + cl.w < 0) continue;
-          ctx.globalAlpha = 0.9;
-          for (const [px, py, w, h] of cl.parts) {
-            ctx.fillStyle = css(atmo.cloud);
-            ctx.fillRect(x + px, y + py, w, h);
-            ctx.fillStyle = css(atmo.cloudGlow);
-            ctx.fillRect(x + px + 1, y + py, w - 2, 1);
-          }
+          if (x > vw || x + cl.w * 1.4 < 0) continue;
+          // Round, soft-topped clouds; colors rounded so the sprite cache
+          // only rebuilds when the weather actually changes.
+          const q = (c: number[]) => css([Math.round(c[0] / 8) * 8, Math.round(c[1] / 8) * 8, Math.round(c[2] / 8) * 8] as [number, number, number]);
+          ctx.globalAlpha = 0.92;
+          ctx.drawImage(cloudSprite(cl.parts.length * 7 + Math.round(cl.w), Math.round(cl.w * 1.4), q(atmo.cloud), q(atmo.cloudGlow)), x, y - Math.round(cl.w * 0.4));
           ctx.globalAlpha = 1;
         }
       }
@@ -847,6 +870,24 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
 
       /* Ground */
       ctx.drawImage(s.terrain, camPx, camPy, vw, vh, 0, 0, vw, vh);
+
+      // The deeper, the darker and warmer: soil fades into a cozy brown dusk
+      // instead of a flat wall of stone.
+      {
+        const top = (SEA_LEVEL - 6) * TILE - camPy;
+        const bottom = (SEA_LEVEL + 10) * TILE - camPy;
+        if (bottom > 0 && top < vh) {
+          const dg = ctx.createLinearGradient(0, top, 0, bottom);
+          dg.addColorStop(0, 'rgba(40,22,18,0)');
+          dg.addColorStop(1, 'rgba(40,22,18,0.55)');
+          ctx.fillStyle = dg;
+          ctx.fillRect(0, Math.max(0, top), vw, vh - Math.max(0, top));
+          if (bottom < vh) {
+            ctx.fillStyle = 'rgba(40,22,18,0.55)';
+            ctx.fillRect(0, bottom, vw, vh - bottom);
+          }
+        }
+      }
 
       // Water surface, moving.
       const x0 = Math.floor(camPx / TILE);
@@ -885,6 +926,21 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       const sy = (z: number) => Math.round(z * TILE - camPy);
       const inView = (x: number, m = 4) => x * TILE - camPx > -m * TILE && x * TILE - camPx < vw + m * TILE;
 
+      // Tall grass, leaning with the wind; Dui pushes it aside as he passes.
+      {
+        const wind = still ? 0 : moodFor(props.current.weather, s.dark).wind * 1.4;
+        for (let x = Math.max(0, x0 - 1); x <= Math.min(WORLD_W - 1, x1); x++) {
+          const ty = SURFACE[x] - 1;
+          const i = idx(x, ty);
+          if (tiles[i] !== T.TALLGRASS || s.cut.has(i)) continue;
+          const dxD = x + 0.5 - p.x;
+          const push = Math.abs(dxD) < 1.2 && Math.abs(p.z - SURFACE[x]) < 1.5 ? Math.sign(dxD || s.facing) * 3 : 0;
+          drawSwayingGrass(ctx, x * TILE - camPx, ty * TILE - camPy, x, ty, t, wind, push);
+        }
+      }
+      const mood = moodFor(props.current.weather, s.dark);
+      for (const ln of LANTERNS) if (inView(ln.x)) drawLantern(ctx, sx(ln.x + 0.2), sy(SURFACE[ln.x]), mood.evening, t);
+      if (inView(CAMPFIRE.x)) drawCampfire(ctx, sx(CAMPFIRE.x + 0.5), sy(SURFACE[CAMPFIRE.x]), t, still);
       if (inView(WORKSHOP.x)) drawGear(ctx, sx(WORKSHOP.x + 0.5) + 2, sy(SURFACE[WORKSHOP.x] - WORKSHOP.h + 1) - 2, still ? 0 : t * 0.9);
       for (const pl of GARDEN_PLOTS) if (inView(pl.x)) drawPlant(ctx, sx(pl.x + 0.5), sy(pl.z), pl.kind, store.garden.growth, t);
       if (inView(STATION.x)) drawStation(ctx, sx(STATION.x + 0.5), sy(STATION.z), t, !!store.meteo);
@@ -940,6 +996,8 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       }
       ctx.globalAlpha = 1;
 
+      drawMotes(ctx, s.motes, t, camPx, camPy);
+
       /* Dui */
       const pose: DuiPose = {
         facing: s.facing,
@@ -955,6 +1013,13 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         swim: s.inWater ? 1 : 0,
       };
       drawDui(ctx, sx(p.x), sy(p.z + s.lift * 0.6) + (s.inWater ? 4 : 0), pose);
+
+      // Warm light: the fire always glows a little; lanterns come on at dusk.
+      if (inView(CAMPFIRE.x)) {
+        const fl = still ? 1 : 0.85 + Math.sin(t * 11) * 0.08 + Math.sin(t * 17) * 0.05;
+        glow(ctx, sx(CAMPFIRE.x + 0.5), sy(SURFACE[CAMPFIRE.x]) - 8, 34, 'rgba(255,150,60,0.55)', (0.35 + mood.evening * 0.5) * fl);
+      }
+      for (const ln of LANTERNS) if (inView(ln.x)) glow(ctx, sx(ln.x + 0.2) + 4, sy(SURFACE[ln.x]) - 15, 22, 'rgba(255,210,120,0.6)', mood.evening * 0.85);
 
       /* Weather on top of everything */
       if (!still) {
@@ -1022,6 +1087,8 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           lamp(sx(STAR_SPOTS[i].x + 0.5), sy(STAR_SPOTS[i].z - 0.7), TILE * 1.6, 0.9);
         });
         if (inView(STATION.x)) lamp(sx(STATION.x + 0.5) + 2, sy(STATION.z) - 19, 10, 0.8);
+        if (inView(CAMPFIRE.x)) lamp(sx(CAMPFIRE.x + 0.5), sy(SURFACE[CAMPFIRE.x]) - 8, TILE * (4.2 + (still ? 0 : Math.sin(t * 9) * 0.25)), 1);
+        for (const ln of LANTERNS) if (inView(ln.x)) lamp(sx(ln.x + 0.2) + 4, sy(SURFACE[ln.x]) - 15, TILE * 2.6, 0.95);
         ctx.drawImage(s.light, 0, 0);
       }
       if (atmo.mist > 0.02) {
@@ -1035,6 +1102,8 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           }
         }
       }
+
+      drawGrade(ctx, vw, vh, props.current.weather, s.under);
 
       /* Labels and Daniel's bubble, in the DOM */
       const toCss = v.scale / v.dpr;
