@@ -324,7 +324,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
           lines: [
             '¡Bienvenid@ a la isla de Daniel Eduardo! 🌅',
             'Eres Dui, el gato de Daniel. Camina con A y D (o las flechas) y salta con Espacio o W. En el celular, usa el joystick: hacia arriba salta.',
-            'Con F (o 🐾) das un zarpazo: corta el pasto alto y cava la tierra. Dicen que hay estrellitas escondidas entre el pasto… y algunas bajo tierra.',
+            'Con F (o 🐾) das un zarpazo: corta el pasto alto y cava la tierra. S+F cava hacia abajo y W+F sube cavando. Dicen que hay estrellitas escondidas entre el pasto… y algunas bajo tierra.',
             'Acércate a las cosas y pulsa E para interactuar. ¡O usa los botones de abajo para ir directo!',
           ],
           choices: [{ label: '¡Vamos!', run: finishTutorial }],
@@ -930,7 +930,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             <div className="pointer-events-none absolute bottom-4 left-4 z-10 hidden lg:block rounded-2xl bg-[#fff8e7]/85 px-4 py-3 text-xs font-bold leading-relaxed text-[#6b4f3a]">
               <Kbd>A</Kbd> <Kbd>D</Kbd> caminar · <Kbd>Shift</Kbd> correr · <Kbd>Espacio</Kbd> saltar
               <br />
-              <Kbd>F</Kbd> zarpazo (pasto y tierra) · <Kbd>S</Kbd>+<Kbd>F</Kbd> cavar abajo · <Kbd>E</Kbd> interactuar
+              <Kbd>F</Kbd> zarpazo (pasto y tierra) · <Kbd>S</Kbd>+<Kbd>F</Kbd> cavar abajo · <Kbd>W</Kbd>+<Kbd>F</Kbd> subir cavando · <Kbd>E</Kbd> interactuar
               <br />
               <span className="text-[#7a614c]">Clic: caminar, cavar un bloque cercano o hacerle cariño a Dui</span>
             </div>

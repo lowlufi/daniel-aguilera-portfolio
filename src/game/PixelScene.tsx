@@ -21,6 +21,7 @@ import {
   STATION,
   SURFACE,
   T,
+  TREES,
   Vec3,
   WELCOME,
   WORKSHOP,
@@ -199,6 +200,12 @@ const CLOUDS = (() => {
 })();
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+
+// Columns whose surface block can't be dug: what stands on them (Daniel, the
+// signs, the trees) is drawn at a fixed height and would float over a hole.
+const KEEP_GROUND = new Set<number>();
+for (const it of INTERACTABLES) if (it.id !== 'dock' && it.id !== 'garden') for (let d = -1; d <= 1; d++) KEEP_GROUND.add(Math.round(it.x) + d);
+for (const tr of TREES) KEEP_GROUND.add(tr.x);
 
 export default function PixelScene({ store, events, onWalkTo, weather, reduceMotion, paused }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -459,6 +466,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       const i = idx(tx, ty);
       const t = tiles[i];
       if (!isDiggableTile(t)) return false;
+      // The ground under Daniel, the signs and the trees stays: they're drawn
+      // at a fixed height and would hover over the hole.
+      if (ty === SURFACE[tx] && KEEP_GROUND.has(tx)) return false;
       tiles[i] = T.AIR;
       s.dug.set(i, { t, time: s.time });
       // Tall grass standing on this block has nothing to stand on.
@@ -470,19 +480,61 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         spawn({ x: tx + 0.5, y: ty + 0.5, vx: (R() - 0.5) * 5, vy: -3 - R() * 4, life: 0.7, kind: 'px', c: t === T.SAND ? PAL.sandDark : k & 1 ? PAL.dirtDark : PAL.dirtLight, s: 2, g: 22 });
       sfx.pop();
       store.revealAt(tx + 0.5, ty + 0.5, 3.2);
-      events.current.onCut(1);
+      // Not an `onCut`: that counter (and the gardening achievements) is about
+      // grass, and every block of dirt was inflating it.
+      return true;
+    };
+    // Jump + paw while underground: Dui digs the block over his head (if there
+    // is one) and climbs a block, scraping dirt together under his paws. It's
+    // the only way up: a shaft dug with S+F or a cave is deeper than a jump,
+    // and before this the way out of one was reloading the page.
+    const burrowUp = () => {
+      const p = store.pos;
+      const body = Math.floor(p.z - 0.5);
+      const head = body - 1;
+      const x0 = Math.floor(p.x - HW);
+      const x1 = Math.floor(p.x + HW - 1e-4);
+      // Only with his body at or below ground level somewhere under him (a
+      // hole or a cave; on a slope one column is enough): no dirt towers.
+      let under = false;
+      for (let tx = x0; tx <= x1; tx++) if (body >= SURFACE[tx]) under = true;
+      if (!under) return false;
+      let fill: number = T.DIRT;
+      let dug = false;
+      for (let tx = x0; tx <= x1; tx++) {
+        const t = tiles[idx(tx, head)];
+        if (!dig(tx, head)) continue;
+        dug = true;
+        if (t === T.SAND) fill = T.SAND;
+      }
+      // Stone over his head: the notch stays, Dui doesn't.
+      if (collide(p.x, body)) return dug;
+      if (!dug) sfx.pop();
+      for (let tx = x0; tx <= x1; tx++) {
+        const i = idx(tx, body);
+        const d = s.dug.get(i);
+        // His own hole gets its block back; a block left in natural air (a
+        // cave) is remembered so the refill clears it later.
+        if (d && d.t === fill) s.dug.delete(i);
+        else if (!d) s.dug.set(i, { t: tiles[i], time: s.time });
+        tiles[i] = fill;
+      }
+      p.z = body;
+      s.vy = 0;
+      s.lift = 1;
+      paintRegion(x0 - 1, body - 1, x1 + 1, body + 1);
       return true;
     };
     // `at`: the block a tap landed on. A finger points at one block, so dig
     // that one; the paw's own rule (in front, then below) only knew about the
     // blocks at body height, and a tap on the ground ahead did nothing.
-    const swipe = (down: boolean, at?: { tx: number; ty: number }) => {
+    const swipe = (down: boolean, at?: { tx: number; ty: number }, up = false) => {
       const st = store;
       st.swing = 0.3;
       s.still = 0;
-      const fx = st.pos.x + s.facing * 1.1;
-      const fz = st.pos.z - 0.5;
-      const n = st.cutAt(fx, fz, 1.4);
+      const fx = at ? at.tx + 0.5 : st.pos.x + s.facing * 1.1;
+      const fz = at ? at.ty + 1 : st.pos.z - 0.5;
+      const n = st.cutAt(fx, fz, at ? 0.9 : 1.4);
       st.revealAt(fx, fz, 1.4);
       if (n > 0) {
         sfx.snip();
@@ -496,6 +548,8 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       if (down) {
         const ty = Math.floor(st.pos.z + 0.02);
         for (let tx = Math.floor(st.pos.x - HW); tx <= Math.floor(st.pos.x + HW - 1e-4); tx++) dig(tx, ty);
+      } else if (up && burrowUp()) {
+        // Dui went up a block; nothing in front to dig.
       } else if (!dig(Math.floor(fx), Math.floor(fz))) dig(Math.floor(fx), Math.floor(st.pos.z - 1.5));
     };
     (store as unknown as { __swipe?: typeof swipe }).__swipe = swipe;
@@ -720,13 +774,16 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       /* Paw: hold F or the button. */
       st.swing = Math.max(0, st.swing - dt);
       const paw = !st.frozen && (k.has('f') || st.cutHeld);
-      if (paw && st.swing <= 0) swipe(down);
+      if (paw && st.swing <= 0) swipe(down, undefined, jump);
 
       /* Stars: walk over a revealed one to take it. */
       s.stars.forEach((sp, i) => {
+        const q = STAR_SPOTS[i];
+        // A cave star shows itself once Dui is down there with it: breaking
+        // in from the side or off-centre keeps the paw out of its reach.
+        if (!sp.revealed && q.cave && (p.x - (q.x + 0.5)) ** 2 + (p.z - q.z) ** 2 < 9) st.revealAt(q.x + 0.5, q.z - 0.5, 0);
         if (!sp.revealed || sp.taken) return;
         sp.t += dt;
-        const q = STAR_SPOTS[i];
         if ((p.x - (q.x + 0.5)) ** 2 + (p.z - 0.5 - (q.z - 0.7)) ** 2 < 1.2) {
           sp.taken = true;
           sp.t = 0;
@@ -744,7 +801,12 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
             paintRegion(i % WORLD_W, Math.floor(i / WORLD_W), i % WORLD_W, Math.floor(i / WORLD_W));
           }
         for (const [i, d] of s.dug) {
-          if (s.time - d.time < REFILL_AFTER || tiles[i] !== T.AIR) continue;
+          // Also the blocks Dui left behind while burrowing up: back to air.
+          if (tiles[i] === d.t) {
+            s.dug.delete(i);
+            continue;
+          }
+          if (s.time - d.time < REFILL_AFTER) continue;
           const tx = i % WORLD_W;
           const ty = Math.floor(i / WORLD_W);
           if (Math.abs(tx + 0.5 - p.x) < HW + 0.6 && ty >= Math.floor(p.z - H) - 1 && ty <= Math.floor(p.z)) continue;
@@ -1247,7 +1309,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     if (reach < 2.4 && store.swing <= 0) {
       s.facing = tx + 0.5 >= p.x ? 1 : -1;
       store.facing = s.facing;
-      const swipe = (store as unknown as { __swipe?: (down: boolean, at?: { tx: number; ty: number }) => void }).__swipe;
+      const swipe = (store as unknown as { __swipe?: (down: boolean, at?: { tx: number; ty: number }, up?: boolean) => void }).__swipe;
       if (swipe) {
         swipe(ty > p.z - 0.5 && Math.abs(tx + 0.5 - p.x) < 1, { tx, ty });
         return;
