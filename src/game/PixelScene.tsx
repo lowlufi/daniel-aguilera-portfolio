@@ -140,6 +140,32 @@ for (let y = 0; y < WORLD_H; y++)
     if (t === T.CHIMNEY && tiles[idx(x, y - 1)] !== T.CHIMNEY) CHIMNEYS.push({ x, y });
   }
 
+// Row of the water surface in each column (-1 when dry). Water never changes
+// (paws can't dig it), so this replaces a tileAt() scan per visible column.
+const WATER_TOP = new Int16Array(WORLD_W).fill(-1);
+for (let x = 0; x < WORLD_W; x++)
+  for (let y = SEA_LEVEL - 4; y < SEA_LEVEL + 3; y++)
+    if (tiles[idx(x, y)] === T.WATER && tiles[idx(x, y - 1)] !== T.WATER && tiles[idx(x, y - 1)] !== T.POST) {
+      WATER_TOP[x] = y;
+      break;
+    }
+
+let lampCache: HTMLCanvasElement | null = null;
+/** A radial falloff, opaque at the centre: punched out of the darkness layer. */
+function lampSprite() {
+  if (lampCache) return lampCache;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const rg = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  rg.addColorStop(0, 'rgba(0,0,0,1)');
+  rg.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = rg;
+  g.fillRect(0, 0, 64, 64);
+  lampCache = c;
+  return c;
+}
+
 // Top-left block of each 2x2 window, for the evening glow.
 const WINDOW_BLOCKS = WINDOWS.filter((w) => !WINDOWS.some((o) => (o.x === w.x - 1 && o.y === w.y) || (o.x === w.x && o.y === w.y - 1)));
 
@@ -243,6 +269,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     particles: [] as Particle[],
     motes: [] as Mote[],
     sparkT: 0,
+    lastDraw: 0,
     drops: [] as Drop[],
     flies: [] as { x: number; y: number; k: number }[],
     smokeT: 0,
@@ -853,7 +880,19 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       const depth = p.z - SURFACE[clamp(Math.floor(p.x), 0, WORLD_W - 1)];
       s.under += (clamp((depth - 1.5) / 4, 0, 1) - s.under) * (1 - Math.exp(-3 * dt));
 
-      draw();
+      // Calm frames (Dui still, camera settled, nothing fast on screen) are
+      // drawn at ~30 fps: the flames, grass and fireflies move slowly enough
+      // that it looks the same, and it halves the raster work while idle or
+      // reading a dialog. The simulation above still runs every frame.
+      const camMoving = Math.abs(tx - v.camX) > 0.02 || Math.abs(tz - v.camY) > 0.02;
+      // Campfire sparks, smoke and sleepy "z"s drift slowly: they don't count.
+      let fast = false;
+      for (const q of s.particles) if (q.kind === 'heart' || q.g > 5 || Math.abs(q.vx) > 2) { fast = true; break; }
+      const busy = moving || !s.onGround || st.swing > 0 || camMoving || fast || atmo.rain > 0.05 || atmo.snow > 0.05;
+      if (busy || now - s.lastDraw > 31) {
+        s.lastDraw = now;
+        draw();
+      }
     };
 
     const draw = () => {
@@ -974,7 +1013,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       g.beginPath();
       for (let x = Math.max(0, x0); x <= Math.min(WORLD_W - 1, x1); x++) {
         let y = -1;
-        for (let yy = SEA_LEVEL - 4; yy < SEA_LEVEL + 3; yy++) if (tileAt(x, yy) === T.WATER && tileAt(x, yy - 1) !== T.WATER && tileAt(x, yy - 1) !== T.POST) { y = yy; break; }
+        y = WATER_TOP[x];
         if (y < 0) continue;
         for (let k = 0; k <= 4; k++) {
           const wx = x * TILE + k * 4;
@@ -1143,12 +1182,14 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         l.fillStyle = `rgba(20,24,60,${dark * 0.85})`;
         l.fillRect(0, 0, vw, vh);
         l.globalCompositeOperation = 'destination-out';
+        // One radial falloff for every lamp, scaled and faded with
+        // globalAlpha: building a gradient per lamp per frame made a dozen
+        // CanvasGradients every frame at night.
+        const fall = lampSprite();
         const lamp = (x: number, y: number, rr: number, a: number) => {
-          const rg = l.createRadialGradient(x, y, 0, x, y, rr);
-          rg.addColorStop(0, `rgba(0,0,0,${a})`);
-          rg.addColorStop(1, 'rgba(0,0,0,0)');
-          l.fillStyle = rg;
-          l.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+          l.globalAlpha = a;
+          l.drawImage(fall, x - rr, y - rr, rr * 2, rr * 2);
+          l.globalAlpha = 1;
         };
         lamp(sx(p.x), sy(p.z - 0.6), TILE * (5.5 + s.under * 1.5), 1);
         for (const w of WINDOW_BLOCKS) {
