@@ -1,56 +1,27 @@
-// Synthesized sound kit + ambient mixer. Everything is generated with the
-// Web Audio API, so there are no audio files to download or license.
+// Synthesized chiptune sound kit: one original looping song and a set of
+// 16-bit style sound effects. Everything is generated with the Web Audio API
+// (pulse and triangle waves, sample-and-hold noise, a short echo), so there
+// are no audio files to download or license.
 
-export type AmbientId = 'lluvia' | 'truenos' | 'viento' | 'pajaritos' | 'olas' | 'grillos' | 'fogata' | 'arroyo' | 'musica' | 'ruido';
-
-export const AMBIENTS: { id: AmbientId; label: string; emoji: string }[] = [
-  { id: 'lluvia', label: 'Lluvia', emoji: '🌧️' },
-  { id: 'truenos', label: 'Truenos', emoji: '⛈️' },
-  { id: 'viento', label: 'Viento', emoji: '🍃' },
-  { id: 'pajaritos', label: 'Pajaritos', emoji: '🐦' },
-  { id: 'olas', label: 'Olas', emoji: '🌊' },
-  { id: 'grillos', label: 'Grillos', emoji: '🦗' },
-  { id: 'fogata', label: 'Fogata', emoji: '🔥' },
-  { id: 'arroyo', label: 'Arroyo', emoji: '💧' },
-  { id: 'musica', label: 'Música (cuaderno)', emoji: '🎶' },
-  { id: 'ruido', label: 'Ruido de color', emoji: '🎚️' },
-];
-
-// Noise colors from the darkest (most bass) to the brightest spectrum.
-export const NOISE_COLORS = [
-  { label: 'Café', hex: '#8a5a3b' },
-  { label: 'Rosa', hex: '#f08fb0' },
-  { label: 'Blanco', hex: '#f4f1ea' },
-  { label: 'Azul', hex: '#6fa8e8' },
-  { label: 'Morado', hex: '#a07ae0' },
-];
-
-export type Mix = Partial<Record<AmbientId, number>>;
+/** 'alegre' is the bouncy daytime arrangement, 'calma' a slower, softer one. */
+export type MusicMood = 'alegre' | 'calma';
 
 let ctx: AudioContext | null = null;
 let out: GainNode | null = null;
 let sfxBus: GainNode | null = null;
-let ambBus: GainNode | null = null;
+let musicBus: GainNode | null = null;
+let echoIn: GainNode | null = null;
 let muted = false;
-let ambientVolume = 0.5;
-let reverb: GainNode | null = null;
+let musicVolume = 0.5;
+let mood: MusicMood = 'alegre';
 let scheduler = 0;
-const levels: Record<AmbientId, number> = { lluvia: 0, truenos: 0, viento: 0, pajaritos: 0, olas: 0, grillos: 0, fogata: 0, arroyo: 0, musica: 0, ruido: 0 };
-let noiseColor = 1;
-const noiseGains: GainNode[] = [];
-let white: AudioBuffer | null = null;
-let pink: AudioBuffer | null = null;
-let brown: AudioBuffer | null = null;
-
-// Called when a thunder clap is scheduled, so the scene can flash.
-let thunderListener: ((delayS: number) => void) | null = null;
-export function onThunder(fn: ((delayS: number) => void) | null) {
-  thunderListener = fn;
-}
+let noise: AudioBuffer | null = null;
+const pulses: Partial<Record<number, PeriodicWave>> = {};
 
 export function initAudio(startMuted: boolean) {
   muted = startMuted;
   if (ctx) {
+    if (out) out.gain.value = muted ? 0 : 1;
     ctx.resume().catch(() => {});
     startScheduler();
     return;
@@ -60,38 +31,35 @@ export function initAudio(startMuted: boolean) {
   ctx = new AC();
   out = ctx.createGain();
   out.gain.value = muted ? 0 : 1;
-  // Master chain: gentle compression and a soft top end keep every sound warm
-  // and stop sudden peaks (thunder, crackles) from jumping out.
+  // Master chain: gentle compression keeps peaks in check, and a lowpass
+  // rounds off the pulse waves the way the SNES output filter did.
   const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -20;
-  comp.knee.value = 18;
-  comp.ratio.value = 3.5;
-  comp.attack.value = 0.01;
-  comp.release.value = 0.35;
-  const soft = ctx.createBiquadFilter();
-  soft.type = 'lowpass';
-  soft.frequency.value = 10500;
-  soft.Q.value = 0.5;
-  out.connect(comp).connect(soft).connect(ctx.destination);
-  sfxBus = ctx.createGain();
-  sfxBus.gain.value = 0.32;
+  comp.threshold.value = -18;
+  comp.knee.value = 16;
+  comp.ratio.value = 3;
+  comp.attack.value = 0.005;
+  comp.release.value = 0.25;
+  out.connect(filter('lowpass', 9000, 0.5)).connect(comp).connect(ctx.destination);
+
+  // SPC700-ish echo: a filtered feedback delay of three sixteenths.
+  echoIn = gain(1);
+  const delay = ctx.createDelay(1);
+  delay.delayTime.value = 0.31;
+  const fb = gain(0.32);
+  const tone = filter('lowpass', 2400, 0.6);
+  echoIn.connect(delay).connect(tone).connect(fb).connect(delay);
+  tone.connect(gain(0.55)).connect(out);
+
+  sfxBus = gain(0.3);
   sfxBus.connect(out);
-  ambBus = ctx.createGain();
-  // Ambience fades in instead of starting at full volume.
-  ambBus.gain.setValueAtTime(0, ctx.currentTime);
-  ambBus.gain.linearRampToValueAtTime(ambientVolume, ctx.currentTime + 3);
-  ambBus.connect(out);
-  // A small, soft room (generated impulse) for birds, music and UI blips.
-  const conv = ctx.createConvolver();
-  conv.buffer = makeImpulse(2.4);
-  reverb = ctx.createGain();
-  reverb.gain.value = 0.22;
-  reverb.connect(conv).connect(out);
-  sfxBus.connect(reverb);
-  white = makeNoise('white', 3);
-  pink = makeNoise('pink', 4);
-  brown = makeNoise('brown', 4);
-  for (const id of Object.keys(levels) as AmbientId[]) applyLevel(id);
+  musicBus = ctx.createGain();
+  // The music fades in instead of starting at full volume.
+  musicBus.gain.setValueAtTime(0, ctx.currentTime);
+  musicBus.gain.linearRampToValueAtTime(musicLevel(), ctx.currentTime + 2);
+  musicBus.connect(out);
+
+  noise = makeChipNoise(1.5);
+  song.next = 0;
   startScheduler();
 }
 
@@ -103,7 +71,9 @@ export function pauseAudio() {
 
 function startScheduler() {
   if (scheduler) return;
-  scheduler = window.setInterval(tick, 100);
+  // The interval only wakes the scheduler up; every note is placed on the
+  // AudioContext clock a little ahead of time, so timing never drifts.
+  scheduler = window.setInterval(tick, 50);
 }
 
 export function setMuted(m: boolean) {
@@ -112,101 +82,19 @@ export function setMuted(m: boolean) {
   out.gain.setTargetAtTime(m ? 0 : 1, ctx.currentTime, 0.08);
 }
 
-export function setAmbientVolume(v: number) {
-  ambientVolume = v;
-  if (ctx && ambBus) ambBus.gain.setTargetAtTime(v, ctx.currentTime, 0.1);
+const musicLevel = () => musicVolume * musicVolume * 0.9;
+
+export function setMusicVolume(v: number) {
+  musicVolume = Math.min(1, Math.max(0, v));
+  if (ctx && musicBus) musicBus.gain.setTargetAtTime(musicLevel(), ctx.currentTime, 0.1);
 }
 
-export function setAmbient(id: AmbientId, v: number) {
-  levels[id] = v;
-  applyLevel(id);
-}
-
-// 0 = café, 1 = rosa, 2 = blanco, 3 = azul, 4 = morado; values in between blend.
-export function setNoiseColor(c: number) {
-  noiseColor = Math.min(4, Math.max(0, c));
-  applyNoiseColor();
-}
-
-function applyNoiseColor() {
-  if (!ctx || !noiseGains.length) return;
-  noiseGains.forEach((g, i) => {
-    const d = Math.abs(noiseColor - i);
-    // Equal-power crossfade between the two nearest colors.
-    const v = d >= 1 ? 0 : Math.cos((d * Math.PI) / 2);
-    g.gain.setTargetAtTime(v, ctx!.currentTime, 0.12);
-  });
-}
-
-export function setMix(mix: Mix) {
-  for (const id of Object.keys(levels) as AmbientId[]) setAmbient(id, mix[id] ?? 0);
+/** Switches the arrangement; it takes effect at the start of the next bar. */
+export function setMusicMood(m: MusicMood) {
+  mood = m;
 }
 
 /* ---------------- building blocks ---------------- */
-
-function makeNoise(kind: 'white' | 'pink' | 'brown', seconds: number) {
-  const c = ctx!;
-  const buf = c.createBuffer(1, Math.floor(c.sampleRate * seconds), c.sampleRate);
-  const d = buf.getChannelData(0);
-  let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, last = 0;
-  for (let i = 0; i < d.length; i++) {
-    const w = Math.random() * 2 - 1;
-    if (kind === 'white') d[i] = w;
-    else if (kind === 'pink') {
-      b0 = 0.99886 * b0 + w * 0.0555179;
-      b1 = 0.99332 * b1 + w * 0.0750759;
-      b2 = 0.969 * b2 + w * 0.153852;
-      b3 = 0.8665 * b3 + w * 0.3104856;
-      b4 = 0.55 * b4 + w * 0.5329522;
-      b5 = -0.7616 * b5 - w * 0.016898;
-      d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
-      b6 = w * 0.115926;
-    } else {
-      last = (last + 0.02 * w) / 1.02;
-      d[i] = last * 3.5;
-    }
-  }
-  return buf;
-}
-
-// Blue and violet noise are the first difference of pink and white noise.
-function differentiate(src: AudioBuffer) {
-  const c = ctx!;
-  const buf = c.createBuffer(1, src.length, c.sampleRate);
-  const a = src.getChannelData(0);
-  const d = buf.getChannelData(0);
-  for (let i = 1; i < a.length; i++) d[i] = a[i] - a[i - 1];
-  return buf;
-}
-
-function normalize(buf: AudioBuffer, rms: number) {
-  const d = buf.getChannelData(0);
-  let sum = 0;
-  for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
-  const k = rms / Math.sqrt(sum / d.length || 1);
-  for (let i = 0; i < d.length; i++) d[i] *= k;
-  return buf;
-}
-
-function makeImpulse(seconds: number) {
-  const c = ctx!;
-  const len = Math.floor(c.sampleRate * seconds);
-  const buf = c.createBuffer(2, len, c.sampleRate);
-  for (let ch = 0; ch < 2; ch++) {
-    const d = buf.getChannelData(ch);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-  }
-  return buf;
-}
-
-function loop(buf: AudioBuffer) {
-  const s = ctx!.createBufferSource();
-  s.buffer = buf;
-  s.loop = true;
-  s.loopStart = Math.random() * (buf.duration - 0.5);
-  s.start(0, s.loopStart);
-  return s;
-}
 
 function filter(type: BiquadFilterType, freq: number, q = 0.7) {
   const f = ctx!.createBiquadFilter();
@@ -222,366 +110,322 @@ function gain(v: number) {
   return g;
 }
 
-function lfo(freq: number, depth: number, target: AudioParam) {
-  const o = ctx!.createOscillator();
-  o.frequency.value = freq;
-  const g = gain(depth);
-  o.connect(g).connect(target);
-  o.start();
+// Band-limited pulse wave with the given duty cycle (0.125, 0.25, 0.5).
+function pulse(duty: number) {
+  let w = pulses[duty];
+  if (w) return w;
+  const n = 40;
+  const re = new Float32Array(n);
+  const im = new Float32Array(n);
+  for (let i = 1; i < n; i++) re[i] = (2 / (i * Math.PI)) * Math.sin(i * Math.PI * duty);
+  w = ctx!.createPeriodicWave(re, im);
+  pulses[duty] = w;
+  return w;
 }
 
-function panner(p: number): AudioNode {
-  if (!ctx!.createStereoPanner) return gain(1);
-  const s = ctx!.createStereoPanner();
-  s.pan.value = p;
-  return s;
+// Sample-and-hold noise: each random value is held for a few samples, which
+// gives the gritty, "crunchy" texture of console noise channels.
+function makeChipNoise(seconds: number) {
+  const c = ctx!;
+  const buf = c.createBuffer(1, Math.floor(c.sampleRate * seconds), c.sampleRate);
+  const d = buf.getChannelData(0);
+  let v = 0;
+  for (let i = 0; i < d.length; i++) {
+    if (i % 6 === 0) v = Math.random() * 2 - 1;
+    d[i] = v;
+  }
+  return buf;
 }
 
-function note(dest: AudioNode, t: number, freq: number, dur: number, type: OscillatorType, vol: number, slideTo?: number, attack = 0.008) {
-  const o = ctx!.createOscillator();
-  const g = ctx!.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(freq, t);
-  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+type Wave = OscillatorType | number; // a number is a pulse duty cycle
+
+type NoteOpts = {
+  slideTo?: number;
+  attack?: number;
+  vibrato?: number; // depth in cents
+  echo?: number; // send level to the echo
+  sustain?: number; // level kept until the release, as a fraction of vol
+};
+
+function note(dest: AudioNode, t: number, freq: number, dur: number, wave: Wave, vol: number, o: NoteOpts = {}) {
+  const c = ctx!;
+  const osc = c.createOscillator();
+  if (typeof wave === 'number') osc.setPeriodicWave(pulse(wave));
+  else osc.type = wave;
+  osc.frequency.setValueAtTime(freq, t);
+  if (o.slideTo) osc.frequency.exponentialRampToValueAtTime(o.slideTo, t + dur);
+  const g = c.createGain();
+  const a = o.attack ?? 0.005;
   g.gain.setValueAtTime(0, t);
-  g.gain.linearRampToValueAtTime(vol, t + attack);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g).connect(dest);
-  o.start(t);
-  o.stop(t + dur + 0.05);
+  g.gain.linearRampToValueAtTime(vol, t + a);
+  if (o.sustain) {
+    // Organ-like hold with a short release, like a sequenced chip note.
+    g.gain.setTargetAtTime(vol * o.sustain, t + a, 0.06);
+    g.gain.setTargetAtTime(0.0001, t + dur * 0.85, 0.03);
+  } else {
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
+  osc.connect(g).connect(dest);
+  if (o.echo && echoIn) {
+    const send = gain(o.echo);
+    g.connect(send).connect(echoIn);
+  }
+  let lfo: OscillatorNode | null = null;
+  if (o.vibrato && dur > 0.18) {
+    // Delayed vibrato: the note starts straight and then starts to wobble.
+    lfo = c.createOscillator();
+    lfo.frequency.value = 5.5;
+    const depth = c.createGain();
+    depth.gain.setValueAtTime(0, t);
+    depth.gain.linearRampToValueAtTime(freq * (Math.pow(2, o.vibrato / 1200) - 1), t + Math.min(0.25, dur * 0.6));
+    lfo.connect(depth).connect(osc.frequency);
+    lfo.start(t);
+    lfo.stop(t + dur + 0.1);
+  }
+  osc.start(t);
+  osc.stop(t + dur + 0.1);
 }
 
-function burst(dest: AudioNode, t: number, dur: number, freq: number, vol: number, buf = white!) {
+function hiss(dest: AudioNode, t: number, dur: number, type: BiquadFilterType, freq: number, vol: number, q = 0.8) {
   const s = ctx!.createBufferSource();
-  s.buffer = buf;
-  const f = filter('bandpass', freq, 1.2);
+  s.buffer = noise!;
   const g = ctx!.createGain();
   g.gain.setValueAtTime(vol, t);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  s.connect(f).connect(g).connect(dest);
-  s.start(t, Math.random() * (buf.duration - 0.2), dur + 0.02);
+  s.connect(filter(type, freq, q)).connect(g).connect(dest);
+  s.start(t, Math.random() * (noise!.duration - dur - 0.05), dur + 0.03);
 }
 
+const hz = (midi: number) => 440 * Math.pow(2, (midi - 69) / 12);
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
-/* ---------------- ambient channels ---------------- */
+/* ---------------- the song: "Isla de Dui" ---------------- */
 
-type Channel = { bus: GainNode | null; next: number; state: Record<string, number>; build: (bus: GainNode) => void; tick?: (ch: Channel, now: number) => void };
+// An original 16-bar loop in F major. A section: F – Dm – Bb – C, F – Am –
+// Bb/C – F. B section: Bb – C – Am – Dm, Gm – C – Bb – C7. Each bar is eight
+// eighth notes: a note name, '-' to hold the previous one, '.' for a rest.
+const MELODY = [
+  // A
+  'C5 . A4 C5 F5 - E5 D5',
+  'D5 - A4 . F4 A4 D5 E5',
+  'F5 - D5 Bb4 . D5 F5 G5',
+  'E5 - - C5 G4 . C5 E5',
+  'A5 . G5 F5 C5 . F5 A5',
+  'G5 - E5 C5 . E5 A5 G5',
+  'F5 D5 Bb4 D5 E5 G5 C6 Bb5',
+  'A5 - - - F5 . . .',
+  // B
+  'D5 - - F5 - - Bb5 -',
+  'A5 - G5 - E5 - C5 -',
+  'E5 - - A5 - - C6 -',
+  'A5 - G5 F5 - D5 E5 F5',
+  'G5 - - Bb5 - - D6 -',
+  'C6 - Bb5 A5 - G5 E5 G5',
+  'F5 - D5 F5 Bb5 - A5 G5',
+  'E5 . G5 . Bb5 . C6 .',
+];
 
-const channels: Record<AmbientId, Channel> = {
-  lluvia: {
-    bus: null,
-    next: 0,
-    state: {},
-    build(bus) {
-      loop(pink!).connect(filter('highpass', 280)).connect(filter('lowpass', 5200)).connect(gain(0.9)).connect(bus);
-      loop(brown!).connect(filter('lowpass', 420)).connect(gain(0.35)).connect(bus);
-    },
-    tick(ch, now) {
-      while (ch.next < now + 0.3) {
-        const t = Math.max(ch.next, now);
-        note(ch.bus!, t, rand(1600, 4200), 0.03, 'sine', rand(0.015, 0.06));
-        ch.next = t + rand(0.02, 0.1);
-      }
-    },
-  },
-  truenos: {
-    bus: null,
-    next: 0,
-    state: {},
-    build() {},
-    tick(ch, now) {
-      if (!ch.next) ch.next = now + rand(2, 5);
-      if (ch.next > now + 0.3) return;
-      const t = Math.max(ch.next, now);
-      const s = ctx!.createBufferSource();
-      s.buffer = brown!;
-      const f = ctx!.createBiquadFilter();
-      f.type = 'lowpass';
-      f.frequency.setValueAtTime(1100, t);
-      f.frequency.exponentialRampToValueAtTime(90, t + 1.6);
-      const g = ctx!.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(1.3, t + 0.12);
-      g.gain.exponentialRampToValueAtTime(0.5, t + 0.5);
-      g.gain.exponentialRampToValueAtTime(0.9, t + 0.8);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + 4.8);
-      s.connect(f).connect(g).connect(ch.bus!);
-      s.start(t, rand(0, 1), 5);
-      thunderListener?.(t - now);
-      ch.next = t + rand(11, 26);
-    },
-  },
-  viento: {
-    bus: null,
-    next: 0,
-    state: {},
-    build(bus) {
-      const bp = filter('bandpass', 520, 0.9);
-      const g = gain(0.7);
-      loop(pink!).connect(bp).connect(g).connect(bus);
-      lfo(0.07, 320, bp.frequency);
-      lfo(0.11, 0.45, g.gain);
-      const hi = filter('bandpass', 1400, 3);
-      const g2 = gain(0.12);
-      loop(white!).connect(hi).connect(g2).connect(bus);
-      lfo(0.05, 500, hi.frequency);
-    },
-  },
-  pajaritos: {
-    bus: null,
-    next: 0,
-    state: {},
-    build() {},
-    tick(ch, now) {
-      while (ch.next < now + 0.3) {
-        const t = Math.max(ch.next, now);
-        const p = panner(rand(-0.85, 0.85));
-        p.connect(ch.bus!);
-        if (reverb) p.connect(reverb);
-        const kind = Math.random();
-        const vol = rand(0.05, 0.11);
-        if (kind < 0.4) {
-          const base = rand(3000, 4300);
-          const n = Math.floor(rand(5, 10));
-          for (let i = 0; i < n; i++) note(p, t + i * 0.06, base + (i % 2 ? 260 : -120), 0.045, 'sine', vol);
-        } else if (kind < 0.7) {
-          const a = rand(1800, 2400);
-          note(p, t, a, 0.22, 'sine', vol, a * 1.4, 0.03);
-          note(p, t + 0.3, a * 1.35, 0.28, 'sine', vol * 0.9, a * 1.05, 0.03);
-        } else {
-          const n = Math.floor(rand(2, 5));
-          for (let i = 0; i < n; i++) note(p, t + i * 0.13, rand(2400, 2800), 0.06, 'sine', vol, rand(4000, 4800));
-        }
-        ch.next = t + rand(0.5, 2.6);
-      }
-    },
-  },
-  olas: {
-    bus: null,
-    next: 0,
-    state: {},
-    build(bus) {
-      const body = gain(0.55);
-      loop(brown!).connect(filter('lowpass', 650)).connect(body).connect(bus);
-      lfo(0.085, 0.42, body.gain);
-      const foam = gain(0.06);
-      loop(white!).connect(filter('highpass', 2600)).connect(foam).connect(bus);
-      lfo(0.085, 0.05, foam.gain);
-    },
-  },
-  grillos: {
-    bus: null,
-    next: 0,
-    state: { a: 0, b: 0 },
-    build() {},
-    tick(ch, now) {
-      for (const k of ['a', 'b'] as const) {
-        if (ch.state[k] > now + 0.3) continue;
-        const t = Math.max(ch.state[k], now);
-        const p = panner(k === 'a' ? -0.55 : 0.6);
-        p.connect(ch.bus!);
-        if (reverb) p.connect(reverb);
-        const f = k === 'a' ? 4350 : 4620;
-        for (let i = 0; i < 3; i++) note(p, t + i * 0.042, f, 0.022, 'sine', 0.05, undefined, 0.004);
-        ch.state[k] = t + rand(0.55, 0.9);
-      }
-    },
-  },
-  fogata: {
-    bus: null,
-    next: 0,
-    state: {},
-    build(bus) {
-      loop(brown!).connect(filter('lowpass', 320)).connect(gain(0.7)).connect(bus);
-    },
-    tick(ch, now) {
-      while (ch.next < now + 0.3) {
-        const t = Math.max(ch.next, now);
-        const pop = Math.random() < 0.08;
-        burst(ch.bus!, t, pop ? rand(0.02, 0.05) : rand(0.004, 0.014), pop ? rand(600, 1400) : rand(1800, 5200), pop ? rand(0.4, 0.8) : rand(0.08, 0.35));
-        ch.next = t - Math.log(1 - Math.random()) * 0.07;
-      }
-    },
-  },
-  arroyo: {
-    bus: null,
-    next: 0,
-    state: {},
-    build(bus) {
-      const src = loop(white!);
-      const bps = [700, 1400, 2300].map((f) => {
-        const bp = filter('bandpass', f, 5);
-        src.connect(bp).connect(gain(0.55)).connect(bus);
-        return bp;
-      });
-      (channels.arroyo as Channel & { bps?: BiquadFilterNode[] }).bps = bps;
-      loop(brown!).connect(filter('lowpass', 480)).connect(gain(0.3)).connect(bus);
-    },
-    tick(ch, now) {
-      const bps = (ch as Channel & { bps?: BiquadFilterNode[] }).bps;
-      bps?.forEach((bp, i) => bp.frequency.setTargetAtTime(rand(500, 1200) * (i + 1), now, 0.04));
-    },
-  },
-  ruido: {
-    bus: null,
-    next: 0,
-    state: {},
-    build(bus) {
-      const bufs = [
-        normalize(makeNoise('brown', 4), 0.3),
-        normalize(makeNoise('pink', 4), 0.24),
-        normalize(makeNoise('white', 4), 0.18),
-        normalize(differentiate(makeNoise('pink', 4)), 0.14),
-        normalize(differentiate(makeNoise('white', 4)), 0.1),
-      ];
-      noiseGains.length = 0;
-      bufs.forEach((b) => {
-        const g = gain(0);
-        loop(b).connect(g).connect(bus);
-        noiseGains.push(g);
-      });
-      applyNoiseColor();
-    },
-  },
-  musica: {
-    bus: null,
-    next: 0,
-    state: { beat: 0 },
-    build(bus) {
-      // A little room: feedback delay into a soft lowpass.
-      const wet = gain(1);
-      const delay = ctx!.createDelay(1);
-      delay.delayTime.value = 0.38;
-      const fb = gain(0.38);
-      wet.connect(delay).connect(fb).connect(delay);
-      delay.connect(filter('lowpass', 2600)).connect(gain(0.6)).connect(bus);
-      wet.connect(bus);
-      if (reverb) wet.connect(reverb);
-      (channels.musica as Channel & { wet?: GainNode }).wet = wet;
-    },
-    tick(ch, now) {
-      const wet = (ch as Channel & { wet?: GainNode }).wet;
-      if (!wet) return;
-      // "Cuaderno": an original, slow piece for the crayon island. Dmaj7 –
-      // Bm7 – Gmaj7 – A6, a soft bass on each chord, broken chords like a
-      // felt piano and a pentatonic melody that wanders by steps and rests.
-      const chords = [
-        { bass: 73.42, tones: [293.66, 369.99, 440.0, 554.37] },
-        { bass: 61.74, tones: [246.94, 293.66, 369.99, 440.0] },
-        { bass: 98.0, tones: [196.0, 246.94, 293.66, 369.99] },
-        { bass: 110.0, tones: [220.0, 277.18, 329.63, 369.99] },
-      ];
-      const melody = [440.0, 493.88, 587.33, 659.25, 739.99, 880.0, 987.77];
-      const st = ch.state as { beat: number; m?: number };
-      const beatLen = 0.66;
-      const arp = [0, 2, 1, 3, 2, 1, 3, 2];
-      while (ch.next < now + 0.3) {
-        const t = Math.max(ch.next, now);
-        const beat = st.beat++;
-        const chord = chords[Math.floor(beat / 8) % chords.length];
-        if (beat % 8 === 0) {
-          note(wet, t, chord.bass, 4.6, 'sine', 0.09, undefined, 0.08);
-          note(wet, t, chord.bass * 2, 3.2, 'sine', 0.03, undefined, 0.1);
-        }
-        // Felt piano: a triangle with a quiet octave on top, quick attack.
-        const f = chord.tones[arp[beat % 8]];
-        const vel = 0.032 + Math.random() * 0.012;
-        note(wet, t + Math.random() * 0.02, f, 2.4, 'triangle', vel, undefined, 0.006);
-        note(wet, t, f * 2, 1.1, 'sine', vel * 0.25, undefined, 0.006);
-        // Melody on the off-beats, stepping up or down the scale.
-        if (beat % 2 === 1 && Math.random() < 0.55) {
-          st.m = Math.max(0, Math.min(melody.length - 1, (st.m ?? 3) + [-1, 1, -1, 1, 2, -2, 0][Math.floor(Math.random() * 7)]));
-          note(wet, t + beatLen * 0.5, melody[st.m], 2.8, 'sine', 0.045, undefined, 0.01);
-          note(wet, t + beatLen * 0.5, melody[st.m] * 2, 1.2, 'triangle', 0.008, undefined, 0.01);
-        }
-        // Every 32 beats, a whole bar of rest for the melody to breathe.
-        ch.next = t + beatLen * (beat % 32 === 31 ? 2 : 1);
-      }
-    },
-  },
-};
+// Chords as MIDI notes (root first); two chords in a bar split it in half.
+const F = [53, 57, 60], Dm = [50, 53, 57], Bb = [46, 50, 53], C = [48, 52, 55], Am = [45, 48, 52], Gm = [43, 46, 50], C7 = [48, 52, 58];
+const CHORDS: number[][][] = [[F], [Dm], [Bb], [C], [F], [Am], [Bb, C], [F], [Bb], [C], [Am], [Dm], [Gm], [C], [Bb], [C7]];
 
-function applyLevel(id: AmbientId) {
-  if (!ctx || !ambBus) return;
-  const ch = channels[id];
-  const v = levels[id];
-  if (!ch.bus) {
-    if (v <= 0) return;
-    ch.bus = gain(0);
-    ch.bus.connect(ambBus);
-    ch.build(ch.bus);
-    ch.next = 0;
+const NOTE_INDEX: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+function parseNote(s: string) {
+  const m = /^([A-G])(b|#)?(\d)$/.exec(s);
+  if (!m) return null;
+  return 12 * (Number(m[3]) + 1) + NOTE_INDEX[m[1]] + (m[2] === 'b' ? -1 : m[2] === '#' ? 1 : 0);
+}
+
+// Melody events per bar: [eighth index, midi, length in eighths].
+const LEAD: [number, number, number][][] = MELODY.map((bar) => {
+  const tokens = bar.split(/\s+/);
+  const events: [number, number, number][] = [];
+  tokens.forEach((tok, i) => {
+    if (tok === '-') {
+      const last = events[events.length - 1];
+      if (last) last[2]++;
+    } else if (tok !== '.') {
+      const n = parseNote(tok);
+      if (n !== null) events.push([i, n, 1]);
+    }
+  });
+  return events;
+});
+
+const ARRANGEMENT = {
+  alegre: { bpm: 140, lead: 0.25, leadVol: 0.075, bass: 0.13, drums: 1 },
+  calma: { bpm: 96, lead: 0.5, leadVol: 0.05, bass: 0.1, drums: 0.45 },
+} as const;
+
+const song = { next: 0, step: 0, arr: ARRANGEMENT.alegre as (typeof ARRANGEMENT)[MusicMood] };
+
+// Schedules one sixteenth-note step of the song at time t.
+function playStep(t: number, step: number, sixteenth: number) {
+  const bus = musicBus!;
+  const a = song.arr;
+  const calm = a === ARRANGEMENT.calma;
+  const bar = Math.floor(step / 16) % MELODY.length;
+  const s = step % 16;
+  const chords = CHORDS[bar];
+  const chord = chords.length > 1 && s >= 8 ? chords[1] : chords[0];
+  const eighth = sixteenth * 2;
+
+  // Lead: a pulse wave with delayed vibrato and some echo.
+  if (s % 2 === 0) {
+    for (const [i, midi, len] of LEAD[bar]) {
+      if (i * 2 !== s) continue;
+      note(bus, t, hz(midi), len * eighth * 0.92, a.lead, a.leadVol, { vibrato: 18, echo: 0.5, sustain: 0.7, attack: 0.004 });
+    }
   }
-  ch.bus.gain.setTargetAtTime(v * v, ctx.currentTime, 0.35);
+
+  // Bass on the triangle: bouncing octaves by day, long roots at night.
+  const root = chord[0] - 12;
+  if (calm) {
+    if (s === 0 || s === 8) note(bus, t, hz(s === 0 ? root : root + 7), eighth * 3.6, 'triangle', a.bass, { sustain: 0.8 });
+  } else if (s % 2 === 0) {
+    const pat = [0, 12, 0, 12, 7, 12, 0, 12];
+    note(bus, t, hz(root + pat[s / 2]), eighth * 0.8, 'triangle', a.bass, { sustain: 0.85, attack: 0.003 });
+  }
+
+  // Harmony: off-beat stabs by day, a slow broken chord at night.
+  if (calm) {
+    if (s % 4 === 2) {
+      const tone = chord[[0, 1, 2, 1][(s / 4) | 0]] + 12;
+      note(bus, t, hz(tone), eighth * 2.5, 0.125, 0.03, { echo: 0.6 });
+    }
+  } else if (s % 4 === 2) {
+    note(bus, t, hz(chord[1] + 12), eighth * 0.45, 0.125, 0.032, { echo: 0.35 });
+    note(bus, t, hz(chord[2] + 12), eighth * 0.45, 0.125, 0.032, { echo: 0.35 });
+  }
+
+  // Drums: soft kick, noise snare and hats.
+  const d = a.drums;
+  if (s === 0 || (!calm && (s === 8 || (s === 11 && bar % 2 === 1)))) {
+    note(bus, t, 140, 0.13, 'sine', 0.32 * d, { slideTo: 42, attack: 0.002 });
+  }
+  if (!calm && (s === 4 || s === 12)) {
+    hiss(bus, t, 0.12, 'bandpass', 2000, 0.16 * d, 0.6);
+    note(bus, t, 190, 0.06, 'triangle', 0.08 * d, { slideTo: 120, attack: 0.002 });
+  }
+  if (calm && s === 8) hiss(bus, t, 0.05, 'bandpass', 3000, 0.08 * d, 1.2);
+  if (calm ? s % 4 === 2 : s % 2 === 0) hiss(bus, t, s % 4 === 2 ? 0.045 : 0.025, 'highpass', 7000, (s % 4 === 2 ? 0.07 : 0.045) * d);
+  // A little fill on the last beat before the loop starts again.
+  if (!calm && bar === MELODY.length - 1 && s >= 13) hiss(bus, t, 0.07, 'bandpass', 1500 + s * 120, 0.1, 0.8);
 }
 
 function tick() {
-  if (!ctx || ctx.state !== 'running') return;
+  if (!ctx || !musicBus || ctx.state !== 'running') return;
   const now = ctx.currentTime;
-  for (const id of Object.keys(channels) as AmbientId[]) {
-    const ch = channels[id];
-    if (!ch.bus || !ch.tick || levels[id] < 0.01) continue;
-    if (ch.next < now - 1) ch.next = now;
-    ch.tick(ch, now);
+  // After a pause or a long stall, pick up from now instead of catching up.
+  if (song.next < now - 0.2) song.next = now + 0.05;
+  const silent = muted || musicVolume < 0.01;
+  while (song.next < now + 0.2) {
+    if (song.step % 16 === 0) song.arr = ARRANGEMENT[mood];
+    const sixteenth = 60 / song.arr.bpm / 4;
+    // Muted: keep the song moving but skip creating any nodes.
+    if (!silent) playStep(song.next, song.step, sixteenth);
+    song.step = (song.step + 1) % (MELODY.length * 16);
+    song.next += sixteenth;
   }
 }
 
 /* ---------------- one-shot effects ---------------- */
 
-function tone(freq: number, dur: number, type: OscillatorType, vol: number, delay = 0, slideTo?: number) {
-  if (!ctx || !sfxBus || muted) return;
-  note(sfxBus, ctx.currentTime + delay, freq, dur, type, vol, slideTo, 0.012);
+function ready() {
+  return !!ctx && !!sfxBus && !muted;
+}
+
+function blip(freq: number, dur: number, wave: Wave, vol: number, delay = 0, o: NoteOpts = {}) {
+  if (!ready()) return;
+  note(sfxBus!, ctx!.currentTime + delay, freq, dur, wave, vol, { attack: 0.003, ...o });
+}
+
+function crunch(dur: number, freq: number, vol: number, delay = 0, type: BiquadFilterType = 'bandpass') {
+  if (!ready()) return;
+  hiss(sfxBus!, ctx!.currentTime + delay, dur, type, freq, vol, 0.7);
 }
 
 export const sfx = {
+  // Cutting grass: a short, gritty noise burst with a tiny click.
   snip() {
-    if (!ctx || !sfxBus || muted) return;
-    burst(sfxBus, ctx.currentTime, 0.11, 3200 + Math.random() * 1400, 0.3);
+    crunch(0.07, rand(2600, 3600), 0.32);
+    blip(rand(900, 1100), 0.03, 0.125, 0.05);
   },
+  // Watering: a handful of rising bubbles.
   water() {
-    if (!ctx || !sfxBus || muted) return;
-    const t = ctx.currentTime;
-    for (let i = 0; i < 18; i++) burst(sfxBus, t + i * 0.06 + Math.random() * 0.04, 0.05, rand(900, 2400), 0.12, pink!);
+    for (let i = 0; i < 6; i++) {
+      const f = rand(380, 720);
+      blip(f, 0.07, 0.5, 0.05, i * 0.07 + rand(0, 0.03), { slideTo: f * 2.2 });
+    }
   },
+  // A small round "boing".
   pop() {
-    [523, 784, 1047].forEach((f, i) => tone(f, 0.12, 'triangle', 0.1, i * 0.05, f * 1.5));
+    blip(330, 0.13, 0.25, 0.08, 0, { slideTo: 880 });
+    blip(660, 0.07, 0.125, 0.03, 0.05, { slideTo: 990 });
+  },
+  // Jump: a springy upward sweep.
+  jump() {
+    blip(260, 0.16, 0.25, 0.08, 0, { slideTo: 760 });
+  },
+  // Landing: a soft thud.
+  land() {
+    blip(180, 0.08, 'triangle', 0.12, 0, { slideTo: 70 });
+    crunch(0.04, 900, 0.08, 0, 'lowpass');
+  },
+  // Digging: a crunchy scoop.
+  dig() {
+    crunch(0.09, 1200, 0.28, 0, 'lowpass');
+    blip(220, 0.06, 0.5, 0.05, 0.02, { slideTo: 140 });
   },
   step() {
-    tone(160 + Math.random() * 30, 0.05, 'sine', 0.018);
+    blip(rand(200, 240), 0.03, 'triangle', 0.05);
   },
   talk() {
-    // "Villager-speak": a quick random-pitch blip per few letters.
-    const notes = [523, 587, 659, 784, 880];
-    tone(notes[Math.floor(Math.random() * notes.length)] * (Math.random() < 0.5 ? 1 : 0.75), 0.07, 'triangle', 0.03);
+    // Text blips: a quick random note of the F major pentatonic.
+    const notes = [698, 784, 880, 1047, 1175];
+    blip(notes[Math.floor(Math.random() * notes.length)], 0.045, 0.125, 0.035);
   },
   open() {
-    tone(660, 0.09, 'sine', 0.12);
-    tone(990, 0.12, 'sine', 0.1, 0.07);
+    blip(784, 0.06, 0.25, 0.06);
+    blip(1175, 0.1, 0.25, 0.06, 0.06);
   },
   close() {
-    tone(740, 0.08, 'sine', 0.09);
-    tone(494, 0.1, 'sine', 0.08, 0.06);
+    blip(1047, 0.06, 0.25, 0.055);
+    blip(698, 0.09, 0.25, 0.055, 0.06);
   },
   select() {
-    tone(880, 0.05, 'triangle', 0.07);
+    blip(1319, 0.04, 0.25, 0.05);
   },
+  // Star pickup: a bright rising arpeggio with an echo.
   star() {
-    [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.18, 'sine', 0.1, i * 0.06));
+    const notes = [1047, 1319, 1568, 2093, 2637];
+    notes.forEach((f, i) => {
+      blip(f, 0.12, 0.125, 0.06, i * 0.045);
+      blip(f, 0.12, 0.125, 0.02, i * 0.045 + 0.16);
+    });
   },
+  // Something hidden appears: a sparkly glide up and a twinkle.
   reveal() {
-    tone(1318, 0.25, 'sine', 0.06, 0, 1760);
+    blip(880, 0.22, 'triangle', 0.06, 0, { slideTo: 1760 });
+    blip(2093, 0.08, 0.125, 0.03, 0.2);
+    blip(2637, 0.1, 0.125, 0.03, 0.27);
   },
+  // Achievement: a short, original fanfare with a bass line.
   achievement() {
-    [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, 0.22, 'triangle', 0.09, i * 0.09));
+    const lead: [number, number, number][] = [
+      [523, 0, 0.08], [659, 0.08, 0.08], [784, 0.16, 0.08], [880, 0.26, 0.16], [784, 0.42, 0.1], [1047, 0.54, 0.5],
+    ];
+    lead.forEach(([f, t, d]) => blip(f, d, 0.25, 0.07, t, { sustain: 0.75, vibrato: d > 0.3 ? 20 : 0 }));
+    blip(1319, 0.5, 0.125, 0.03, 0.54, { sustain: 0.6 });
+    [[131, 0], [196, 0.26], [262, 0.54]].forEach(([f, t]) => blip(f, 0.24, 'triangle', 0.12, t, { sustain: 0.8 }));
   },
-  // Dui: a purr is a low buzz pulsing ~18 times a second, not a pitch; short
-  // sawtooth grains at 45-55 Hz read as one across small speakers too.
+  // Dui purring: low pulse grains about 18 times a second.
   purr() {
-    for (let i = 0; i < 20; i++) tone(45 + Math.random() * 10, 0.05, 'sawtooth', 0.045, i * 0.055);
+    for (let i = 0; i < 18; i++) blip(rand(44, 54), 0.05, 0.25, 0.05, i * 0.055);
   },
+  // A chirpy two-part "mi-au" on a pulse wave.
   meow() {
-    tone(620, 0.12, 'triangle', 0.06, 0, 820);
-    tone(820, 0.22, 'triangle', 0.06, 0.11, 520);
+    blip(700, 0.1, 0.25, 0.055, 0, { slideTo: 1050 });
+    blip(1050, 0.2, 0.25, 0.055, 0.1, { slideTo: 620, vibrato: 30 });
   },
 };

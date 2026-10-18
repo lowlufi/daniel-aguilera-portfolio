@@ -3,7 +3,7 @@ import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/
 import { ArrowUpRight, X } from 'lucide-react';
 import { PROJECTS, SKILLS, SOCIAL } from '../data';
 import PixelScene from './PixelScene';
-import { AMBIENTS, NOISE_COLORS, initAudio, setNoiseColor as setAudioNoiseColor, pauseAudio, setAmbient, setAmbientVolume, setMix as setAudioMix, setMuted as setAudioMuted, sfx, type AmbientId, type Mix } from './audio';
+import { initAudio, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, sfx } from './audio';
 import { WEATHERS, WEATHER_CONFIG, stepAtmosphere, type WeatherId } from './weather';
 import { createStore, type GameEvents, type Meteo } from './store';
 import { STAMPS, loadProgress, nextStamp, saveProgress, stampFor, type StampId } from './progress';
@@ -92,26 +92,9 @@ const MORE_PLACES: { id: InteractableId; label: string }[] = [
 
 const CROP_EMOJI = ['🌻', '🍅', '🥕', '🥬'];
 
-const SOUND_PRESETS: { label: string; emoji: string; mix: Mix }[] = [
-  { label: 'Tormenta', emoji: '⛈️', mix: { lluvia: 0.9, truenos: 0.6, viento: 0.4 } },
-  { label: 'Bosque', emoji: '🌲', mix: { pajaritos: 0.7, arroyo: 0.5, viento: 0.25 } },
-  { label: 'Playa', emoji: '🏖️', mix: { olas: 0.8, viento: 0.3, pajaritos: 0.15 } },
-  { label: 'Chimenea', emoji: '🪵', mix: { fogata: 0.8, lluvia: 0.3, musica: 0.25 } },
-  { label: 'Noche', emoji: '🌌', mix: { grillos: 0.7, fogata: 0.2, olas: 0.2 } },
-  { label: 'Concentración', emoji: '🎧', mix: { ruido: 0.55, lluvia: 0.25 } },
-  { label: 'Silencio', emoji: '🤫', mix: {} },
-];
-
 type Sheet = 'weather' | 'sound' | null;
 
 const SKIP_LINK = 'sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-full focus:bg-[#fff8e7] focus:px-4 focus:py-2 focus:text-sm focus:font-black focus:text-[#6b4f3a] focus:shadow-[0_3px_0_rgba(91,70,54,0.25)]';
-
-function fullMix(m: Mix): Record<AmbientId, number> {
-  // The mix comes from localStorage: anything that isn't a finite number
-  // would reach setTargetAtTime and throw inside audio start-up.
-  const src: Partial<Record<AmbientId, unknown>> = m && typeof m === 'object' ? m : {};
-  return Object.fromEntries(AMBIENTS.map((a) => [a.id, finiteOr(src[a.id], 0)])) as Record<AmbientId, number>;
-}
 
 function readStorage<T>(key: string, fallback: T): T {
   try {
@@ -172,9 +155,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     const w = readStorage<WeatherId>('island-weather', 'atardecer');
     return w in WEATHER_CONFIG ? w : 'atardecer';
   });
-  const [mix, setMixState] = useState<Record<AmbientId, number>>(() => fullMix(readStorage<Mix>('island-mix', WEATHER_CONFIG[weather].mix)));
-  const [ambVol, setAmbVol] = useState(() => finiteOr(readStorage<unknown>('island-ambvol-v2', 0.5), 0.5));
-  const [noiseColor, setNoiseColor] = useState(() => finiteOr(readStorage<unknown>('island-noise-color', 1), 1));
+  const [musicVol, setMusicVol] = useState(() => Math.min(1, Math.max(0, finiteOr(readStorage<unknown>('island-music-vol', 0.5), 0.5))));
   const [sheet, setSheet] = useState<Sheet>(null);
   const reduceMotion = useReducedMotion() ?? false;
   const timers = useRef<number[]>([]);
@@ -577,9 +558,8 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const start = useCallback(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    setAmbientVolume(ambVol);
-    setAudioNoiseColor(noiseColor);
-    setAudioMix(mix);
+    setMusicVolume(musicVol);
+    setMusicMood(WEATHER_CONFIG[weather].music);
     initAudio(muted);
     // The start button keeps keyboard focus while the screen fades out, and a
     // focused button keeps Space for itself: someone who entered with Enter
@@ -596,7 +576,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
         writeStorage('island-tutorial-done', true);
       }, 1300);
     }
-  }, [ambVol, grantStamp, later, mix, muted, noiseColor, openDialog]);
+  }, [grantStamp, later, musicVol, muted, openDialog, weather]);
 
   // Stop every sound and pending timer when leaving the island.
   useEffect(
@@ -610,10 +590,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const chooseWeather = useCallback((w: WeatherId) => {
     setWeather(w);
     writeStorage('island-weather', w);
-    const m = fullMix(WEATHER_CONFIG[w].mix);
-    setMixState(m);
-    setAudioMix(m);
-    writeStorage('island-mix', m);
+    setMusicMood(WEATHER_CONFIG[w].music);
     sfx.select();
   }, []);
 
@@ -665,32 +642,10 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     };
   }, [store]);
 
-  const applyMix = useCallback((m: Mix) => {
-    const full = fullMix(m);
-    setMixState(full);
-    setAudioMix(full);
-    writeStorage('island-mix', full);
-  }, []);
-
-  const changeChannel = useCallback((id: AmbientId, v: number) => {
-    setMixState((prev) => {
-      const next = { ...prev, [id]: v };
-      writeStorage('island-mix', next);
-      return next;
-    });
-    setAmbient(id, v);
-  }, []);
-
-  const changeNoiseColor = (c: number) => {
-    setNoiseColor(c);
-    setAudioNoiseColor(c);
-    writeStorage('island-noise-color', c);
-  };
-
-  const changeAmbVol = (v: number) => {
-    setAmbVol(v);
-    setAmbientVolume(v);
-    writeStorage('island-ambvol-v2', v);
+  const changeMusicVol = (v: number) => {
+    setMusicVol(v);
+    setMusicVolume(v);
+    writeStorage('island-music-vol', v);
   };
 
   const toggleMute = () => {
@@ -877,7 +832,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               <IconButton label={`Clima: ${WEATHERS.find((w) => w.id === weather)?.label ?? ''}`} active={sheet === 'weather'} onClick={() => setSheet((v) => (v === 'weather' ? null : 'weather'))}>
                 {WEATHERS.find((w) => w.id === weather)?.emoji}
               </IconButton>
-              <IconButton label="Sonidos ambiente" active={sheet === 'sound'} onClick={() => setSheet((v) => (v === 'sound' ? null : 'sound'))}>
+              <IconButton label="Música" active={sheet === 'sound'} onClick={() => setSheet((v) => (v === 'sound' ? null : 'sound'))}>
                 🎧
               </IconButton>
               <IconButton label={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className="hidden md:grid">
@@ -1076,7 +1031,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             key={sheet}
             ref={sheetRef}
             role="dialog"
-            aria-label={sheet === 'weather' ? 'Elegir clima' : 'Sonidos ambiente'}
+            aria-label={sheet === 'weather' ? 'Elegir clima' : 'Música'}
             initial={{ opacity: 0, y: -10, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.97 }}
@@ -1085,7 +1040,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             className="absolute right-3 top-[112px] md:right-4 md:top-[68px] z-30 w-[min(340px,calc(100%-24px))] max-h-[calc(100svh-190px)] md:max-h-[calc(100svh-150px)] overflow-y-auto rounded-[1.75rem] bg-[#fff8e7] p-4 text-[#5b4636] shadow-[0_6px_0_rgba(91,70,54,0.22),0_20px_50px_rgba(60,30,40,0.25)]"
           >
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-black">{sheet === 'weather' ? '🌦️ Clima de la isla' : '🎧 Sonidos ambiente'}</h2>
+              <h2 className="text-lg font-black">{sheet === 'weather' ? '🌦️ Clima de la isla' : '🎧 Música'}</h2>
               <button type="button" onClick={() => setSheet(null)} aria-label="Cerrar" className="grid h-9 w-9 place-items-center rounded-full bg-[#f0e2c8] hover:bg-[#ead6b3]">
                 <X size={16} strokeWidth={3} />
               </button>
@@ -1093,61 +1048,13 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             {sheet === 'weather' ? (
               <WeatherPicker weather={weather} onChoose={chooseWeather} />
             ) : (
-              <SoundMixer
-                mix={mix}
-                ambVol={ambVol}
-                muted={muted}
-                onChannel={changeChannel}
-                onVolume={changeAmbVol}
-                onPreset={applyMix}
-                onWeatherPreset={() => applyMix(WEATHER_CONFIG[weather].mix)}
-                onToggleMute={toggleMute}
-                noiseColor={noiseColor}
-                onNoiseColor={changeNoiseColor}
-              />
+              <SoundMixer volume={musicVol} muted={muted} onVolume={changeMusicVol} onToggleMute={toggleMute} />
             )}
           </motion.aside>
         )}
       </AnimatePresence>
     </div>
     </MotionConfig>
-  );
-}
-
-function NoiseColorPicker({ value, onChange }: { value: number; onChange: (c: number) => void }) {
-  const nearest = NOISE_COLORS[Math.round(value)];
-  return (
-    <div className="mt-2.5">
-      <div className="flex items-center justify-between text-[11px] font-extrabold">
-        <span>Tono: {nearest.label}</span>
-        <span className="text-[#7a614c]">grave ← → agudo</span>
-      </div>
-      <input
-        type="range"
-        min={0}
-        max={NOISE_COLORS.length - 1}
-        step={0.01}
-        value={value}
-        aria-label="Color del ruido"
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="cozy-range mt-1 w-full"
-        style={{ background: `linear-gradient(90deg, ${NOISE_COLORS.map((c) => c.hex).join(', ')})` }}
-      />
-      <div className="mt-1.5 flex gap-1">
-        {NOISE_COLORS.map((c, i) => (
-          <button
-            key={c.label}
-            type="button"
-            onClick={() => onChange(i)}
-            aria-pressed={Math.round(value) === i}
-            className={`flex-1 rounded-full py-1 text-[10.5px] font-black ring-offset-1 ring-offset-[#fff8e7] ${Math.round(value) === i ? 'ring-2 ring-[#f0a45d]' : ''}`}
-            style={{ background: c.hex, color: i === 0 ? '#fff8e7' : '#3d2410' }}
-          >
-            {c.label}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -1173,90 +1080,40 @@ function WeatherPicker({ weather, onChoose }: { weather: WeatherId; onChoose: (w
           );
         })}
       </div>
-      <p className="mt-3 text-xs font-bold opacity-80">El clima también cambia los sonidos. Puedes ajustarlos en 🎧.</p>
+      <p className="mt-3 text-xs font-bold opacity-80">De noche y con lluvia la música se vuelve más tranquila. Ajusta el volumen en 🎧.</p>
     </>
   );
 }
 
 type SoundMixerProps = {
-  mix: Record<AmbientId, number>;
-  ambVol: number;
+  volume: number;
   muted: boolean;
-  onChannel: (id: AmbientId, v: number) => void;
   onVolume: (v: number) => void;
-  onPreset: (m: Mix) => void;
-  onWeatherPreset: () => void;
   onToggleMute: () => void;
-  noiseColor: number;
-  onNoiseColor: (c: number) => void;
 };
 
-function SoundMixer({ mix, ambVol, muted, onChannel, onVolume, onPreset, onWeatherPreset, onToggleMute, noiseColor, onNoiseColor }: SoundMixerProps) {
+function SoundMixer({ volume, muted, onVolume, onToggleMute }: SoundMixerProps) {
   return (
     <>
-      <div className="flex flex-wrap gap-1.5">
-        <button type="button" onClick={onWeatherPreset} className="rounded-full bg-[#7ccf8a] px-3 py-1.5 text-xs font-black text-[#1d4a26] shadow-[0_2px_0_#4f9c5d]">
-          🌦️ Del clima
-        </button>
-        {SOUND_PRESETS.map((p) => (
-          <button key={p.label} type="button" onClick={() => onPreset(p.mix)} className="rounded-full bg-white px-3 py-1.5 text-xs font-black hover:bg-[#fbf1dc]">
-            {p.emoji} {p.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-4 flex items-center gap-3 rounded-2xl bg-[#f6ecd9] px-3 py-2.5">
+      <div className="flex items-center gap-3 rounded-2xl bg-[#f6ecd9] px-3 py-2.5">
         <button type="button" onClick={onToggleMute} aria-label={muted ? 'Activar sonido' : 'Silenciar todo'} className="text-xl">
           {muted ? '🔇' : '🔊'}
         </button>
         <label className="flex-1">
-          <span className="sr-only">Volumen general</span>
+          <span className="block text-[13px] font-extrabold leading-tight">🎶 Música</span>
           <input
             type="range"
             min={0}
             max={1}
             step={0.01}
-            value={ambVol}
+            value={volume}
+            aria-label="Volumen de la música"
             onChange={(e) => onVolume(Number(e.target.value))}
-            className="cozy-range w-full"
+            className="cozy-range mt-1 w-full"
           />
         </label>
       </div>
-
-      <ul className="mt-3 space-y-1.5">
-        {AMBIENTS.map((a) => {
-          const v = mix[a.id];
-          const on = v > 0.001;
-          return (
-            <li key={a.id} className={`flex items-center gap-3 rounded-2xl px-3 py-2 transition-colors ${on ? 'bg-white' : 'bg-transparent'}`}>
-              <button
-                type="button"
-                aria-pressed={on}
-                aria-label={`${on ? 'Apagar' : 'Encender'} ${a.label}`}
-                onClick={() => onChannel(a.id, on ? 0 : 0.5)}
-                className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-xl transition-all ${on ? 'bg-[#f0a45d] shadow-[0_2px_0_#c97d3c]' : 'bg-[#f0e2c8] grayscale-[60%]'}`}
-              >
-                {a.emoji}
-              </button>
-              <div className="min-w-0 flex-1">
-                <span className="block text-[13px] font-extrabold leading-tight">{a.label}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={v}
-                  aria-label={`Volumen de ${a.label}`}
-                  onChange={(e) => onChannel(a.id, Number(e.target.value))}
-                  className="cozy-range mt-1 w-full"
-                />
-                {a.id === 'ruido' && <NoiseColorPicker value={noiseColor} onChange={onNoiseColor} />}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-      <p className="mt-3 text-[11px] font-bold opacity-80">Todos los sonidos se generan en vivo en tu navegador. Siguen sonando mientras exploras.</p>
+      <p className="mt-3 text-[11px] font-bold opacity-80">Una canción chiptune original que se genera en vivo en tu navegador. Sigue sonando mientras exploras.</p>
     </>
   );
 }
