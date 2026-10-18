@@ -800,13 +800,17 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
             s.cut.delete(i);
             paintRegion(i % WORLD_W, Math.floor(i / WORLD_W), i % WORLD_W, Math.floor(i / WORLD_W));
           }
+        // Nothing fills in while Dui is below ground: the shaft over his head
+        // closed behind him and sealed him in a pocket (only the blocks right
+        // around his body were spared).
+        const buried = p.z - SURFACE[clamp(Math.floor(p.x), 0, WORLD_W - 1)] > 0.5;
         for (const [i, d] of s.dug) {
           // Also the blocks Dui left behind while burrowing up: back to air.
           if (tiles[i] === d.t) {
             s.dug.delete(i);
             continue;
           }
-          if (s.time - d.time < REFILL_AFTER) continue;
+          if (buried || s.time - d.time < REFILL_AFTER) continue;
           const tx = i % WORLD_W;
           const ty = Math.floor(i / WORLD_W);
           if (Math.abs(tx + 0.5 - p.x) < HW + 0.6 && ty >= Math.floor(p.z - H) - 1 && ty <= Math.floor(p.z)) continue;

@@ -498,7 +498,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     onCut: (n) => {
       const next = (cutRef.current += n);
       setCut(next);
-      if (next >= 60) unlock('jardinero');
+      // "Your first tufts": the 2D island has ~22 of them and digging no
+      // longer counts as cutting, so 60 meant re-cutting all of it three times.
+      if (next >= 12) unlock('jardinero');
       if (next >= store.grassTotal * 0.35) unlock('cesped');
     },
     onStar: (i) => {
