@@ -574,6 +574,10 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     setAudioNoiseColor(noiseColor);
     setAudioMix(mix);
     initAudio(muted);
+    // The start button keeps keyboard focus while the screen fades out, and a
+    // focused button keeps Space for itself: someone who entered with Enter
+    // could then never jump. Let the island have the keyboard.
+    (document.activeElement as HTMLElement | null)?.blur?.();
     setStarted(true);
     grantStamp('llegada');
     if (!readStorage('island-tutorial-done', false)) {
