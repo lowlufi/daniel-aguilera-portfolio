@@ -181,7 +181,12 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   const later = useCallback((fn: () => void, ms: number) => {
     timers.current.push(window.setTimeout(fn, ms));
   }, []);
-  const [unlocked, setUnlocked] = useState<AchievementId[]>(() => readStorage('island-achievements', [] as AchievementId[]));
+  const [unlocked, setUnlocked] = useState<AchievementId[]>(() => {
+    // Anything but a list of known ids (a corrupt value, an achievement that no
+    // longer exists) would throw off the "n/12" counter and the unlock check.
+    const v = readStorage<unknown>('island-achievements', []);
+    return Array.isArray(v) ? [...new Set(v.filter((id): id is AchievementId => typeof id === 'string' && id in ACHIEVEMENTS))] : [];
+  });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const visited = useRef(new Set<InteractableId>());
   const toastKey = useRef(0);
@@ -325,7 +330,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
             '¡Bienvenid@ a la isla de Daniel Eduardo! 🌅',
             'Eres Dui, el gato de Daniel. Camina con A y D (o las flechas) y salta con Espacio o W. En el celular, usa el joystick: hacia arriba salta.',
             'Con F (o 🐾) das un zarpazo: corta el pasto alto y cava la tierra. S+F cava hacia abajo y W+F sube cavando. Dicen que hay estrellitas escondidas entre el pasto… y algunas bajo tierra.',
-            'Acércate a las cosas y pulsa E para interactuar. ¡O usa los botones de abajo para ir directo!',
+            'Acércate a las cosas y pulsa E para interactuar. ¡O usa los botones «Ir a» para llegar directo!',
           ],
           choices: [{ label: '¡Vamos!', run: finishTutorial }],
           skippable: true,
@@ -498,9 +503,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     onCut: (n) => {
       const next = (cutRef.current += n);
       setCut(next);
-      // "Your first tufts": the 2D island has ~22 of them and digging no
-      // longer counts as cutting, so 60 meant re-cutting all of it three times.
-      if (next >= 12) unlock('jardinero');
+      // "Your first tufts": the 2D island keeps ~22 of them and digging no
+      // longer counts as cutting, so the old 60 meant re-cutting it all thrice.
+      if (next >= 5) unlock('jardinero');
       if (next >= store.grassTotal * 0.35) unlock('cesped');
     },
     onStar: (i) => {
@@ -617,24 +622,38 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   // Live readings for the ESP32 station (San Antonio, Valparaíso).
   useEffect(() => {
     let alive = true;
+    let retry = 0;
+    // A first request that fails (flaky mobile data, a cold API) left the
+    // station "offline", and the Meteorólogo badge out of reach, for the full
+    // 10 minutes until the next poll. Try again sooner while there is no reading.
+    const retrySoon = () => {
+      if (!alive || store.meteo) return;
+      window.clearTimeout(retry);
+      retry = window.setTimeout(load, 30_000);
+    };
     const load = async () => {
       try {
         const res = await fetch(
           'https://api.open-meteo.com/v1/forecast?latitude=-33.5933&longitude=-71.6217&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,is_day&daily=sunset&forecast_days=1&timezone=auto&timeformat=unixtime',
         );
-        if (!res.ok) return;
+        if (!res.ok) return retrySoon();
         const d = await res.json();
         if (!alive) return;
+        const c = d?.current ?? {};
+        // Open-Meteo can return null for a reading; the station dialog calls
+        // toFixed on these, which would crash the island.
+        if (![c.temperature_2m, c.relative_humidity_2m, c.wind_speed_10m, c.weather_code].every(Number.isFinite)) return retrySoon();
         store.meteo = {
-          temp: d.current.temperature_2m,
-          hum: d.current.relative_humidity_2m,
-          wind: d.current.wind_speed_10m,
-          code: d.current.weather_code,
-          isDay: d.current.is_day === 1,
-          sunset: d.daily?.sunset?.[0] ?? 0,
+          temp: c.temperature_2m,
+          hum: c.relative_humidity_2m,
+          wind: c.wind_speed_10m,
+          code: c.weather_code,
+          isDay: c.is_day === 1,
+          sunset: finiteOr(d.daily?.sunset?.[0], 0),
         };
       } catch {
-        // Offline or blocked: the station just keeps showing "wifi...".
+        // Offline or blocked: the station shows "no logra conectarse" for now.
+        retrySoon();
       }
     };
     load();
@@ -642,6 +661,7 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
     return () => {
       alive = false;
       window.clearInterval(t);
+      window.clearTimeout(retry);
     };
   }, [store]);
 
@@ -797,13 +817,13 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
   return (
     <MotionConfig reducedMotion="user">
     <div className="absolute inset-0 font-cozy select-none">
-      {/* La isla en 2D, pixel art en un canvas: corre en cualquier equipo, sin WebGL. */}
+      {/* La isla en 2D, dibujada en crayón en un canvas: corre en cualquier equipo, sin WebGL. */}
       <PixelScene store={store} events={events} onWalkTo={walkTo} weather={weather} reduceMotion={reduceMotion} paused={paused} />
 
       {/* Crawlable summary for search engines and screen readers. */}
       <div className="sr-only">
         <h1>Daniel Eduardo — Ingeniero en Informática</h1>
-        <p>Portafolio interactivo: una isla en 2D, pixel art, para explorar con Dui, el gato de Daniel. Desarrollo web full stack, IoT y soluciones a medida.</p>
+        <p>Portafolio interactivo: una isla en 2D dibujada en crayón, para explorar con Dui, el gato de Daniel. Desarrollo web full stack, IoT y soluciones a medida.</p>
         <p>
           Cómo jugar con teclado: A y D o las flechas mueven a Dui, el gato de Daniel; Espacio o W salta; F da un zarpazo que corta el pasto
           y cava la tierra; E o Enter conversa con lo que tengas cerca. Los botones «Ir a» y «Más lugares» llevan a Dui directo a cada
