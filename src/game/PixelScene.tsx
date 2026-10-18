@@ -109,6 +109,8 @@ const SIT_AFTER = 4;
 const SLEEP_AFTER = 20;
 const REGROW_AFTER = 45;
 const REFILL_AFTER = 60;
+// Seconds standing still underground before Dui digs his own way up.
+const BURROW_AFTER = 6;
 
 // How dark each weather is at ground level; caves add their own darkness.
 const DARK: Record<WeatherId, number> = { soleado: 0, atardecer: 0.1, lluvia: 0.22, niebla: 0.12, noche: 0.62, nieve: 0.06 };
@@ -727,12 +729,16 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       }
       s.vy = Math.min(s.vy, s.inWater ? 3.5 : MAX_FALL);
 
-      // X, with a one-block step-up so hills are walkable.
+      // X, with a one-block step-up so hills are walkable. It works in the
+      // air too: a cat pulls himself onto a ledge he can reach, so a jump
+      // (2.9 blocks) gets Dui out of a three-block hole instead of leaving
+      // him pawing at the rim.
       let nx = p.x + s.vx * dt;
       if (collide(nx, p.z)) {
         // Climbing counts too: at the lip of a shaft Dui pulls himself up
-        // onto the ledge instead of sliding back down.
-        if ((s.onGround || s.inWater || s.climbing) && !collide(nx, p.z - 1) && !collide(p.x, p.z - 1)) {
+        // onto the ledge instead of sliding back down (any airborne contact
+        // does, not only while holding jump against the wall).
+        if (!collide(nx, p.z - 1) && !collide(p.x, p.z - 1)) {
           p.z -= 1;
           s.lift = 1;
         } else if (s.inWater && !submerged && !collide(nx, p.z - 2) && !collide(p.x, p.z - 2)) {
@@ -840,10 +846,55 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           if (buried || s.time - d.time < REFILL_AFTER) continue;
           const tx = i % WORLD_W;
           const ty = Math.floor(i / WORLD_W);
-          if (Math.abs(tx + 0.5 - p.x) < HW + 0.6 && ty >= Math.floor(p.z - H) - 1 && ty <= Math.floor(p.z)) continue;
+          if (Math.abs(tx + 0.5 - p.x) < HW + 0.6) {
+            // Dui's own columns. Anything above him waits (the shaft he came
+            // down stays open), and the block he is in lifts him onto itself
+            // instead of burying him: that is how he gets out of a hole too
+            // deep to jump from, one block a second, until he is back on top.
+            if (ty < Math.floor(p.z - H)) continue;
+            if (ty <= Math.floor(p.z - 1e-4)) {
+              if (collide(p.x, ty)) continue;
+              p.z = ty;
+              s.vy = Math.min(s.vy, 0);
+              s.lift = 1;
+            }
+          }
           tiles[i] = d.t;
           s.dug.delete(i);
           paintRegion(tx - 1, ty - 2, tx + 1, ty + 1);
+        }
+        // Stuck underground (a cave, a hole too deep to jump from, a tunnel
+        // that closed behind him) and standing still: Dui burrows up through
+        // the dirt a block a second, the earth closing under his paws, until
+        // he is back on the surface. Stone and ore stop him; so does the water.
+        const cx = clamp(Math.floor(p.x), 0, WORLD_W - 1);
+        if (s.onGround && !s.inWater && s.still > BURROW_AFTER && p.z > SURFACE[cx]) {
+          const x0 = Math.floor(p.x - HW);
+          const x1 = Math.floor(p.x + HW - 1e-4);
+          const above = Math.floor(p.z - H) - 1;
+          let canDig = true;
+          for (let tx = x0; tx <= x1; tx++) if (solidAt(tx, above) && !isDiggableTile(tileAt(tx, above))) canDig = false;
+          if (canDig) {
+            for (let tx = x0; tx <= x1; tx++) {
+              const i = idx(tx, above);
+              if (isDiggableTile(tiles[i])) {
+                s.dug.set(i, { t: tiles[i], time: s.time });
+                tiles[i] = T.AIR;
+              }
+              // The row he leaves fills in so he has something to stand on.
+              const below = idx(tx, above + 1);
+              if (tiles[below] === T.AIR && !STAR_SPOTS.some((q) => q.x === tx && q.z - 1 === above + 1)) {
+                tiles[below] = above + 1 === SURFACE[tx] ? T.GRASS : T.DIRT;
+                s.dug.delete(below);
+              }
+              paintRegion(tx - 1, above - 1, tx + 1, above + 2);
+            }
+            p.z -= 1;
+            s.lift = 1;
+            s.vy = 0;
+            if (!still) for (let q = 0; q < 6; q++) spawn({ x: p.x + (Math.random() - 0.5) * 1.4, y: p.z - 1, vx: (Math.random() - 0.5) * 4, vy: -2 - Math.random() * 3, life: 0.6, kind: 'px', c: q & 1 ? PAL.dirtDark : PAL.dirtLight, s: 2, g: 22 });
+            sfx.pop();
+          }
         }
       }
 

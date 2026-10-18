@@ -176,6 +176,12 @@ function rawHeight(x: number) {
     }
     SURFACE[x] = Math.min(SEA_LEVEL - 1, Math.round(y));
   }
+  // The beach curve and two flats at different levels side by side (the
+  // plaza and the campfire) left two-block steps that stopped Dui dead when
+  // walking with A/D held. Sweep west to east keeping every step at one
+  // block, which the walk's step-up climbs on its own. Going this way the
+  // west beach stays low by the sea (the hill behind it eases down instead).
+  for (let x = ISLAND_X0 + 1; x <= ISLAND_X1; x++) SURFACE[x] = Math.max(SURFACE[x - 1] - 1, Math.min(SURFACE[x], SURFACE[x - 1] + 1));
 })();
 
 export const isBeach = (x: number) => Math.min(x - ISLAND_X0, ISLAND_X1 - x) < 7;
