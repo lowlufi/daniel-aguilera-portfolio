@@ -37,40 +37,39 @@ import {
 } from './world';
 import { PAL } from './sprites';
 import {
-  CHUNK,
-  CHUNK_RES,
-  INK,
+  P,
+  SKY_H,
   TILE,
-  crayonBoard,
-  crayonCampfire,
-  crayonCloud,
-  crayonDaniel,
-  crayonDui,
-  crayonGear,
-  crayonGrass,
-  crayonHeart,
-  crayonHills,
-  crayonLantern,
-  crayonMailbox,
-  crayonMoon,
-  crayonPlant,
-  crayonSign,
-  crayonStar,
-  crayonStation,
-  crayonSun,
-  crayonWelcome,
-  dot,
-  grain,
-  hatch,
-  paintChunk,
-  paper,
+  board90,
+  campfire90,
+  cloud90,
+  drawDaniel90,
+  drawDui90,
+  gear90,
+  grass90,
+  heart90,
+  hills90,
+  lantern90,
+  mailbox90,
+  moon90,
+  paintChunk90,
+  plant90,
+  sign90,
+  sky,
+  star90,
+  station90,
+  sun90,
+  welcome90,
   type DuiPose,
-} from './crayon';
+} from './pixel90';
+
+// Blocks per side of a cached ground chunk.
+const CHUNK = 8;
 
 /*
- * The island as a side-scrolling world of blocks, drawn in crayon on a
- * sketchbook page (crayon.ts). Physics and blocks are Terraria-like; the look
- * is hand-drawn.
+ * The island as a side-scrolling world of blocks, in 90s pixel art
+ * (pixel90.ts): dithered skies and hills, three-tone shading, dark outlines.
+ * Physics and blocks are Terraria-like.
  *
  * Everything is drawn on a small canvas (one unit = one virtual pixel) and
  * upscaled by a whole number with nearest-neighbour, so the pixel art stays
@@ -172,27 +171,24 @@ function lampSprite() {
 // Top-left block of each 2x2 window, for the evening glow.
 const WINDOW_BLOCKS = WINDOWS.filter((w) => !WINDOWS.some((o) => (o.x === w.x - 1 && o.y === w.y) || (o.x === w.x && o.y === w.y - 1)));
 
-/* Crayon colors per weather: the page tint, the sky scribble, clouds, hills. */
-const PAGE_TINT: Record<WeatherId, string | null> = {
-  soleado: null,
-  atardecer: 'rgba(255,170,120,0.16)',
-  lluvia: 'rgba(110,130,160,0.22)',
-  niebla: 'rgba(225,225,232,0.28)',
-  noche: 'rgba(30,40,95,0.5)',
-  nieve: 'rgba(220,235,255,0.18)',
+/* Colors per weather: the sky from top to horizon, clouds, hills. */
+const SKY_STOPS: Record<WeatherId, number[][]> = {
+  soleado: [[44, 98, 196], [70, 132, 222], [108, 170, 236], [156, 204, 244], [214, 236, 250]],
+  atardecer: [[58, 48, 118], [128, 66, 132], [214, 96, 112], [246, 148, 92], [255, 214, 132]],
+  lluvia: [[58, 66, 86], [78, 90, 110], [102, 116, 136], [128, 140, 158], [158, 168, 184]],
+  niebla: [[150, 156, 172], [174, 180, 192], [198, 202, 212], [218, 220, 228], [234, 236, 240]],
+  noche: [[8, 10, 34], [14, 20, 54], [24, 32, 80], [38, 48, 106], [58, 70, 130]],
+  nieve: [[108, 138, 188], [138, 168, 210], [174, 198, 230], [204, 222, 242], [230, 240, 250]],
 };
-const SKY_CRAYON: Record<WeatherId, string | null> = {
-  soleado: '#6fb4ee',
-  atardecer: '#f2895a',
-  lluvia: '#7d8ea8',
-  niebla: null,
-  noche: '#3a4a9a',
-  nieve: '#a9c8ee',
+const CLOUD_FILL: Record<WeatherId, string> = { soleado: '#f4f8ff', atardecer: '#ffc8a8', lluvia: '#9aa4b6', niebla: '#e4e4ec', noche: '#5a648e', nieve: '#eef4ff' };
+const CLOUD_LIGHT: Record<WeatherId, string> = { soleado: '#ffffff', atardecer: '#fff0d8', lluvia: '#c0c8d4', niebla: '#f8f8fc', noche: '#7a84b0', nieve: '#ffffff' };
+const CLOUD_SHADE: Record<WeatherId, string> = { soleado: '#b4c8e4', atardecer: '#d0808a', lluvia: '#6a7488', niebla: '#b8b8c8', noche: '#3a4270', nieve: '#b0c4e0' };
+const HILL_FAR: Record<WeatherId, string> = { soleado: '#7fae9a', atardecer: '#a87494', lluvia: '#7a8a98', niebla: '#bcbcc8', noche: '#2e3668', nieve: '#b8cadc' };
+const HILL_NEAR: Record<WeatherId, string> = { soleado: '#4f9a5a', atardecer: '#8a5c76', lluvia: '#5a7868', niebla: '#a2a8b2', noche: '#232a56', nieve: '#94b0c4' };
+const R = (g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, c: string) => {
+  g.fillStyle = c;
+  g.fillRect(Math.round(x), Math.round(y), w, h);
 };
-const CLOUD_FILL: Record<WeatherId, string> = { soleado: '#ffffff', atardecer: '#ffd2b8', lluvia: '#a8b2c2', niebla: '#e8e8ee', noche: '#6a74a8', nieve: '#f4f8ff' };
-const CLOUD_LINE: Record<WeatherId, string> = { soleado: '#7fa6d0', atardecer: '#d07a6a', lluvia: '#5f6b80', niebla: '#a8a8b8', noche: '#3a4478', nieve: '#9ab4d8' };
-const HILL_FAR: Record<WeatherId, string> = { soleado: '#9cc7a0', atardecer: '#c98aa0', lluvia: '#8a9aa8', niebla: '#c8c8d0', noche: '#4a5288', nieve: '#c8d8e8' };
-const HILL_NEAR: Record<WeatherId, string> = { soleado: '#6faa6a', atardecer: '#a87a8a', lluvia: '#6f8a7a', niebla: '#b0b4bc', noche: '#3a4478', nieve: '#a8c0d0' };
 
 // Distant hills behind the island, two layers of parallax.
 const hills = (seed: number, amp: number) => {
@@ -215,14 +211,14 @@ const SKY_STARS = (() => {
   return out;
 })();
 const CLOUDS = (() => {
-  const out: { x: number; y: number; w: number; parts: [number, number, number, number][] }[] = [];
+  const out: { x: number; y: number; w: number; k: number; parts: [number, number, number, number][] }[] = [];
   let a = 5;
   const r = () => ((a = (a * 9301 + 49297) % 233280), a / 233280);
   for (let i = 0; i < 9; i++) {
     const w = 24 + Math.floor(r() * 40);
     const parts: [number, number, number, number][] = [];
     for (let k = 0; k < 4; k++) parts.push([Math.floor(r() * (w - 10)), -2 - Math.floor(r() * 6), 10 + Math.floor(r() * 14), 4 + Math.floor(r() * 5)]);
-    out.push({ x: r() * 2200, y: 40 + r() * 130, w, parts });
+    out.push({ x: r() * 2200, y: 40 + r() * 130, w, k: i + 1, parts });
   }
   return out;
 })();
@@ -241,7 +237,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
   const props = useRef({ weather, reduceMotion, onWalkTo });
   props.current = { weather, reduceMotion, onWalkTo };
 
-  const view = useRef({ cssW: 0, cssH: 0, dpr: 1, scale: 3, r: 2, vw: 320, vh: 240, camX: 0, camY: 0, camPx: 0, camPy: 0 });
+  const view = useRef({ cssW: 0, cssH: 0, dpr: 1, scale: 3, r: 1, vw: 320, vh: 240, camX: 0, camY: 0, camPx: 0, camPy: 0 });
 
   const sim = useRef({
     time: 0,
@@ -287,10 +283,8 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     daniel: { wave: 0, waveT: 6, blink: 0, blinkT: 3, mutter: '', mutterT: 5, mutterUntil: 0 },
     labelEls: [] as HTMLDivElement[],
     bubbleEl: null as HTMLDivElement | null,
-    // Ground painted in crayon, by 8x8-block chunks, most recently used last.
+    // Ground painted by 8x8-block chunks, most recently used last.
     chunks: new Map<number, HTMLCanvasElement>(),
-    layer: null as HTMLCanvasElement | null,
-    grainPattern: null as CanvasPattern | null,
     light: null as HTMLCanvasElement | null,
   });
 
@@ -306,7 +300,6 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
 
   useEffect(() => {
     const s = sim.current;
-    s.layer = document.createElement('canvas');
     s.light = document.createElement('canvas');
     s.chunks.clear();
     store.grassTotal = 0;
@@ -398,22 +391,13 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     v.scale = scale;
     v.vw = Math.ceil((cssW * dpr) / scale);
     v.vh = Math.ceil((cssH * dpr) / scale);
-    // Crayon lines want real resolution, not upscaled pixels. The backing
-    // store is capped (2 on phones, 3 elsewhere): enough for soft wax lines,
-    // and a phone doesn't push 3M pixels per frame.
-    const r = Math.min(scale, cssW < 700 ? 2 : 3);
-    // Chunks are painted at this resolution: a new one means repainting them.
-    if (r !== v.r) sim.current.chunks.clear();
-    v.r = r;
-    c.width = Math.ceil(v.vw * v.r);
-    c.height = Math.ceil(v.vh * v.r);
+    // One canvas pixel per art pixel: the browser upscales it, nearest-neighbour.
+    v.r = 1;
+    c.width = v.vw;
+    c.height = v.vh;
     c.style.width = `${(v.vw * scale) / dpr}px`;
     c.style.height = `${(v.vh * scale) / dpr}px`;
     const s = sim.current;
-    if (s.layer) {
-      s.layer.width = c.width;
-      s.layer.height = c.height;
-    }
     if (s.light) {
       s.light.width = v.vw;
       s.light.height = v.vh;
@@ -1025,7 +1009,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
     const draw = () => {
       const c = canvasRef.current;
       const ctx = c?.getContext('2d');
-      if (!c || !ctx || !s.layer) return;
+      if (!c || !ctx) return;
       // The first fit can run before the page settles (the route fades in):
       // re-fit whenever the box is not the size we measured.
       const box = c.parentElement;
@@ -1033,79 +1017,63 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       const still = props.current.reduceMotion;
       const weather = props.current.weather;
       const t = s.time;
-      const { vw, vh, camPx, camPy, r } = v;
+      const { vw, vh, camPx, camPy } = v;
       const p = store.pos;
       const mood = moodFor(weather, s.dark);
       const sx = (x: number) => x * TILE - camPx;
       const sy = (z: number) => z * TILE - camPy;
       const inView = (x: number, m = 4) => x * TILE - camPx > -m * TILE && x * TILE - camPx < vw + m * TILE;
 
-      /* The page */
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
-      ctx.drawImage(paper(c.width, c.height, r), 0, 0);
-      const tint = PAGE_TINT[weather];
-      if (tint) {
-        ctx.fillStyle = tint;
-        ctx.fillRect(0, 0, c.width, c.height);
-      }
-
-      /* Everything drawn in crayon goes on its own layer first, so the wax
-         grain can be punched out of it without touching the paper. */
-      const L = s.layer;
-      const g = L.getContext('2d')!;
+      const g = ctx;
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.globalCompositeOperation = 'source-over';
       g.globalAlpha = 1;
-      g.clearRect(0, 0, L.width, L.height);
-      g.setTransform(r, 0, 0, r, 0, 0);
+      g.imageSmoothingEnabled = false;
 
-      // Sky: a loose crayon wash at the top of the page.
+      /* Sky: dithered bands down to the horizon */
       const horizon = SEA_LEVEL * TILE - camPy;
-      const skyCol = SKY_CRAYON[weather];
-      if (skyCol) {
-        for (let band = 0; band < 3; band++) {
-          const top = -10 + band * 40;
-          g.save();
-          g.beginPath();
-          g.rect(0, top, vw, 46);
-          g.clip();
-          hatch(g, -(camPx * 0.1) % 12 - 12, top, vw + 24, 46, skyCol, 0.2 - band * 0.06, 5 + band * 2, -0.22, 1.6, 40 + band);
-          g.restore();
-        }
-      }
+      const stops = SKY_STOPS[weather];
+      const skyTop = Math.round(horizon - SKY_H);
+      if (skyTop > 0) R(g, 0, 0, vw, skyTop, `rgb(${stops[0].join(',')})`);
+      g.drawImage(sky(vw, stops), 0, skyTop);
+      if (horizon < vh) R(g, 0, horizon, vw, vh - horizon, `rgb(${stops[4].join(',')})`);
       if (atmo.stars > 0.3) {
         for (const sk of SKY_STARS) {
-          const x = ((sk.x * 1400 - camPx * 0.05) % vw + vw) % vw;
-          const y = sk.y * Math.max(60, horizon - 40);
-          const tw = still ? 1 : 0.6 + 0.4 * Math.sin(t * 2 + sk.k);
-          g.globalAlpha = atmo.stars * tw;
-          if (sk.k % 5 === 0) crayonStar(g, x, y, 3, '#fff6c0', '#e8d890');
-          else dot(g, x, y, 0.9, '#fff6c0');
+          const x = Math.round((((sk.x * 1400 - camPx * 0.05) % vw) + vw) % vw);
+          const y = Math.round(skyTop + sk.y * (SKY_H - 60));
+          if (!still && Math.sin(t * 2 + sk.k) < -0.6) continue;
+          g.globalAlpha = Math.min(1, atmo.stars * 1.2);
+          if (sk.k % 6 === 0) star90(g, x, y, 1, '#fff6c0');
+          else R(g, x, y, 1, 1, sk.k % 3 ? '#fff6c0' : '#9ab0ff');
         }
         g.globalAlpha = 1;
-        crayonMoon(g, vw * 0.78 - camPx * 0.04, Math.max(40, horizon - 150));
+        moon90(g, vw * 0.78 - camPx * 0.04, Math.max(30, horizon - 150));
       } else if (atmo.sunAmt > 0.02) {
-        crayonSun(g, vw * (0.5 + atmo.sunDir[0] * 0.45) - camPx * 0.04, horizon - 40 - atmo.sunDir[1] * 140, t, still);
+        sun90(g, vw * (0.5 + atmo.sunDir[0] * 0.45) - camPx * 0.04, horizon - 40 - atmo.sunDir[1] * 140, t, still);
       }
       for (const cl of CLOUDS) {
         const span = WORLD_W * TILE * 0.35 + vw + 300;
         const drift = still ? 0 : t * 4;
-        const x = ((cl.x + drift - camPx * 0.35) % span + span) % span - 150;
-        const y = horizon - cl.y - camPy * 0.1;
-        if (x > vw || x + cl.w * 1.5 < 0) continue;
-        crayonCloud(g, x, y, cl.w * 1.5, cl.parts.length * 13 + Math.round(cl.w), CLOUD_FILL[weather], CLOUD_LINE[weather]);
+        const w = Math.round(cl.w * 1.5);
+        const x = Math.round((((cl.x + drift - camPx * 0.35) % span) + span) % span - 150);
+        const y = Math.round(horizon - cl.y - camPy * 0.1 - w * 0.45);
+        if (x > vw || x + w < 0) continue;
+        g.drawImage(cloud90(cl.k, w, CLOUD_FILL[weather], CLOUD_LIGHT[weather], CLOUD_SHADE[weather]), x, y);
       }
-      crayonHills(g, HILLS_FAR, camPx * 0.18, horizon, vw, HILL_FAR[weather], 0.7);
-      crayonHills(g, HILLS_NEAR, camPx * 0.42, horizon, vw, HILL_NEAR[weather], 0.85);
+      const hillLayer = (strip: HTMLCanvasElement, off: number) => {
+        const W = strip.width;
+        let x = -((Math.round(off) % W) + W) % W;
+        for (; x < vw; x += W) g.drawImage(strip, x, Math.round(horizon - strip.height + 2));
+      };
+      hillLayer(hills90(HILLS_FAR, HILL_FAR[weather], false), camPx * 0.18);
+      hillLayer(hills90(HILLS_NEAR, HILL_NEAR[weather], true), camPx * 0.42);
 
       /* Ground, from the chunk cache (painted the first time it's seen). */
       const cx0 = Math.floor(camPx / (CHUNK * TILE));
       const cx1 = Math.floor((camPx + vw) / (CHUNK * TILE));
       const cy0 = Math.floor(camPy / (CHUNK * TILE));
       const cy1 = Math.floor((camPy + vh) / (CHUNK * TILE));
-      // Painting a chunk takes a few ms: at most two new ones per frame, and
+      // Painting a chunk takes a moment: at most two new ones per frame, and
       // the ring just outside the view is painted ahead, before it shows.
       let budget = s.chunks.size === 0 ? 999 : 2;
       for (let cy = Math.max(0, cy0 - 1); cy <= Math.min(Math.ceil(WORLD_H / CHUNK) - 1, cy1 + 1); cy++)
@@ -1116,66 +1084,47 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           if (!ch) {
             if (budget-- <= 0) continue;
             ch = document.createElement('canvas');
-            // Painted at the canvas' own resolution and copied 1:1 at whole
-            // device pixels: scaled or half-pixel copies blurred the chunk
-            // edges into visible seams across the ground.
-            ch.width = ch.height = Math.round(CHUNK * TILE * r);
-            paintChunk(ch.getContext('2d')!, cx, cy, (i) => s.cut.has(i), r);
+            ch.width = ch.height = CHUNK * TILE;
+            paintChunk90(ch.getContext('2d')!, cx, cy, CHUNK, (i) => s.cut.has(i));
             // Bounded cache: forget the chunk used longest ago.
             if (s.chunks.size > 90) s.chunks.delete(s.chunks.keys().next().value!);
           } else s.chunks.delete(key);
           s.chunks.set(key, ch);
-          if (!visible) continue;
-          g.setTransform(1, 0, 0, 1, 0, 0);
-          g.drawImage(ch, Math.round((cx * CHUNK * TILE - camPx) * r), Math.round((cy * CHUNK * TILE - camPy) * r));
-          g.setTransform(r, 0, 0, r, 0, 0);
+          if (visible) g.drawImage(ch, cx * CHUNK * TILE - camPx, cy * CHUNK * TILE - camPy);
         }
 
-      // Water surface: a wavy crayon line that moves.
+      // Water surface: glints that slide along the top row.
       const x0 = Math.floor(camPx / TILE);
       const x1 = Math.ceil((camPx + vw) / TILE);
-      g.strokeStyle = INK.waterLight;
-      g.lineWidth = 2;
-      g.lineCap = 'round';
-      g.beginPath();
       for (let x = Math.max(0, x0); x <= Math.min(WORLD_W - 1, x1); x++) {
-        let y = -1;
-        y = WATER_TOP[x];
+        const y = WATER_TOP[x];
         if (y < 0) continue;
-        for (let k = 0; k <= 4; k++) {
-          const wx = x * TILE + k * 4;
-          const wy = y * TILE + 1 + (still ? 0 : Math.sin(t * 2.2 + wx * 0.09) * 1.6);
-          if (k === 0) g.moveTo(wx - camPx, wy - camPy);
-          else g.lineTo(wx - camPx, wy - camPy);
-        }
+        const ph = still ? 0 : Math.floor(t * 3 + x * 0.7) % 4;
+        R(g, x * TILE - camPx + ph * 4, y * TILE - camPy + (ph & 1), 4, 1, P.white);
       }
-      g.stroke();
 
       // Tall grass, leaning with the wind; Dui pushes it aside as he passes.
-      g.save();
-      g.translate(-camPx, -camPy);
       const wind = still ? 0 : mood.wind * 1.6;
       for (let x = Math.max(0, x0 - 1); x <= Math.min(WORLD_W - 1, x1); x++) {
         const ty = SURFACE[x] - 1;
         const i = idx(x, ty);
         if (tiles[i] !== T.TALLGRASS || s.cut.has(i)) continue;
         const dxD = x + 0.5 - p.x;
-        const push = Math.abs(dxD) < 1.2 && Math.abs(p.z - SURFACE[x]) < 1.5 ? Math.sign(dxD || s.facing) * 4 : 0;
-        crayonGrass(g, x, ty, t, wind, push);
+        const push = Math.abs(dxD) < 1.2 && Math.abs(p.z - SURFACE[x]) < 1.5 ? Math.sign(dxD || s.facing) * 3 : 0;
+        grass90(g, x * TILE - camPx, ty * TILE - camPy, x, ty, t, wind, push);
       }
-      g.restore();
 
       /* Things on the island */
-      if (inView(WORKSHOP.x)) crayonGear(g, sx(WORKSHOP.x + 0.5) + 2, sy(SURFACE[WORKSHOP.x] - WORKSHOP.h + 1) - 4, still ? 0 : t * 0.9);
-      for (const pl of GARDEN_PLOTS) if (inView(pl.x)) crayonPlant(g, sx(pl.x + 0.5), sy(pl.z), pl.kind, store.garden.growth, t);
-      if (inView(STATION.x)) crayonStation(g, sx(STATION.x + 0.5), sy(STATION.z), t, !!store.meteo);
-      for (const sg of PROJECT_SIGNS) if (inView(sg.x)) crayonSign(g, sx(sg.x + 0.5), sy(sg.z), sg.color, store.seenProjects.has(sg.project.id));
-      if (inView(PLAZA.x)) crayonBoard(g, sx(PLAZA.x + 0.5), sy(PLAZA.z));
-      if (inView(WELCOME.x)) crayonWelcome(g, sx(WELCOME.x + 0.5), sy(WELCOME.z));
-      if (inView(MAILBOX.x)) crayonMailbox(g, sx(MAILBOX.x + 0.5), sy(MAILBOX.z));
-      for (const ln of LANTERNS) if (inView(ln.x)) crayonLantern(g, sx(ln.x + 0.2), sy(SURFACE[ln.x]), mood.evening);
-      if (inView(CAMPFIRE.x)) crayonCampfire(g, sx(CAMPFIRE.x + 0.5), sy(SURFACE[CAMPFIRE.x]), t, still);
-      if (inView(DANIEL.x)) crayonDaniel(g, sx(DANIEL.x + 0.5), sy(DANIEL.z), { facing: p.x < DANIEL.x ? -1 : 1, t, wave: s.daniel.wave > 0, blink: s.daniel.blink > 0 });
+      if (inView(WORKSHOP.x)) gear90(g, sx(WORKSHOP.x + 0.5) + 2, sy(SURFACE[WORKSHOP.x] - WORKSHOP.h + 1) - 4, still ? 0 : t * 0.9);
+      for (const pl of GARDEN_PLOTS) if (inView(pl.x)) plant90(g, sx(pl.x + 0.5), sy(pl.z), pl.kind, store.garden.growth, t);
+      if (inView(STATION.x)) station90(g, sx(STATION.x + 0.5), sy(STATION.z), store.meteo ? (still || Math.sin(t * 4) > 0 ? '#5dff7a' : '#1f7a34') : '#ff5a4a');
+      for (const sg of PROJECT_SIGNS) if (inView(sg.x)) sign90(g, sx(sg.x + 0.5), sy(sg.z), sg.color, store.seenProjects.has(sg.project.id));
+      if (inView(PLAZA.x)) board90(g, sx(PLAZA.x + 0.5), sy(PLAZA.z));
+      if (inView(WELCOME.x)) welcome90(g, sx(WELCOME.x + 0.5), sy(WELCOME.z));
+      if (inView(MAILBOX.x)) mailbox90(g, sx(MAILBOX.x + 0.5), sy(MAILBOX.z));
+      for (const ln of LANTERNS) if (inView(ln.x)) lantern90(g, sx(ln.x + 0.2), sy(SURFACE[ln.x]), mood.evening > 0.15, t);
+      if (inView(CAMPFIRE.x)) campfire90(g, sx(CAMPFIRE.x + 0.5), sy(SURFACE[CAMPFIRE.x]), t, still);
+      if (inView(DANIEL.x)) drawDaniel90(g, sx(DANIEL.x + 0.5), sy(DANIEL.z), { facing: p.x < DANIEL.x ? -1 : 1, t, wave: s.daniel.wave > 0, blink: s.daniel.blink > 0 });
 
       // Stars: a glint through the grass, then a floating star.
       s.stars.forEach((sp, i) => {
@@ -1184,36 +1133,38 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         if (sp.taken) {
           if (sp.t < 0.5) {
             sp.t += 0.016;
-            crayonStar(g, sx(q.x + 0.5), sy(q.z - 0.7) - sp.t * 30, 5, INK.yellow);
+            star90(g, sx(q.x + 0.5), sy(q.z - 0.7) - sp.t * 30, 4, P.gold);
           }
           return;
         }
         if (!sp.revealed) {
-          if (!still && Math.sin(t * 2.2 + i * 1.7) > 0.88) crayonStar(g, sx(q.x + 0.5), sy(q.z - 0.3), 2.5, '#fff6c0', '#e8d890');
+          if (!still && Math.sin(t * 2.2 + i * 1.7) > 0.88) star90(g, sx(q.x + 0.5), sy(q.z - 0.3), 1, '#fff6c0');
           return;
         }
-        const bob = still ? 0 : Math.sin(t * 2.5 + i) * 2;
-        crayonStar(g, sx(q.x + 0.5), sy(q.z - 0.8) + bob, sp.t < 0.4 ? 4 : 6, INK.yellow);
+        const bob = still ? 0 : Math.round(Math.sin(t * 2.5 + i) * 2);
+        star90(g, sx(q.x + 0.5), sy(q.z - 0.8) + bob, sp.t < 0.4 ? 3 : 4, P.gold);
       });
 
       for (const q of s.particles) {
-        const px = sx(q.x);
-        const py = sy(q.y);
+        const px = Math.round(sx(q.x));
+        const py = Math.round(sy(q.y));
         const a = clamp(q.life / q.max, 0, 1);
         if (q.kind === 'heart') {
           g.globalAlpha = Math.min(1, a * 1.5);
-          crayonHeart(g, px, py, 3, q.c);
+          heart90(g, px, py, q.c);
         } else if (q.kind === 'z') {
           g.globalAlpha = a;
-          g.fillStyle = INK.graphite;
-          g.font = 'bold 9px "Patrick Hand", "Comic Sans MS", cursive';
+          g.fillStyle = '#f4f0ff';
+          g.font = '8px "Pixelify Sans", monospace';
           g.fillText('z', px, py);
         } else if (q.kind === 'smoke') {
-          g.globalAlpha = a * 0.35;
-          dot(g, px, py, 2 + (1 - a) * 4, '#9a948c', 1);
+          g.globalAlpha = a * 0.45;
+          const r = Math.round(2 + (1 - a) * 3);
+          R(g, px - r, py - r, r * 2, r * 2, '#a8a29a');
         } else {
           g.globalAlpha = q.kind === 'px' && q.max > 2 ? 1 : Math.min(1, a * 2);
-          dot(g, px, py, Math.max(0.8, q.s * 0.7), q.c, 1);
+          const z = Math.max(1, Math.round(q.s));
+          R(g, px, py, z, z, q.c);
         }
       }
       g.globalAlpha = 1;
@@ -1233,25 +1184,9 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         squish: s.squish,
         swim: s.inWater ? 1 : 0,
       };
-      crayonDui(g, sx(p.x), sy(p.z + s.lift * 0.6) + (s.inWater ? 5 : 0), pose);
-
-      /* Wax grain: specks where the crayon skipped over the paper. Anchored
-         to the world, so it doesn't swim when the camera moves. */
-      if (!s.grainPattern) s.grainPattern = g.createPattern(grain(), 'repeat');
-      if (s.grainPattern) {
-        g.setTransform(1, 0, 0, 1, 0, 0);
-        s.grainPattern.setTransform(new DOMMatrix([1, 0, 0, 1, -((camPx * r) % 96), -((camPy * r) % 96)]));
-        g.globalCompositeOperation = 'destination-out';
-        g.globalAlpha = 0.5;
-        g.fillStyle = s.grainPattern;
-        g.fillRect(0, 0, L.width, L.height);
-        g.globalAlpha = 1;
-        g.globalCompositeOperation = 'source-over';
-      }
-      ctx.drawImage(L, 0, 0);
+      drawDui90(g, sx(p.x), sy(p.z + s.lift * 0.6) + (s.inWater ? 5 : 0), pose);
 
       /* Light and weather, over the drawing */
-      ctx.setTransform(r, 0, 0, r, 0, 0);
       const window_ = (x: number, y: number, a: number) => {
         ctx.fillStyle = `rgba(255,214,120,${a})`;
         ctx.fillRect(x, y, 2 * TILE - 2, 2 * TILE - 2);
@@ -1273,10 +1208,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         const nRain = Math.round(atmo.rain * 70);
         while (s.drops.length < nRain) s.drops.push({ x: Math.random() * vw, y: Math.random() * vh, v: 140 + Math.random() * 60, k: 0 });
         if (s.drops.length > nRain) s.drops.length = nRain;
-        ctx.strokeStyle = 'rgba(70,120,190,0.55)';
-        ctx.lineWidth = 1.2;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
+        ctx.fillStyle = 'rgba(150,190,240,0.7)';
         for (const d of s.drops) {
           d.y += d.v / 60;
           d.x -= d.v / 300;
@@ -1285,10 +1217,8 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
             d.x = Math.random() * vw;
           }
           if (d.x < 0) d.x += vw;
-          ctx.moveTo(d.x, d.y);
-          ctx.lineTo(d.x - 1.5, d.y + 6);
+          ctx.fillRect(Math.round(d.x), Math.round(d.y), 1, 4);
         }
-        ctx.stroke();
         const nSnow = Math.round(atmo.snow * 60);
         while (s.flies.length < nSnow) s.flies.push({ x: Math.random() * vw, y: Math.random() * vh, k: Math.random() * 10 });
         if (s.flies.length > nSnow) s.flies.length = nSnow;
@@ -1296,7 +1226,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           f.y += 0.4;
           f.x += Math.sin(t * 1.5 + f.k) * 0.3;
           if (f.y > vh) f.y = -2;
-          dot(ctx, f.x, f.y, 1.4, '#ffffff', 0.9);
+          R(ctx, f.x, f.y, f.k > 6 ? 2 : 1, f.k > 6 ? 2 : 1, '#ffffff');
         }
       }
 
@@ -1428,7 +1358,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
   return (
     <div className={`pixel-isla absolute inset-0 overflow-hidden clima-${weather}`} aria-hidden="true">
       <canvas ref={canvasRef} onPointerDown={onPointerDown} onContextMenu={(e) => e.preventDefault()} className="block cursor-pointer" style={{ touchAction: 'none' }} />
-      <div ref={labelsRef} className="pointer-events-none absolute inset-0 font-crayon" />
+      <div ref={labelsRef} className="pointer-events-none absolute inset-0 font-pixel" />
     </div>
   );
 }
