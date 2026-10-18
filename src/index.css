@@ -223,14 +223,15 @@ html.lite .liquid-glass-strong::before {
    El color de fondo es el del papel: evita un flash antes del primer cuadro.
    Los letreros del mapa van con letra manuscrita, como escritos a mano. */
 .pixel-isla {
-  background: #6caae8;
+  background: #92d2ff;
 }
 .pixel-isla canvas {
   image-rendering: crisp-edges;
   image-rendering: pixelated;
 }
 .font-pixel {
-  font-family: "Pixelify Sans", "Courier New", monospace;
+  font-family: "Fredoka", "Nunito", "Arial Rounded MT Bold", sans-serif;
+  font-weight: 600;
 }
 
 /* Island focus ring: hugging the control (no gap) so the dark ring always

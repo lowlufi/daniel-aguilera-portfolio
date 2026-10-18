@@ -13,7 +13,7 @@ Sitio personal de Daniel Eduardo Aguilera Campusano, Ingeniero en Informática c
 - **Lenis** para inercia de scroll (solo escritorio, se apaga en equipos modestos)
 - **lucide-react** para los íconos
 - Router SPA hecho a mano con `history.pushState`
-- **Sin WebGL ni three.js**: la isla es un juego 2D de plataformas en pixel art al estilo de los 90 (SimCity 2000, RollerCoaster Tycoon): cielos y colinas con tramado, sombreado en tres tonos y contorno oscuro. Hasta octubre de 2026 era 3D con three.js/R3F y andaba lenta en celulares modestos; pasó por versiones ASCII, pixel art simple y crayón antes de esta.
+- **Sin WebGL ni three.js**: la isla es un juego 2D de plataformas en pixel art dulce estilo 16 bits (arte original inspirado en los plataformas de Super Nintendo): pasteles, formas redondas, contornos de color, colinas a rayas y árboles chupetín. Hasta octubre de 2026 era 3D con three.js/R3F y andaba lenta en celulares modestos; pasó por versiones ASCII, pixel art simple, crayón y pixel art noventero antes de esta.
 
 ## Estructura
 
@@ -24,7 +24,7 @@ src/
 ├── game/                ← La isla (ruta /)
 │   ├── IslandGame.tsx   ← Interfaz: libreta, diálogos, logros, clima, sonido, accesibilidad
 │   ├── PixelScene.tsx   ← La escena: cámara, física (gravedad, salto, agua), cavar, pasto, estrellas, clima, luz
-│   ├── pixel90.ts       ← El pixel art: paleta, tramado, bloques con contorno, cielo, colinas, nubes, Dui, Daniel, cosas
+│   ├── dulce.ts         ← El arte: paleta pastel, bloques con contorno de color, cielo, colinas, nubes, árboles, Dui, Daniel, cosas
 │   ├── ambiente.ts      ← Fogata, faroles, pétalos, mariposas, luciérnagas, gradación de color
 │   ├── sprites.ts       ← Paleta de colores de partículas (del pixel art anterior)
 │   ├── world.ts         ← El mundo de bloques: superficie, casas, árboles, huerto, muelle, cuevas, estrellas
@@ -49,7 +49,7 @@ public/
 
 | Ruta | Página |
 |---|---|
-| `/` | Isla de Daniel en 2D, en pixel art de los 90: Dui (el gato) recorre la isla, cava, salta, trepa y junta los 5 sellos de la libreta |
+| `/` | Isla de Daniel en 2D, en pixel art dulce de 16 bits: Dui (el gato) recorre la isla, cava, salta, trepa y junta los 5 sellos de la libreta |
 | `/clasico` | Hero + proyectos destacados + contacto |
 | `/proyectos` | Catálogo completo con filtro por tags |
 | `/sobre-mi` | Bio extendida, stack y valores |
@@ -63,9 +63,9 @@ public/
 - **Estrellas:** 12. Ocho bajo el pasto alto (zarpazo) y cuatro en cuevas (hay que cavar). Las tomadas se guardan por índice en `localStorage`.
 - **Coordenadas:** x en bloques; la vertical va en `pos.z` (pies), así `IslandGame` sigue midiendo distancias con `hypot(dx, dz)` sin saber que el mundo es 2D.
 - **Clima:** `weather.ts` mezcla cielo, nubes, lluvia, nieve, niebla y estrellas; de noche y bajo tierra una capa oscura deja luz alrededor de Dui, las ventanas y las estrellas reveladas.
-- **Arte:** todo se dibuja con código, sin imágenes, a 1 píxel de arte = 1 píxel del canvas, y el navegador lo agranda por un número entero sin suavizar (`image-rendering: pixelated`). Paleta fija con tres tonos por material, tramado ordenado 4×4 (Bayer) para los degradados, contorno oscuro donde el terreno o las hojas tocan el aire y esquinas escalonadas. Los detalles salen de un hash de la posición (no de `Math.random`), así nada parpadea. Dui, Daniel y las cosas se dibujan una vez por pose en un canvas chico con contorno y se reutilizan.
+- **Arte:** todo se dibuja con código, sin imágenes, a 1 píxel de arte = 1 píxel del canvas, agrandado por un número entero sin suavizar (`image-rendering: pixelated`). Paleta pastel, contorno en un tono oscuro del propio color (nunca negro), esquinas redondeadas, tierra con lunares, colinas a rayas, nubes infladas y árboles dibujados enteros como figuras redondas. Dui es una bolita de gato naranja con ojos grandes y mejillas rosadas. Personajes, árboles y cosas se dibujan una vez por pose y quedan en caché.
 - **Física de gato:** salta ~2,75 bloques, flota y nada, y trepa paredes manteniendo el salto (un pozo hondo ya no es una trampa). Al caminar solo bajo tierra, escarba hacia su destino.
-- **Música:** «Cuaderno», pieza original y generativa (Web Audio): Dmaj7–Bm7–Gmaj7–A6, arpegios tipo piano y melodía pentatónica. Suena por defecto en todos los climas; se ajusta desde 🎧.
+- **Música y sonido:** chiptune original generado con Web Audio («Isla de Dui», Fa mayor, 140 BPM; versión tranquila a 96 BPM de noche y con lluvia): pulso con vibrato, bajo triangular, batería de ruido y eco. Efectos en el mismo estilo (salto, aterrizaje, cavar, estrella, logro, maullido). Sin sonidos ambientales; desde 🎧 se ajusta el volumen.
 - **Rendimiento:** el canvas tiene la resolución del arte (unos 450×270 píxeles en escritorio), no la de la pantalla. El terreno se pinta en trozos de 8×8 bloques (caché acotada, dos trozos nuevos por cuadro y el anillo vecino se adelanta); cielo, colinas, nubes y poses quedan en caché.
 - **Accesible:** región `aria-live` que anuncia qué hay cerca, barra "Ir a / Más lugares" con teclado y avisos con `role="status"`.
 - En desarrollo existen `window.__island` (estado y `walkTo`), `window.__pixel` (cámara y escala) y `window.__pixelSpots` (estrellas) para pruebas.

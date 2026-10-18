@@ -36,39 +36,15 @@ import {
   type InteractableId,
 } from './world';
 import { PAL } from './sprites';
-import {
-  P,
-  SKY_H,
-  TILE,
-  board90,
-  campfire90,
-  cloud90,
-  drawDaniel90,
-  drawDui90,
-  gear90,
-  grass90,
-  heart90,
-  hills90,
-  lantern90,
-  mailbox90,
-  moon90,
-  paintChunk90,
-  plant90,
-  sign90,
-  sky,
-  star90,
-  station90,
-  sun90,
-  welcome90,
-  type DuiPose,
-} from './pixel90';
+import * as D from './dulce';
+import { P, SKY_H, TILE, type DuiPose } from './dulce';
 
 // Blocks per side of a cached ground chunk.
 const CHUNK = 8;
 
 /*
- * The island as a side-scrolling world of blocks, in 90s pixel art
- * (pixel90.ts): dithered skies and hills, three-tone shading, dark outlines.
+ * The island as a side-scrolling world of blocks, in a sweet pastel 16-bit
+ * look (dulce.ts): round shapes, colored outlines, striped hills.
  * Physics and blocks are Terraria-like.
  *
  * Everything is drawn on a small canvas (one unit = one virtual pixel) and
@@ -173,18 +149,18 @@ const WINDOW_BLOCKS = WINDOWS.filter((w) => !WINDOWS.some((o) => (o.x === w.x - 
 
 /* Colors per weather: the sky from top to horizon, clouds, hills. */
 const SKY_STOPS: Record<WeatherId, number[][]> = {
-  soleado: [[44, 98, 196], [70, 132, 222], [108, 170, 236], [156, 204, 244], [214, 236, 250]],
-  atardecer: [[58, 48, 118], [128, 66, 132], [214, 96, 112], [246, 148, 92], [255, 214, 132]],
-  lluvia: [[58, 66, 86], [78, 90, 110], [102, 116, 136], [128, 140, 158], [158, 168, 184]],
-  niebla: [[150, 156, 172], [174, 180, 192], [198, 202, 212], [218, 220, 228], [234, 236, 240]],
-  noche: [[8, 10, 34], [14, 20, 54], [24, 32, 80], [38, 48, 106], [58, 70, 130]],
-  nieve: [[108, 138, 188], [138, 168, 210], [174, 198, 230], [204, 222, 242], [230, 240, 250]],
+  soleado: [[88, 168, 255], [112, 188, 255], [146, 210, 255], [186, 230, 255], [226, 246, 255]],
+  atardecer: [[150, 110, 220], [214, 128, 210], [255, 150, 170], [255, 188, 140], [255, 228, 160]],
+  lluvia: [[120, 132, 176], [140, 152, 192], [162, 174, 208], [184, 196, 222], [206, 216, 234]],
+  niebla: [[196, 200, 226], [210, 214, 234], [224, 226, 240], [234, 236, 246], [244, 244, 250]],
+  noche: [[28, 22, 84], [44, 36, 116], [66, 52, 146], [92, 72, 172], [124, 98, 196]],
+  nieve: [[150, 190, 250], [172, 206, 252], [196, 222, 254], [218, 236, 255], [240, 248, 255]],
 };
-const CLOUD_FILL: Record<WeatherId, string> = { soleado: '#f4f8ff', atardecer: '#ffc8a8', lluvia: '#9aa4b6', niebla: '#e4e4ec', noche: '#5a648e', nieve: '#eef4ff' };
-const CLOUD_LIGHT: Record<WeatherId, string> = { soleado: '#ffffff', atardecer: '#fff0d8', lluvia: '#c0c8d4', niebla: '#f8f8fc', noche: '#7a84b0', nieve: '#ffffff' };
-const CLOUD_SHADE: Record<WeatherId, string> = { soleado: '#b4c8e4', atardecer: '#d0808a', lluvia: '#6a7488', niebla: '#b8b8c8', noche: '#3a4270', nieve: '#b0c4e0' };
-const HILL_FAR: Record<WeatherId, string> = { soleado: '#7fae9a', atardecer: '#a87494', lluvia: '#7a8a98', niebla: '#bcbcc8', noche: '#2e3668', nieve: '#b8cadc' };
-const HILL_NEAR: Record<WeatherId, string> = { soleado: '#4f9a5a', atardecer: '#8a5c76', lluvia: '#5a7868', niebla: '#a2a8b2', noche: '#232a56', nieve: '#94b0c4' };
+const CLOUD_FILL: Record<WeatherId, string> = { soleado: '#ffffff', atardecer: '#fff0f4', lluvia: '#dce2f0', niebla: '#f6f6fc', noche: '#9a8ad8', nieve: '#ffffff' };
+const CLOUD_LIGHT: Record<WeatherId, string> = { soleado: '#ffffff', atardecer: '#ffffff', lluvia: '#f0f4fc', niebla: '#ffffff', noche: '#c8bcf4', nieve: '#ffffff' };
+const CLOUD_SHADE: Record<WeatherId, string> = { soleado: '#6aaee8', atardecer: '#d07aaa', lluvia: '#7a88b0', niebla: '#a8aecc', noche: '#4a3a96', nieve: '#7aaee8' };
+const HILL_FAR: Record<WeatherId, string> = { soleado: '#9ae0b4', atardecer: '#e0a0c8', lluvia: '#9ab0c4', niebla: '#d0d4e6', noche: '#5a4aa4', nieve: '#c4dcf4' };
+const HILL_NEAR: Record<WeatherId, string> = { soleado: '#5cc87a', atardecer: '#c47aa8', lluvia: '#78a094', niebla: '#b8c0d4', noche: '#46388a', nieve: '#a0c8e4' };
 const R = (g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, c: string) => {
   g.fillStyle = c;
   g.fillRect(Math.round(x), Math.round(y), w, h);
@@ -493,7 +469,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       const R = Math.random;
       for (let k = 0; k < (props.current.reduceMotion ? 3 : 7); k++)
         spawn({ x: tx + 0.5, y: ty + 0.5, vx: (R() - 0.5) * 5, vy: -3 - R() * 4, life: 0.7, kind: 'px', c: t === T.SAND ? PAL.sandDark : k & 1 ? PAL.dirtDark : PAL.dirtLight, s: 2, g: 22 });
-      sfx.pop();
+      sfx.dig();
       store.revealAt(tx + 0.5, ty + 0.5, 3.2);
       // Not an `onCut`: that counter (and the gardening achievements) is about
       // grass, and every block of dirt was inflating it.
@@ -524,7 +500,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       }
       // Stone over his head: the notch stays, Dui doesn't.
       if (collide(p.x, body)) return dug;
-      if (!dug) sfx.pop();
+      if (!dug) sfx.dig();
       for (let tx = x0; tx <= x1; tx++) {
         const i = idx(tx, body);
         const d = s.dug.get(i);
@@ -693,7 +669,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           s.jumpBuffer = 0;
           s.still = 0;
           s.autoJumping = autoJump && s.jumpBuffer <= 0;
-          sfx.select();
+          sfx.jump();
         }
       }
       s.jumpHeld = jump;
@@ -752,7 +728,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           if (!s.wasOnGround && s.vy > 9) {
             s.squish = Math.max(s.squish, 0.6);
             if (!still) for (let q = 0; q < 5; q++) spawn({ x: p.x + (Math.random() - 0.5) * 1.4, y: nz, vx: (Math.random() - 0.5) * 3, vy: -1 - Math.random(), life: 0.4, kind: 'px', c: PAL.dirtLight, s: 1, g: 10 });
-            sfx.pop();
+            sfx.land();
           }
         } else {
           nz = Math.floor(nz - H) + 1 + H;
@@ -1035,7 +1011,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
       const stops = SKY_STOPS[weather];
       const skyTop = Math.round(horizon - SKY_H);
       if (skyTop > 0) R(g, 0, 0, vw, skyTop, `rgb(${stops[0].join(',')})`);
-      g.drawImage(sky(vw, stops), 0, skyTop);
+      g.drawImage(D.sky(vw, stops), 0, skyTop);
       if (horizon < vh) R(g, 0, horizon, vw, vh - horizon, `rgb(${stops[4].join(',')})`);
       if (atmo.stars > 0.3) {
         for (const sk of SKY_STARS) {
@@ -1043,13 +1019,13 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
           const y = Math.round(skyTop + sk.y * (SKY_H - 60));
           if (!still && Math.sin(t * 2 + sk.k) < -0.6) continue;
           g.globalAlpha = Math.min(1, atmo.stars * 1.2);
-          if (sk.k % 6 === 0) star90(g, x, y, 1, '#fff6c0');
+          if (sk.k % 6 === 0) D.star(g, x, y, 1, '#fff6c0');
           else R(g, x, y, 1, 1, sk.k % 3 ? '#fff6c0' : '#9ab0ff');
         }
         g.globalAlpha = 1;
-        moon90(g, vw * 0.78 - camPx * 0.04, Math.max(30, horizon - 150));
+        D.moon(g, vw * 0.78 - camPx * 0.04, Math.max(30, horizon - 150));
       } else if (atmo.sunAmt > 0.02) {
-        sun90(g, vw * (0.5 + atmo.sunDir[0] * 0.45) - camPx * 0.04, horizon - 40 - atmo.sunDir[1] * 140, t, still);
+        D.sun(g, vw * (0.5 + atmo.sunDir[0] * 0.45) - camPx * 0.04, horizon - 40 - atmo.sunDir[1] * 140, t, still);
       }
       for (const cl of CLOUDS) {
         const span = WORLD_W * TILE * 0.35 + vw + 300;
@@ -1058,15 +1034,15 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         const x = Math.round((((cl.x + drift - camPx * 0.35) % span) + span) % span - 150);
         const y = Math.round(horizon - cl.y - camPy * 0.1 - w * 0.45);
         if (x > vw || x + w < 0) continue;
-        g.drawImage(cloud90(cl.k, w, CLOUD_FILL[weather], CLOUD_LIGHT[weather], CLOUD_SHADE[weather]), x, y);
+        g.drawImage(D.cloud(cl.k, w, CLOUD_FILL[weather], CLOUD_LIGHT[weather], CLOUD_SHADE[weather]), x, y);
       }
       const hillLayer = (strip: HTMLCanvasElement, off: number) => {
         const W = strip.width;
         let x = -((Math.round(off) % W) + W) % W;
         for (; x < vw; x += W) g.drawImage(strip, x, Math.round(horizon - strip.height + 2));
       };
-      hillLayer(hills90(HILLS_FAR, HILL_FAR[weather], false), camPx * 0.18);
-      hillLayer(hills90(HILLS_NEAR, HILL_NEAR[weather], true), camPx * 0.42);
+      hillLayer(D.hills(HILLS_FAR, HILL_FAR[weather], false), camPx * 0.18);
+      hillLayer(D.hills(HILLS_NEAR, HILL_NEAR[weather], true), camPx * 0.42);
 
       /* Ground, from the chunk cache (painted the first time it's seen). */
       const cx0 = Math.floor(camPx / (CHUNK * TILE));
@@ -1085,13 +1061,20 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
             if (budget-- <= 0) continue;
             ch = document.createElement('canvas');
             ch.width = ch.height = CHUNK * TILE;
-            paintChunk90(ch.getContext('2d')!, cx, cy, CHUNK, (i) => s.cut.has(i));
+            D.paintChunk(ch.getContext('2d')!, cx, cy, CHUNK, (i) => s.cut.has(i));
             // Bounded cache: forget the chunk used longest ago.
             if (s.chunks.size > 90) s.chunks.delete(s.chunks.keys().next().value!);
           } else s.chunks.delete(key);
           s.chunks.set(key, ch);
           if (visible) g.drawImage(ch, cx * CHUNK * TILE - camPx, cy * CHUNK * TILE - camPy);
         }
+
+      // Trees, whole, behind everything else on the island.
+      for (const tr of TREES) {
+        if (!inView(tr.x, 5)) continue;
+        const img = D.tree(tr.kind, tr.trunk, tr.r, tr.fruit, tr.x);
+        g.drawImage(img, Math.round(sx(tr.x + 0.5) - img.width / 2), Math.round(sy(SURFACE[tr.x]) - img.height));
+      }
 
       // Water surface: glints that slide along the top row.
       const x0 = Math.floor(camPx / TILE);
@@ -1111,20 +1094,20 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         if (tiles[i] !== T.TALLGRASS || s.cut.has(i)) continue;
         const dxD = x + 0.5 - p.x;
         const push = Math.abs(dxD) < 1.2 && Math.abs(p.z - SURFACE[x]) < 1.5 ? Math.sign(dxD || s.facing) * 3 : 0;
-        grass90(g, x * TILE - camPx, ty * TILE - camPy, x, ty, t, wind, push);
+        D.grass(g, x * TILE - camPx, ty * TILE - camPy, x, ty, t, wind, push);
       }
 
       /* Things on the island */
-      if (inView(WORKSHOP.x)) gear90(g, sx(WORKSHOP.x + 0.5) + 2, sy(SURFACE[WORKSHOP.x] - WORKSHOP.h + 1) - 4, still ? 0 : t * 0.9);
-      for (const pl of GARDEN_PLOTS) if (inView(pl.x)) plant90(g, sx(pl.x + 0.5), sy(pl.z), pl.kind, store.garden.growth, t);
-      if (inView(STATION.x)) station90(g, sx(STATION.x + 0.5), sy(STATION.z), store.meteo ? (still || Math.sin(t * 4) > 0 ? '#5dff7a' : '#1f7a34') : '#ff5a4a');
-      for (const sg of PROJECT_SIGNS) if (inView(sg.x)) sign90(g, sx(sg.x + 0.5), sy(sg.z), sg.color, store.seenProjects.has(sg.project.id));
-      if (inView(PLAZA.x)) board90(g, sx(PLAZA.x + 0.5), sy(PLAZA.z));
-      if (inView(WELCOME.x)) welcome90(g, sx(WELCOME.x + 0.5), sy(WELCOME.z));
-      if (inView(MAILBOX.x)) mailbox90(g, sx(MAILBOX.x + 0.5), sy(MAILBOX.z));
-      for (const ln of LANTERNS) if (inView(ln.x)) lantern90(g, sx(ln.x + 0.2), sy(SURFACE[ln.x]), mood.evening > 0.15, t);
-      if (inView(CAMPFIRE.x)) campfire90(g, sx(CAMPFIRE.x + 0.5), sy(SURFACE[CAMPFIRE.x]), t, still);
-      if (inView(DANIEL.x)) drawDaniel90(g, sx(DANIEL.x + 0.5), sy(DANIEL.z), { facing: p.x < DANIEL.x ? -1 : 1, t, wave: s.daniel.wave > 0, blink: s.daniel.blink > 0 });
+      if (inView(WORKSHOP.x)) D.gear(g, sx(WORKSHOP.x + 0.5) + 2, sy(SURFACE[WORKSHOP.x] - WORKSHOP.h + 1) - 4, still ? 0 : t * 0.9);
+      for (const pl of GARDEN_PLOTS) if (inView(pl.x)) D.plant(g, sx(pl.x + 0.5), sy(pl.z), pl.kind, store.garden.growth, t);
+      if (inView(STATION.x)) D.station(g, sx(STATION.x + 0.5), sy(STATION.z), store.meteo ? (still || Math.sin(t * 4) > 0 ? '#5dff7a' : '#1f7a34') : '#ff5a4a');
+      for (const sg of PROJECT_SIGNS) if (inView(sg.x)) D.sign(g, sx(sg.x + 0.5), sy(sg.z), sg.color, store.seenProjects.has(sg.project.id));
+      if (inView(PLAZA.x)) D.board(g, sx(PLAZA.x + 0.5), sy(PLAZA.z));
+      if (inView(WELCOME.x)) D.welcome(g, sx(WELCOME.x + 0.5), sy(WELCOME.z));
+      if (inView(MAILBOX.x)) D.mailbox(g, sx(MAILBOX.x + 0.5), sy(MAILBOX.z));
+      for (const ln of LANTERNS) if (inView(ln.x)) D.lantern(g, sx(ln.x + 0.2), sy(SURFACE[ln.x]), mood.evening > 0.15, t);
+      if (inView(CAMPFIRE.x)) D.campfire(g, sx(CAMPFIRE.x + 0.5), sy(SURFACE[CAMPFIRE.x]), t, still);
+      if (inView(DANIEL.x)) D.drawDaniel(g, sx(DANIEL.x + 0.5), sy(DANIEL.z), { facing: p.x < DANIEL.x ? -1 : 1, t, wave: s.daniel.wave > 0, blink: s.daniel.blink > 0 });
 
       // Stars: a glint through the grass, then a floating star.
       s.stars.forEach((sp, i) => {
@@ -1133,16 +1116,16 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         if (sp.taken) {
           if (sp.t < 0.5) {
             sp.t += 0.016;
-            star90(g, sx(q.x + 0.5), sy(q.z - 0.7) - sp.t * 30, 4, P.gold);
+            D.star(g, sx(q.x + 0.5), sy(q.z - 0.7) - sp.t * 30, 4, P.gold);
           }
           return;
         }
         if (!sp.revealed) {
-          if (!still && Math.sin(t * 2.2 + i * 1.7) > 0.88) star90(g, sx(q.x + 0.5), sy(q.z - 0.3), 1, '#fff6c0');
+          if (!still && Math.sin(t * 2.2 + i * 1.7) > 0.88) D.star(g, sx(q.x + 0.5), sy(q.z - 0.3), 1, '#fff6c0');
           return;
         }
         const bob = still ? 0 : Math.round(Math.sin(t * 2.5 + i) * 2);
-        star90(g, sx(q.x + 0.5), sy(q.z - 0.8) + bob, sp.t < 0.4 ? 3 : 4, P.gold);
+        D.star(g, sx(q.x + 0.5), sy(q.z - 0.8) + bob, sp.t < 0.4 ? 3 : 4, P.gold);
       });
 
       for (const q of s.particles) {
@@ -1151,11 +1134,11 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         const a = clamp(q.life / q.max, 0, 1);
         if (q.kind === 'heart') {
           g.globalAlpha = Math.min(1, a * 1.5);
-          heart90(g, px, py, q.c);
+          D.heart(g, px, py, q.c);
         } else if (q.kind === 'z') {
           g.globalAlpha = a;
           g.fillStyle = '#f4f0ff';
-          g.font = '8px "Pixelify Sans", monospace';
+          g.font = 'bold 9px "Fredoka", sans-serif';
           g.fillText('z', px, py);
         } else if (q.kind === 'smoke') {
           g.globalAlpha = a * 0.45;
@@ -1184,7 +1167,7 @@ export default function PixelScene({ store, events, onWalkTo, weather, reduceMot
         squish: s.squish,
         swim: s.inWater ? 1 : 0,
       };
-      drawDui90(g, sx(p.x), sy(p.z + s.lift * 0.6) + (s.inWater ? 5 : 0), pose);
+      D.drawDui(g, sx(p.x), sy(p.z + s.lift * 0.6) + (s.inWater ? 5 : 0), pose);
 
       /* Light and weather, over the drawing */
       const window_ = (x: number, y: number, a: number) => {
