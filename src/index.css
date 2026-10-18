@@ -219,16 +219,14 @@ html.lite .liquid-glass-strong::before {
   }
 }
 
-/* ── Isla en 2D (src/game/PixelScene.tsx) ─────────────────────────────────
-   El canvas se dibuja chico y se agranda por un entero: sin suavizado, para
-   que el pixel art quede nítido. El color de fondo evita un flash blanco
-   antes del primer cuadro. */
+/* ── Isla en 2D, dibujada en crayón (src/game/PixelScene.tsx, crayon.ts) ──
+   El color de fondo es el del papel: evita un flash antes del primer cuadro.
+   Los letreros del mapa van con letra manuscrita, como escritos a mano. */
 .pixel-isla {
-  background: #2a1a2e;
+  background: #f7f1e3;
 }
-.pixel-isla canvas {
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
+.font-crayon {
+  font-family: "Patrick Hand", "Comic Sans MS", "Chalkboard SE", cursive;
 }
 
 /* Island focus ring: hugging the control (no gap) so the dark ring always

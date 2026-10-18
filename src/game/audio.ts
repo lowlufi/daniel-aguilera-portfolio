@@ -12,7 +12,7 @@ export const AMBIENTS: { id: AmbientId; label: string; emoji: string }[] = [
   { id: 'grillos', label: 'Grillos', emoji: '🦗' },
   { id: 'fogata', label: 'Fogata', emoji: '🔥' },
   { id: 'arroyo', label: 'Arroyo', emoji: '💧' },
-  { id: 'musica', label: 'Cajita musical', emoji: '🎶' },
+  { id: 'musica', label: 'Música (cuaderno)', emoji: '🎶' },
   { id: 'ruido', label: 'Ruido de color', emoji: '🎚️' },
 ];
 
@@ -463,25 +463,40 @@ const channels: Record<AmbientId, Channel> = {
     tick(ch, now) {
       const wet = (ch as Channel & { wet?: GainNode }).wet;
       if (!wet) return;
-      // C – Am – F – G, gentle pentatonic melody on top.
+      // "Cuaderno": an original, slow piece for the crayon island. Dmaj7 –
+      // Bm7 – Gmaj7 – A6, a soft bass on each chord, broken chords like a
+      // felt piano and a pentatonic melody that wanders by steps and rests.
       const chords = [
-        [261.63, 329.63, 392.0, 523.25, 659.25],
-        [220.0, 261.63, 329.63, 440.0, 523.25],
-        [174.61, 261.63, 349.23, 440.0, 523.25],
-        [196.0, 293.66, 392.0, 493.88, 587.33],
+        { bass: 73.42, tones: [293.66, 369.99, 440.0, 554.37] },
+        { bass: 61.74, tones: [246.94, 293.66, 369.99, 440.0] },
+        { bass: 98.0, tones: [196.0, 246.94, 293.66, 369.99] },
+        { bass: 110.0, tones: [220.0, 277.18, 329.63, 369.99] },
       ];
-      const beatLen = 0.52;
+      const melody = [440.0, 493.88, 587.33, 659.25, 739.99, 880.0, 987.77];
+      const st = ch.state as { beat: number; m?: number };
+      const beatLen = 0.66;
+      const arp = [0, 2, 1, 3, 2, 1, 3, 2];
       while (ch.next < now + 0.3) {
         const t = Math.max(ch.next, now);
-        const beat = ch.state.beat++;
+        const beat = st.beat++;
         const chord = chords[Math.floor(beat / 8) % chords.length];
-        if (beat % 8 === 0) note(wet, t, chord[0] / 2, 3.2, 'sine', 0.07, undefined, 0.05);
-        if (Math.random() < 0.72) {
-          const f = chord[1 + Math.floor(Math.random() * 4)] * (Math.random() < 0.3 ? 2 : 1);
-          note(wet, t, f, 1.8, 'triangle', 0.05);
-          note(wet, t, f * 2, 0.9, 'sine', 0.015);
+        if (beat % 8 === 0) {
+          note(wet, t, chord.bass, 4.6, 'sine', 0.09, undefined, 0.08);
+          note(wet, t, chord.bass * 2, 3.2, 'sine', 0.03, undefined, 0.1);
         }
-        ch.next = t + beatLen * (Math.random() < 0.15 ? 2 : 1);
+        // Felt piano: a triangle with a quiet octave on top, quick attack.
+        const f = chord.tones[arp[beat % 8]];
+        const vel = 0.032 + Math.random() * 0.012;
+        note(wet, t + Math.random() * 0.02, f, 2.4, 'triangle', vel, undefined, 0.006);
+        note(wet, t, f * 2, 1.1, 'sine', vel * 0.25, undefined, 0.006);
+        // Melody on the off-beats, stepping up or down the scale.
+        if (beat % 2 === 1 && Math.random() < 0.55) {
+          st.m = Math.max(0, Math.min(melody.length - 1, (st.m ?? 3) + [-1, 1, -1, 1, 2, -2, 0][Math.floor(Math.random() * 7)]));
+          note(wet, t + beatLen * 0.5, melody[st.m], 2.8, 'sine', 0.045, undefined, 0.01);
+          note(wet, t + beatLen * 0.5, melody[st.m] * 2, 1.2, 'triangle', 0.008, undefined, 0.01);
+        }
+        // Every 32 beats, a whole bar of rest for the melody to breathe.
+        ch.next = t + beatLen * (beat % 32 === 31 ? 2 : 1);
       }
     },
   },

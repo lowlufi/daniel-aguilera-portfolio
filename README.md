@@ -13,7 +13,7 @@ Sitio personal de Daniel Eduardo Aguilera Campusano, Ingeniero en Informática c
 - **Lenis** para inercia de scroll (solo escritorio, se apaga en equipos modestos)
 - **lucide-react** para los íconos
 - Router SPA hecho a mano con `history.pushState`
-- **Sin WebGL ni three.js**: la isla es un juego 2D de plataformas en pixel art, dibujado en un canvas chico y agrandado por un entero. Hasta octubre de 2026 era 3D con three.js/R3F y andaba lenta en celulares modestos; pasó por una versión ASCII antes de esta.
+- **Sin WebGL ni three.js**: la isla es un juego 2D de plataformas dibujado con crayón sobre papel de cuaderno (estilo original, inspirado en juegos como Crayon Physics). Hasta octubre de 2026 era 3D con three.js/R3F y andaba lenta en celulares modestos; pasó por versiones ASCII y pixel art antes de esta.
 
 ## Estructura
 
@@ -24,7 +24,9 @@ src/
 ├── game/                ← La isla (ruta /)
 │   ├── IslandGame.tsx   ← Interfaz: libreta, diálogos, logros, clima, sonido, accesibilidad
 │   ├── PixelScene.tsx   ← La escena: cámara, física (gravedad, salto, agua), cavar, pasto, estrellas, clima, luz
-│   ├── sprites.ts       ← Pixel art dibujado con código: Dui, Daniel, bloques, plantas, letreros
+│   ├── crayon.ts        ← El dibujo en crayón: trazos, achurado, papel, terreno por trozos, Dui, Daniel, cosas
+│   ├── ambiente.ts      ← Fogata, faroles, pétalos, mariposas, luciérnagas, gradación de color
+│   ├── sprites.ts       ← Paleta de colores de partículas (del pixel art anterior)
 │   ├── world.ts         ← El mundo de bloques: superficie, casas, árboles, huerto, muelle, cuevas, estrellas
 │   ├── store.ts         ← Estado por cuadro compartido entre escena e interfaz
 │   ├── progress.ts      ← Libreta de 5 sellos, guardada en localStorage
@@ -47,7 +49,7 @@ public/
 
 | Ruta | Página |
 |---|---|
-| `/` | Isla de Daniel en 2D, estilo Terraria: Dui (el gato) recorre la isla, cava, salta y junta los 5 sellos de la libreta |
+| `/` | Isla de Daniel en 2D, dibujada en crayón: Dui (el gato) recorre la isla, cava, salta, trepa y junta los 5 sellos de la libreta |
 | `/clasico` | Hero + proyectos destacados + contacto |
 | `/proyectos` | Catálogo completo con filtro por tags |
 | `/sobre-mi` | Bio extendida, stack y valores |
@@ -61,7 +63,10 @@ public/
 - **Estrellas:** 12. Ocho bajo el pasto alto (zarpazo) y cuatro en cuevas (hay que cavar). Las tomadas se guardan por índice en `localStorage`.
 - **Coordenadas:** x en bloques; la vertical va en `pos.z` (pies), así `IslandGame` sigue midiendo distancias con `hypot(dx, dz)` sin saber que el mundo es 2D.
 - **Clima:** `weather.ts` mezcla cielo, nubes, lluvia, nieve, niebla y estrellas; de noche y bajo tierra una capa oscura deja luz alrededor de Dui, las ventanas y las estrellas reveladas.
-- **Rendimiento:** el terreno se pinta una vez en un canvas del tamaño del mundo y se copia cada cuadro; solo se repintan los bloques que cambian. 60 fps con la CPU 6 veces más lenta; el chunk de la isla pesa ~35 KB gzip (antes 447 KB en 3D).
+- **Arte:** todo se dibuja con código, sin imágenes. Cada trazo es una línea de cera en dos pasadas con temblor; el temblor sale de un hash de la posición en el mundo (no de `Math.random`), así nada parpadea y los bordes calzan entre trozos. Rellenos achurados, textura de cera (`destination-out` con un patrón de granos) y papel con renglones.
+- **Física de gato:** salta ~2,75 bloques, flota y nada, y trepa paredes manteniendo el salto (un pozo hondo ya no es una trampa). Al caminar solo bajo tierra, escarba hacia su destino.
+- **Música:** «Cuaderno», pieza original y generativa (Web Audio): Dmaj7–Bm7–Gmaj7–A6, arpegios tipo piano y melodía pentatónica. Suena por defecto en todos los climas; se ajusta desde 🎧.
+- **Rendimiento:** el terreno se pinta en trozos de 8×8 bloques a la resolución del canvas (caché acotada, dos trozos nuevos por cuadro y el anillo vecino se adelanta); el canvas se limita a 2× en celulares y 3× en escritorio. 60 fps con la CPU 6 veces más lenta.
 - **Accesible:** región `aria-live` que anuncia qué hay cerca, barra "Ir a / Más lugares" con teclado y avisos con `role="status"`.
 - En desarrollo existen `window.__island` (estado y `walkTo`), `window.__pixel` (cámara y escala) y `window.__pixelSpots` (estrellas) para pruebas.
 

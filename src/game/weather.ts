@@ -77,7 +77,7 @@ export const WEATHER_CONFIG: Record<WeatherId, Config> = {
     snow: 0,
     mist: 0,
     fireflies: 0,
-    mix: { pajaritos: 0.52, olas: 0.26, viento: 0.15, arroyo: 0.19 },
+    mix: { pajaritos: 0.52, olas: 0.26, viento: 0.15, arroyo: 0.19, musica: 0.4 },
   },
   atardecer: {
     sky: ['#4f549e', '#c280c7', '#ff9e94', '#ffc78c', '#fab38c'],
@@ -110,7 +110,7 @@ export const WEATHER_CONFIG: Record<WeatherId, Config> = {
     snow: 0,
     mist: 0,
     fireflies: 0.85,
-    mix: { olas: 0.45, pajaritos: 0.15, viento: 0.11, musica: 0.22 },
+    mix: { olas: 0.45, pajaritos: 0.15, viento: 0.11, musica: 0.4 },
   },
   lluvia: {
     sky: ['#56657a', '#76849a', '#95a1b0', '#a9b2bd', '#98a3ad'],
@@ -143,7 +143,7 @@ export const WEATHER_CONFIG: Record<WeatherId, Config> = {
     snow: 0,
     mist: 0.25,
     fireflies: 0,
-    mix: { lluvia: 0.6, truenos: 0.3, viento: 0.19 },
+    mix: { lluvia: 0.6, truenos: 0.3, viento: 0.19, musica: 0.4 },
   },
   niebla: {
     sky: ['#aeb4c9', '#c7cad8', '#dcdce4', '#e6e3e6', '#d9d8de'],
@@ -176,7 +176,7 @@ export const WEATHER_CONFIG: Record<WeatherId, Config> = {
     snow: 0,
     mist: 1,
     fireflies: 0,
-    mix: { viento: 0.19, arroyo: 0.26, pajaritos: 0.11, musica: 0.15 },
+    mix: { viento: 0.19, arroyo: 0.26, pajaritos: 0.11, musica: 0.4 },
   },
   noche: {
     sky: ['#0a0f2e', '#18214e', '#2d3876', '#474e8a', '#232a55'],
@@ -209,7 +209,7 @@ export const WEATHER_CONFIG: Record<WeatherId, Config> = {
     snow: 0,
     mist: 0,
     fireflies: 1,
-    mix: { grillos: 0.45, olas: 0.22, viento: 0.08, musica: 0.19 },
+    mix: { grillos: 0.45, olas: 0.22, viento: 0.08, musica: 0.4 },
   },
   nieve: {
     sky: ['#98afcf', '#c3d0e3', '#dfe6f0', '#eef1f6', '#dde4ee'],
@@ -242,7 +242,7 @@ export const WEATHER_CONFIG: Record<WeatherId, Config> = {
     snow: 1,
     mist: 0,
     fireflies: 0,
-    mix: { viento: 0.38, fogata: 0.38, musica: 0.22 },
+    mix: { viento: 0.38, fogata: 0.38, musica: 0.4 },
   },
 };
 
