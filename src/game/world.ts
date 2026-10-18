@@ -339,13 +339,20 @@ for (const p of GARDEN_PLOTS) p.z = SURFACE[p.x];
 export const STAR_SPOTS: { x: number; z: number; cave: boolean }[] = (() => {
   const rnd = mulberry32(2024);
   const out: { x: number; z: number; cave: boolean }[] = [];
-  for (const c of CAVES) if (c.star) out.push({ x: c.x, z: SURFACE[c.x] + c.depth + c.h - 1, cave: true });
+  // `z` is the row Dui stands on (the cave floor), like `SURFACE[x]` for the
+  // grass ones: the star floats the same height over both, so walking up to
+  // it takes it. With the last air row here, cave stars hung a block higher
+  // and only a jump reached them.
+  for (const c of CAVES) if (c.star) out.push({ x: c.x, z: SURFACE[c.x] + c.depth + c.h, cave: true });
   const tall: number[] = [];
   for (let x = 0; x < WORLD_W; x++) if (tiles[idx(x, SURFACE[x] - 1)] === T.TALLGRASS) tall.push(x);
   let guard = 0;
   while (out.length < STAR_COUNT && guard++ < 5000) {
     const x = tall[Math.floor(rnd() * tall.length)];
-    if (out.some((s) => Math.abs(s.x - x) < 9)) continue;
+    // Keep the grass stars apart from each other; the cave ones are deep
+    // underground and don't crowd the surface (counting them left only
+    // eight stars on an island that promises twelve).
+    if (out.some((s) => !s.cave && Math.abs(s.x - x) < 9)) continue;
     out.push({ x, z: SURFACE[x], cave: false });
   }
   return out;
