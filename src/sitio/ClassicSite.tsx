@@ -982,7 +982,7 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
       { id: 'c:compose', group: 'Contacto', label: 'Escribir un correo', hint: SOCIAL.email, icon: Mail, keywords: 'email mail contacto mensaje hablar escribir composer', action: openComposer },
       { id: 'c:github', group: 'Contacto', label: 'GitHub', hint: SOCIAL.github.replace(/^https?:\/\//, ''), icon: Github, action: () => window.open(SOCIAL.github, '_blank', 'noopener,noreferrer') },
       { id: 'c:linkedin', group: 'Contacto', label: 'LinkedIn', hint: 'linkedin.com/in/danielaguileracampusano', icon: Linkedin, action: () => window.open(SOCIAL.linkedin, '_blank', 'noopener,noreferrer') },
-      { id: 'c:instagram', group: 'Contacto', label: 'Instagram', hint: '@daanieleduardo', icon: Instagram, action: () => window.open(SOCIAL.instagram, '_blank', 'noopener,noreferrer') },
+      { id: 'c:instagram', group: 'Contacto', label: 'Instagram', hint: '@danieleduardo.md', icon: Instagram, action: () => window.open(SOCIAL.instagram, '_blank', 'noopener,noreferrer') },
     ];
 
     return [...pages, ...projects, ...themes, ...contact];

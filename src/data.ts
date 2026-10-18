@@ -17,7 +17,7 @@ import {
 export const SOCIAL = {
   github: 'https://github.com/lowlufi',
   linkedin: 'https://www.linkedin.com/in/danielaguileracampusano/',
-  instagram: 'https://instagram.com/daanieleduardo',
+  instagram: 'https://instagram.com/danieleduardo.md',
   email: 'danieleduardoaguilerac@gmail.com',
 };
 
