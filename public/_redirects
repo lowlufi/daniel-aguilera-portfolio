@@ -1,4 +1,5 @@
 # SPA routes. Anything else falls through to 404.html (served with a real 404 status).
+/aviones      /   200
 /clasico      /   200
 /proyectos    /   200
 /sobre-mi     /   200

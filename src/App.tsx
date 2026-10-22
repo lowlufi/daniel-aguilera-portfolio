@@ -7,10 +7,13 @@ import type { ClassicRoute } from './sitio/ClassicSite';
 // in parallel with React booting.
 const loadIslandGame = () => import('./game/IslandGame');
 const loadClassicSite = () => import('./sitio/ClassicSite');
+const loadVuelo = () => import('./vuelo/VueloGame');
 const landingPath = typeof window !== 'undefined' ? window.location.pathname : '/';
 const earlyGame = landingPath === '/' ? loadIslandGame() : null;
-const earlyClassic = landingPath !== '/' ? loadClassicSite() : null;
+const earlyVuelo = landingPath === '/aviones' ? loadVuelo() : null;
+const earlyClassic = landingPath !== '/' && landingPath !== '/aviones' ? loadClassicSite() : null;
 const IslandGame = lazy(() => earlyGame ?? loadIslandGame());
+const VueloGame = lazy(() => earlyVuelo ?? loadVuelo());
 const ClassicSite = lazy(() => earlyClassic ?? loadClassicSite());
 // The composer is only needed once someone asks to write.
 const ContactComposer = lazy(() => import('./sitio/ContactComposer'));
@@ -19,6 +22,10 @@ const ROUTE_META: Record<string, { title: string; description: string }> = {
   '/': {
     title: 'Daniel Eduardo — Portafolio interactivo',
     description: 'Explora la isla de Daniel Eduardo: Ingeniero en Informática. Desarrollo web full stack, IoT y soluciones a medida.',
+  },
+  '/aviones': {
+    title: 'Escuadrón Dui — Juego de aviones de Daniel Eduardo',
+    description: 'Pilotea el avión de Dui, esquiva misiles y detén a los ratones antes de que lleguen a la despensa. Un juego de Daniel Eduardo.',
   },
   '/clasico': {
     title: 'Daniel Eduardo — Portafolio',
@@ -45,7 +52,7 @@ function getInitialPath() {
   return window.location.pathname;
 }
 
-const KNOWN_ROUTES = ['/', '/clasico', '/proyectos', '/sobre-mi', '/privacidad'];
+const KNOWN_ROUTES = ['/', '/aviones', '/clasico', '/proyectos', '/sobre-mi', '/privacidad'];
 
 export default function App() {
   const [pathname, setPathname] = useState<string>(getInitialPath);
@@ -79,9 +86,10 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  type Route = 'game' | ClassicRoute;
+  type Route = 'game' | 'vuelo' | ClassicRoute;
   const route: Route =
     pathname === '/' ? (gameSupported ? 'game' : 'home') :
+    pathname === '/aviones' ? 'vuelo' :
     pathname === '/clasico' ? 'home' :
     pathname === '/proyectos' ? 'projects' :
     pathname === '/sobre-mi' ? 'about' :
@@ -113,6 +121,16 @@ export default function App() {
       <ContactComposer open={composerOpen} onClose={closeComposer} />
     </Suspense>
   );
+
+  if (route === 'vuelo') {
+    return (
+      <div className="fixed inset-0 bg-[#92d2ff] text-[#5b4636] overflow-hidden">
+        <Suspense fallback={<div className="absolute inset-0 grid place-items-center font-cozy text-lg">Preparando el avión…</div>}>
+          <VueloGame navigate={navigate} />
+        </Suspense>
+      </div>
+    );
+  }
 
   if (route === 'game') {
     return (

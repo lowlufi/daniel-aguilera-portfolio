@@ -841,6 +841,9 @@ export default function IslandGame({ navigate, openComposer, paused }: Props) {
               <IconButton label="Ayuda" onClick={() => openDialog('welcome')}>
                 ❔
               </IconButton>
+              <IconButton label="Juego de aviones" onClick={() => navigate('/aviones')}>
+                ✈️
+              </IconButton>
               <button
                 type="button"
                 onClick={() => navigate('/clasico')}

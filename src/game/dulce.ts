@@ -484,7 +484,8 @@ export function paintChunk(g: Ctx, cx: number, cy: number, size: number, cutGras
 
 const spriteCache = new Map<string, HTMLCanvasElement>();
 /** Renders `draw` into a small canvas and rings its silhouette with `ink`. Cached by `key`. */
-function outlined(key: string, ink: string, w: number, h: number, ox: number, oy: number, draw: (g: Ctx) => void) {
+/** Paints a sprite once and caches it with a 1 px outline in `ink` around it. */
+export function outlined(key: string, ink: string, w: number, h: number, ox: number, oy: number, draw: (g: Ctx) => void) {
   let c = spriteCache.get(key);
   if (c) return c;
   if (spriteCache.size > 400) spriteCache.clear();

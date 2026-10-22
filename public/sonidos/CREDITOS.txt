@@ -1,0 +1,16 @@
+Efectos de sonido: grabaciones CC0 (dominio público) de Freesound.org,
+recortadas y comprimidas. No requieren atribución; se agradece a:
+- modusmogulus  — Airplane Propeller Loop (789390)        → motor-avioneta.mp3
+- craigsmith    — G08-25 4-E Jet Constant Noise (437888)  → motor-jet.mp3
+- craigsmith    — G08-28 Bombers Fly in Formation (437892)→ motor-bombardero.mp3
+- qubodup       — Driving Tank Engine (187676)            → motor-tanque.mp3
+- qubodup       — AGM-114 Hellfire Missile Launch (162368)→ misil.mp3
+- unfa          — Firecracker Explosion (609588)          → explosion-chica.mp3
+- qubodup       — Explosive 1 v2 [DOD] (182431)           → explosion-grande.mp3
+- josecruz98    — Silbido bomba cayendo (393006)          → bomba.mp3
+- qubodup       — Autocannon Three Shot Burst (854186)    → antiaereo.mp3
+- Alxy          — missile lock on sound (189327)          → alarma.mp3
+- craigsmith    — S31-09 Flare whoosh (675772)            → bengalas.mp3
+- Anthousai     — hit - metallic 01 (406562)              → impacto.mp3
+- Rocotilos     — Real Coin Drop (343462)                 → recoger.mp3
+La música es original (chiptune sintetizado en el navegador).

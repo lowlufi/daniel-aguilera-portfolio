@@ -32,6 +32,14 @@ src/
 │   ├── progress.ts      ← Libreta de 5 sellos, guardada en localStorage
 │   ├── weather.ts       ← Climas y mezcla de sonido de cada uno
 │   └── audio.ts         ← Efectos y ambientes con Web Audio
+├── vuelo/               ← Escuadrón Dui, el juego de aviones (ruta /aviones)
+│   ├── VueloGame.tsx    ← Interfaz: hangar de pilotos, marcador, pausa, controles táctiles
+│   ├── motor.ts         ← Reglas: oleadas, disparos, daño, cámara, radar, dibujo de la escena
+│   ├── dibujo.ts        ← Arte dulce: aviones con Dui, Lulu y Almendrita, vehículos de ratones, terreno, explosiones
+│   ├── fisica-vuelo.ts  ← Aerodinámica: sustentación, arrastre inducido, pérdida, límite de g, medio tonel
+│   ├── fisica-armas.ts  ← Misiles con navegación proporcional, bombas con arrastre, explosiones, suspensión de vehículos
+│   ├── fisica-tipos.ts  ← Tipos compartidos de la física
+│   └── sonido.ts        ← Muestras grabadas (CC0) y motores en loop con tono según la velocidad
 ├── sitio/               ← Versión clásica (/clasico, /proyectos, /sobre-mi, /privacidad)
 │   ├── ClassicSite.tsx
 │   ├── ContactComposer.tsx
@@ -39,6 +47,7 @@ src/
 ├── index.css            ← Tailwind, "liquid glass", paleta de la isla ASCII por clima
 └── main.tsx
 public/
+├── sonidos/             ← Efectos grabados CC0 de Freesound para /aviones (300 KB, ver CREDITOS.txt)
 ├── videos/fondo-*-720.mp4  ← Videos de fondo livianos para celulares (0,3–0,8 MB)
 ├── _headers             ← Seguridad y caché (Cloudflare Pages)
 ├── _redirects           ← SPA fallback /* → /index.html
@@ -50,6 +59,7 @@ public/
 | Ruta | Página |
 |---|---|
 | `/` | Isla de Daniel en 2D, en pixel art dulce de 16 bits: Dui (el gato) recorre la isla, cava, salta, trepa y junta los 5 sellos de la libreta |
+| `/aviones` | Escuadrón Dui: juego de aviones en 2D. Dui, Lulu o Almendrita detienen a los ratones antes de que lleguen a la despensa |
 | `/clasico` | Hero + proyectos destacados + contacto |
 | `/proyectos` | Catálogo completo con filtro por tags |
 | `/sobre-mi` | Bio extendida, stack y valores |
@@ -69,6 +79,14 @@ public/
 - **Rendimiento:** el canvas tiene la resolución del arte (unos 450×270 píxeles en escritorio), no la de la pantalla. El terreno se pinta en trozos de 8×8 bloques (caché acotada, dos trozos nuevos por cuadro y el anillo vecino se adelanta); cielo, colinas, nubes y poses quedan en caché.
 - **Accesible:** región `aria-live` que anuncia qué hay cerca, barra "Ir a / Más lugares" con teclado y avisos con `role="status"`.
 - En desarrollo existen `window.__island` (estado y `walkTo`), `window.__pixel` (cámara y escala) y `window.__pixelSpots` (estrellas) para pruebas.
+
+## Escuadrón Dui (/aviones)
+
+- **Pilotos:** Lulu (gatita negra de ojos amarillos) en la Avioneta Mostaza, ágil; Dui en el Caza Mandarina, el más rápido; Almendrita (yorkshire) en el Bombardero Nube, blindado y con bombas triples.
+- **Objetivo:** los vehículos de los ratones (jeep con cohetes, camión con misil guiado, tanque antiaéreo y batería SAM) avanzan hacia la despensa; si cinco llegan, se acaba. Oleadas cada vez más difíciles, cielo de día, tarde y noche, latas de atún en paracaídas que dan vida.
+- **Física:** escala de 3,5 m por px y 1 s de juego = 5 s reales (g ≈ 70 px/s², mismo número de Froude que en la realidad). El avión vuela con sustentación y arrastre inducido, cambia velocidad por altura, entra en pérdida y gira limitado por g; para dar la vuelta hace un Immelmann, un split-S o una vuelta de campana. Los misiles usan navegación proporcional con límite de g y motor que se apaga (se esquivan con un giro cerrado o con bengalas); bombas con arrastre y mira de impacto exacta; explosiones con escalado cúbico de Hopkinson-Cranz; vehículos con suspensión resorte-amortiguador.
+- **Sonido:** música original «Escuadrón Dui» (chiptune, Re menor, 160 BPM) y efectos grabados reales con licencia CC0 (motores en loop, misiles, explosiones, antiaéreo, alarma), en estéreo según la posición.
+- **Controles:** flechas o WASD, Shift turbo, Espacio/J misil, K bomba, L bengalas, Esc pausa. En celular, joystick a la izquierda y botones a la derecha.
 
 ## Features del sitio clásico
 
