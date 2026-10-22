@@ -257,7 +257,7 @@ export function pilotPortrait(m: ModeloAvion) {
 
 /* ── Mice and their vehicles ─────────────────────────────────────────────── */
 
-export type VehiculoTipo = 'jeep' | 'camion' | 'tanque' | 'sam';
+export type VehiculoTipo = 'jeep' | 'camion' | 'tanque' | 'sam' | 'margarita';
 
 const V = '#b49af4', V0 = '#8064d8', V1 = '#e0d4ff', VINK = '#3a2a7a';
 const TIRE = '#4a3a5a';
@@ -352,16 +352,84 @@ function paintSam(g: Ctx, f: number) {
   wheel(g, 11, -4, 3, f);
 }
 
-export const VEH_LOOK: Record<VehiculoTipo, { w: number; h: number; paint: (g: Ctx, f: number) => void }> = {
+/**
+ * Neighbour Margarita, the boss: a grumpy old lady in a red wool hat, glasses
+ * and a grey cardigan, riding a motorised shopping trolley full of groceries.
+ * Faces left like the mice. Her broom is drawn separately so it can shake.
+ */
+function paintMargarita(g: Ctx, f: number) {
+  const M = P.metal, M0 = P.metal0;
+  // The trolley basket: a wire grid, slightly wider at the top.
+  for (let y = -30; y < -10; y++) {
+    const inset = Math.round((y + 30) * 0.15);
+    R(g, -24 + inset, y, 40 - inset, 1, (y + 30) % 4 === 0 ? M0 : M);
+  }
+  for (let x = -22; x < 16; x += 4) R(g, x, -30, 1, 20, M0);
+  R(g, -25, -32, 43, 2, M0);
+  R(g, -24, -32, 41, 1, P.white);
+  // Groceries poking out: a lettuce, a leek and a loaf.
+  D.disc(g, -13, -34, 6, P.g0);
+  D.disc(g, -13, -35, 5, P.g2);
+  R(g, -15, -38, 3, 2, P.g4);
+  R(g, -5, -46, 3, 14, P.g4);
+  R(g, -6, -50, 5, 5, P.g1);
+  D.oval(g, 6, -34, 7, 3, P.k1);
+  R(g, 2, -36, 8, 1, P.k3);
+  // Engine box and the handle.
+  R(g, 14, -12, 9, 7, M0);
+  R(g, 15, -11, 7, 3, M);
+  R(g, 16, -30, 2, 16, M0);
+  // Margarita, behind the trolley: cardigan, skirt, legs, shoes.
+  R(g, 16, -32, 12, 20, '#8a7a9a');
+  R(g, 17, -31, 10, 18, '#a898b8');
+  R(g, 21, -31, 1, 18, '#8a7a9a');
+  R(g, 16, -13, 12, 6, '#6a4a7a');
+  R(g, 18, -7, 2, 4, P.skin);
+  R(g, 24, -7, 2, 4, P.skin);
+  R(g, 17, -4, 4, 2, P.r0);
+  R(g, 23, -4, 4, 2, P.r0);
+  // Arm reaching to the handle.
+  R(g, 15, -27, 4, 3, '#a898b8');
+  R(g, 14, -26, 2, 2, P.skin);
+  // Head: grey hair and bun, wrinkly face, big nose, glasses, a frown.
+  D.disc(g, 24, -40, 6, '#d8d4e4');
+  D.disc(g, 27, -44, 3, '#d8d4e4');
+  D.disc(g, 21, -39, 5, P.skin);
+  R(g, 15, -39, 3, 3, P.skin0);
+  R(g, 16, -42, 7, 1, P.metal0);
+  R(g, 16, -42, 3, 3, P.gl2);
+  R(g, 20, -42, 3, 3, P.gl2);
+  R(g, 17, -41, 1, 1, P.eye);
+  R(g, 21, -41, 1, 1, P.eye);
+  // Angry eyebrows sloping down to the nose.
+  R(g, 16, -44, 2, 1, '#5a4a5a');
+  R(g, 18, -43, 1, 1, '#5a4a5a');
+  R(g, 21, -44, 2, 1, '#5a4a5a');
+  R(g, 17, -36, 4, 1, P.r0);
+  R(g, 16, -35, 1, 1, P.r0);
+  R(g, 24, -37, 2, 1, P.blush);
+  // The red wool hat with a pompom.
+  D.oval(g, 22, -45, 8, 4, P.r0);
+  D.oval(g, 22, -46, 7, 3, P.r1);
+  R(g, 15, -43, 15, 2, P.r0);
+  for (let x = 16; x < 30; x += 2) R(g, x, -43, 1, 2, P.r2);
+  D.disc(g, 22, -51, 3, P.r2);
+  R(g, 21, -52, 1, 1, P.r3);
+  // Four casters.
+  for (const x of [-18, -6, 6, 16]) wheel(g, x, -4, 3, f);
+}
+
+export const VEH_LOOK: Record<VehiculoTipo, { w: number; h: number; paint: (g: Ctx, f: number) => void; ink?: string }> = {
   jeep: { w: 24, h: 18, paint: paintJeep },
   camion: { w: 34, h: 18, paint: paintCamion },
   tanque: { w: 30, h: 18, paint: paintTanque },
   sam: { w: 34, h: 24, paint: paintSam },
+  margarita: { w: 56, h: 54, paint: paintMargarita, ink: '#6a2a4a' },
 };
 
 function vehicleSprite(k: VehiculoTipo, f: number) {
   const L = VEH_LOOK[k];
-  return D.outlined(`veh|${k}|${f}`, VINK, L.w + 6, L.h + 6, L.w / 2 + 3, L.h + 2, (g) => L.paint(g, f));
+  return D.outlined(`veh|${k}|${f}`, L.ink ?? VINK, L.w + 6, L.h + 6, L.w / 2 + 3, L.h + 2, (g) => L.paint(g, f));
 }
 
 const flashCache = new Map<HTMLCanvasElement, HTMLCanvasElement>();
@@ -405,6 +473,18 @@ export function drawVehicle(g: Ctx, k: VehiculoTipo, x: number, y: number, tilt:
     g.restore();
   }
   g.drawImage(flash ? white(img) : img, -L.w / 2 - 3, -L.h - 2);
+  if (k === 'margarita') {
+    // She shakes her broom at the sky.
+    g.save();
+    g.translate(13, -30);
+    g.rotate(-0.5 + Math.sin(t * 9) * 0.35);
+    R(g, -1, -24, 3, 26, '#6a2a4a');
+    R(g, 0, -23, 1, 24, P.k1);
+    R(g, -4, -31, 9, 8, '#6a2a4a');
+    R(g, -3, -30, 7, 6, P.gold);
+    for (let i = -3; i < 4; i += 2) R(g, i, -30, 1, 6, P.gold0);
+    g.restore();
+  }
   if (k === 'sam') {
     // Spinning radar dish.
     const w = Math.round(Math.abs(Math.cos(t * 3)) * 4) + 1;
@@ -417,23 +497,35 @@ export function drawVehicle(g: Ctx, k: VehiculoTipo, x: number, y: number, tilt:
 
 /* ── Weapons, flares, crates ─────────────────────────────────────────────── */
 
-/** A missile pointing along `angle` (screen radians). */
-export function drawMissile(g: Ctx, x: number, y: number, angle: number, enemy: boolean, burning: boolean, t: number) {
+export type MissileLook = { cuerpo: string; punta: string; aletas: string; largo: number };
+
+/**
+ * A missile pointing along `angle` (screen radians). Enemy missiles pass their
+ * type's look (colors and length); `blink` flashes the body white.
+ */
+export function drawMissile(g: Ctx, x: number, y: number, angle: number, enemy: boolean, burning: boolean, t: number, look?: MissileLook, blink = false) {
   g.save();
   g.translate(Math.round(x), Math.round(y));
   g.rotate(Math.round(angle / 0.1) * 0.1);
-  const body = enemy ? '#f4f0ff' : P.white;
-  const tip = enemy ? P.p0 : P.red;
-  const ink = enemy ? VINK : P.red0;
-  R(g, -5, -2, 11, 4, ink);
-  R(g, -4, -1, 9, 2, body);
-  R(g, 4, -1, 2, 2, tip);
-  R(g, -5, -3, 2, 6, ink);
-  R(g, -4, -2, 1, 4, tip);
+  const len = Math.max(5, Math.round(look?.largo ?? 11));
+  const thick = len >= 14 ? 6 : len <= 7 ? 3 : 4;
+  const body = blink ? P.white : look?.cuerpo ?? (enemy ? '#f4f0ff' : P.white);
+  const tip = look?.punta ?? (enemy ? P.p0 : P.red);
+  const fins = look?.aletas ?? tip;
+  const ink = enemy ? (look ? D.tone(look.punta, -0.45) : VINK) : P.red0;
+  const x0 = -Math.floor(len / 2);
+  const h = Math.floor(thick / 2);
+  R(g, x0, -h, len, thick, ink);
+  R(g, x0 + 1, -h + 1, len - 2, thick - 2, body);
+  R(g, x0 + len - 2, -h + 1, 2, thick - 2, tip);
+  R(g, x0 + len - 1, -h + 1 + (thick > 4 ? 1 : 0), 1, Math.max(1, thick - 2 - (thick > 4 ? 2 : 0)), tip);
+  R(g, x0, -h - 1, 2, thick + 2, ink);
+  R(g, x0 + 1, -h, 1, thick, fins);
+  if (thick >= 4) R(g, x0 + 2, -h + 1, len - 5, 1, P.white);
   if (burning) {
-    const len = 2 + (Math.floor(t * 30) % 2);
-    R(g, -6 - len, -1, len, 2, '#ff9a3c');
-    R(g, -7, -1, 1, 1, P.gold);
+    const fl = 2 + (Math.floor(t * 30) % 2) + (thick > 4 ? 2 : 0);
+    R(g, x0 - fl, -1, fl, 2, '#ff9a3c');
+    R(g, x0 - 2, -1, 1, 1, P.gold1);
   }
   g.restore();
 }
@@ -448,6 +540,71 @@ export function drawBomb(g: Ctx, x: number, y: number, angle: number) {
   R(g, -7, -3, 2, 6, P.s0);
   R(g, -6, -2, 1, 4, P.s2);
   g.restore();
+}
+
+/** Things Margarita throws: a slipper, a tomato or a flower pot, spinning. */
+export function drawJunk(g: Ctx, kind: 'chancla' | 'tomate' | 'macetero', x: number, y: number, spin: number) {
+  g.save();
+  g.translate(Math.round(x), Math.round(y));
+  g.rotate(Math.round(spin / 0.4) * 0.4);
+  if (kind === 'chancla') {
+    D.oval(g, 0, 0, 6, 3, '#2a5a9a');
+    D.oval(g, 0, 0, 5, 2, P.w2);
+    R(g, -1, -3, 4, 2, P.p1);
+    R(g, -2, -2, 1, 1, '#2a5a9a');
+  } else if (kind === 'tomate') {
+    D.disc(g, 0, 0, 4, P.red0);
+    D.disc(g, 0, 0, 3, P.red);
+    R(g, -1, -2, 2, 1, P.white);
+    R(g, -2, -5, 5, 2, P.g1);
+  } else {
+    R(g, -5, -4, 11, 9, '#8a3a1e');
+    R(g, -4, -3, 9, 7, '#e07a4a');
+    R(g, -5, -4, 11, 2, '#c05a2e');
+    D.disc(g, 0, -7, 3, P.g1);
+    R(g, -1, -11, 3, 3, P.r2);
+  }
+  g.restore();
+}
+
+/**
+ * A speech bubble with its tail pointing down at (x, y). Words are drawn with
+ * the game's rounded font; the bubble wraps to two lines when it's long.
+ */
+export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: number) {
+  g.font = 'bold 8px "Fredoka", "Nunito", sans-serif';
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let line = '';
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (g.measureText(next).width > 150 && line) {
+      lines.push(line);
+      line = w;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  const w = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width))) + 10;
+  const h = lines.length * 9 + 6;
+  const bx = Math.round(Math.min(vw - w - 2, Math.max(2, x - w / 2)));
+  const by = Math.round(y - h - 6);
+  R(g, bx + 1, by - 1, w - 2, h + 2, '#6a2a4a');
+  R(g, bx - 1, by + 1, w + 2, h - 2, '#6a2a4a');
+  R(g, bx, by, w, h, '#6a2a4a');
+  R(g, bx + 1, by, w - 2, h, P.white);
+  R(g, bx, by + 1, w, h - 2, P.white);
+  // Tail.
+  const tx = Math.round(Math.min(bx + w - 8, Math.max(bx + 6, x)));
+  for (let i = 0; i < 5; i++) {
+    R(g, tx - 3 + i, by + h + i - 1, 6 - i * 1.2, 1, '#6a2a4a');
+    R(g, tx - 2 + i, by + h + i - 1, Math.max(1, 4 - i * 1.2), 1, P.white);
+  }
+  g.textAlign = 'left';
+  g.textBaseline = 'top';
+  g.fillStyle = '#6a2a4a';
+  lines.forEach((l, i) => g.fillText(l, bx + 5, by + 3 + i * 9));
+  g.textBaseline = 'alphabetic';
+  g.textAlign = 'center';
 }
 
 export function drawShell(g: Ctx, x: number, y: number) {

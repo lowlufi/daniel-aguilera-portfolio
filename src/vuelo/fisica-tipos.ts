@@ -16,8 +16,9 @@ export type ModeloAvion = 'avioneta' | 'caza' | 'bombardero';
 
 /**
  * Stick input. x: -1 left … +1 right, y: -1 down … +1 up, in SCREEN
- * directions (the player points where they want to fly). gas: 0…1 extra
- * throttle (boost) on top of cruise.
+ * directions (the player points where they want to fly). gas: -1…1, the
+ * throttle: 0 holds cruise speed, +1 is full power, -1 idles the engine and
+ * opens the air brakes.
  */
 export type Mando = { x: number; y: number; gas: number };
 

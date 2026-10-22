@@ -38,6 +38,9 @@ src/
 │   ├── dibujo.ts        ← Arte dulce: aviones con Dui, Lulu y Almendrita, vehículos de ratones, terreno, explosiones
 │   ├── fisica-vuelo.ts  ← Aerodinámica: sustentación, arrastre inducido, pérdida, límite de g, medio tonel
 │   ├── fisica-armas.ts  ← Misiles con navegación proporcional, bombas con arrastre, explosiones, suspensión de vehículos
+│   ├── misiles.ts       ← Catálogo de misiles enemigos (buscador, dardo, zigzag, pesado, racimo, enjambre), choques entre misiles
+│   ├── estelas.ts       ← Estelas de misil: cinta de fuego, humo pastel con contorno, chispas
+│   ├── fondo.ts         ← Fondo cozy por capas: cielo alto, nubes, cordillera, globos, pueblito con molino, bosque, aurora
 │   ├── fisica-tipos.ts  ← Tipos compartidos de la física
 │   └── sonido.ts        ← Muestras grabadas (CC0) y motores en loop con tono según la velocidad
 ├── sitio/               ← Versión clásica (/clasico, /proyectos, /sobre-mi, /privacidad)
@@ -83,10 +86,13 @@ public/
 ## Escuadrón Dui (/aviones)
 
 - **Pilotos:** Lulu (gatita negra de ojos amarillos) en la Avioneta Mostaza, ágil; Dui en el Caza Mandarina, el más rápido; Almendrita (yorkshire) en el Bombardero Nube, blindado y con bombas triples.
+- **Jefa:** al terminar las oleadas 1, 4, 7… llega la vecina Margarita en su carro de feria con escoba, gorro rojo y mal genio: lanza chanclas, tomates y maceteros y grita frases («¡Ricachones $&#%!», «¡Hagan asados con parrilla eléctrica!!»).
 - **Objetivo:** los vehículos de los ratones (jeep con cohetes, camión con misil guiado, tanque antiaéreo y batería SAM) avanzan hacia la despensa; si cinco llegan, se acaba. Oleadas cada vez más difíciles, cielo de día, tarde y noche, latas de atún en paracaídas que dan vida.
 - **Física:** escala de 3,5 m por px y 1 s de juego = 5 s reales (g ≈ 70 px/s², mismo número de Froude que en la realidad). El avión vuela con sustentación y arrastre inducido, cambia velocidad por altura, entra en pérdida y gira limitado por g; para dar la vuelta hace un Immelmann, un split-S o una vuelta de campana. Los misiles usan navegación proporcional con límite de g y motor que se apaga (se esquivan con un giro cerrado o con bengalas); bombas con arrastre y mira de impacto exacta; explosiones con escalado cúbico de Hopkinson-Cranz; vehículos con suspensión resorte-amortiguador.
-- **Sonido:** música original «Escuadrón Dui» (chiptune, Re menor, 160 BPM) y efectos grabados reales con licencia CC0 (motores en loop, misiles, explosiones, antiaéreo, alarma), en estéreo según la posición.
-- **Controles:** flechas o WASD, Shift turbo, Espacio/J misil, K bomba, L bengalas, Esc pausa. En celular, joystick a la izquierda y botones a la derecha.
+- **Sin ayudas de puntería:** los misiles salen derecho por la nariz y no hay mira de bomba. Las explosiones cavan cráteres en el terreno (estilo Worms) y el viento empuja bombas y humo.
+- **Misiles enemigos:** seis tipos, cada uno con su forma de esquivarlo; dos misiles que chocan explotan, las explosiones revientan en cadena a los cercanos y los tuyos pueden derribarlos.
+- **Sonido:** sin música de fondo; efectos grabados reales con licencia CC0 (motores en loop, misiles, explosiones, antiaéreo, alarma), en estéreo según la posición.
+- **Controles (siempre en pantalla):** flechas o WASD pilotear, E/Shift acelerar, Q/Ctrl frenar (aerofrenos), Espacio/J misil, K bomba, L bengalas, Z o rueda zoom, Esc pausa. En celular, joystick a la izquierda y botones con nombre a la derecha.
 
 ## Features del sitio clásico
 

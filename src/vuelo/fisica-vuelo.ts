@@ -287,7 +287,7 @@ export function pasoAvion(
   const h = dt / n;
   const mx = clamp(fin(mando.x), -1, 1);
   const my = clamp(fin(mando.y), -1, 1);
-  const gas = clamp(fin(mando.gas), 0, 1);
+  const gas = clamp(fin(mando.gas), -1, 1);
   const tch = Number.isFinite(techo) ? techo : 1e9;
   let impacto = -1;
   for (let i = 0; i < n; i++) {
@@ -444,13 +444,15 @@ function subpaso(
   const cl = coefSustentacion(p, alfaB2, a.perdida);
   const cd = coefArrastre(p, alfaB2, cl, a.perdida);
   const lIn = q * p.superficie * cl * a.alabeo * delgado; // in-plane lift (CCW of wind)
-  const dr = q * p.superficie * cd;
+  // Braking (gas < 0) idles the engine and opens air brakes: extra parasite drag.
+  const freno = Math.max(0, -gas);
+  const dr = q * p.superficie * (cd + freno * p.cd0 * 4);
   const ux = V > 1e-3 ? vax / V : Math.cos(a.rumbo);
   const uy = V > 1e-3 ? vay / V : Math.sin(a.rumbo);
 
   // Auto-throttle: hold the target speed, limited by cruise or boost thrust.
-  const vObj = p.velCrucero + gas * (p.velMax - p.velCrucero);
-  let tLim = (p.empujeCrucero + gas * (p.empujeMax - p.empujeCrucero)) * delgado;
+  const vObj = gas >= 0 ? p.velCrucero + gas * (p.velMax - p.velCrucero) : p.velCrucero - freno * (p.velCrucero - 1.3 * p.velPerdida);
+  let tLim = (p.empujeCrucero + Math.max(0, gas) * (p.empujeMax - p.empujeCrucero)) * delgado * (1 - 0.8 * freno);
   if (p.helice) tLim *= clamp(1.25 - 0.25 * (V / p.velCrucero), 0.55, 1.4);
   const tReq = dr + W * Math.sin(gam) + (p.masa * (vObj - V)) / 0.8;
   const T = clamp(tReq, 0, tLim);
