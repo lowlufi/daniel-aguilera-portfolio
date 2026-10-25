@@ -190,7 +190,10 @@ function tiro(v: VehiculoIA, vista: Vista, k: number) {
   const alcance = F.alcance * lerp(1, 1.25, k);
   const dist = Math.hypot(a.x - v.x, a.y - oy);
   const libre = lineaLibre(v.x, oy, p.x, p.y, vista.suelo) || lineaLibre(v.x, oy, a.x, a.y, vista.suelo);
-  return { punto: { x: p.x, y: p.y }, ok: a.vivo && dist < alcance && p.y > oy - 10 && libre };
+  // A plane high above is still a target: the long-range missiles climb
+  // after it (more so in later waves), so flying high is no free escape.
+  const arriba = Math.abs(a.x - v.x) < alcance * 0.9 && a.y - oy < lerp(1400, 3000, k);
+  return { punto: { x: p.x, y: p.y }, ok: a.vivo && (dist < alcance || arriba) && p.y > oy - 10 && libre };
 }
 
 /* ── The brain ──────────────────────────────────────────────────────────── */

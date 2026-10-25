@@ -724,6 +724,110 @@ export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: numbe
   g.textAlign = 'center';
 }
 
+/**
+ * A mouse on foot with a yellow hard hat, walking (phase `t`), maybe with a
+ * plank on its shoulder. (x, y) are its feet; `dir` -1 faces left.
+ */
+export function drawWorker(g: Ctx, x: number, y: number, t: number, plank: boolean, dir: 1 | -1) {
+  const X = Math.round(x);
+  const Y = Math.round(y);
+  const step = Math.floor(t * 8) % 2;
+  g.save();
+  g.translate(X, Y);
+  g.scale(dir, 1);
+  R(g, -2 + step, -2, 1, 2, '#6a5a7a');
+  R(g, 1 - step, -2, 1, 2, '#6a5a7a');
+  D.oval(g, 0, -4, 2, 2, VINK);
+  D.oval(g, 0, -4, 2, 1, '#c8c0d8');
+  D.disc(g, 1, -8, 2, VINK);
+  D.disc(g, 1, -8, 2, '#e0d8ec');
+  R(g, -1, -11, 2, 2, '#c8c0d8');
+  R(g, 3, -8, 1, 1, P.p0);
+  R(g, 0, -11, 4, 1, P.gold0);
+  R(g, 0, -12, 3, 1, P.gold);
+  R(g, -3, -4, 1, 1, '#c8c0d8');
+  if (plank) {
+    R(g, -6, -11, 11, 2, P.k0);
+    R(g, -6, -11, 11, 1, P.k2);
+  }
+  g.restore();
+}
+
+/** One plank of a mouse-built bridge with its rail post; (x, y) is the deck top. */
+export function bridgeColumn(g: Ctx, x: number, y: number, x0: number) {
+  const k = (x - x0) % 5;
+  R(g, x, y, 1, 3, k === 0 ? P.k0 : k % 2 ? P.k2 : P.k1);
+  R(g, x, y + 3, 1, 1, P.k0);
+  if (k === 0) R(g, x, y - 5, 1, 5, P.k0);
+  R(g, x, y - 5, 1, 1, P.k1);
+}
+
+/**
+ * Battle damage painted over a vehicle: scorch marks, dents and glowing
+ * embers that grow with `amount` (0…1). Stable per vehicle (`seed`).
+ */
+export function scorchMarks(g: Ctx, k: VehiculoTipo, x: number, y: number, seed: number, amount: number, t: number) {
+  const L = VEH_LOOK[k];
+  const n = Math.round(amount * (k === 'margarita' ? 22 : 10));
+  for (let i = 0; i < n; i++) {
+    const h = (Math.imul(seed + 7, 2654435761) ^ Math.imul(i + 3, 40503)) >>> 0;
+    const px = Math.round(x - L.w / 2 + 3 + (h % Math.max(1, L.w - 6)));
+    const py = Math.round(y - 4 - ((h >>> 8) % Math.max(1, L.h - 8)));
+    R(g, px, py, 2 + (h % 2), 1, i % 3 === 0 ? '#4a3a5a' : '#6a5a7a');
+    if (amount > 0.5 && i % 4 === 0 && Math.floor(t * 6 + i) % 2) R(g, px, py - 1, 1, 1, i % 8 ? '#ff9a3c' : P.gold);
+  }
+  // A crack across the hull when badly hurt.
+  if (amount > 0.6) {
+    const cx = Math.round(x - L.w / 4 + (seed % 7));
+    for (let i = 0; i < 5; i++) R(g, cx + i, Math.round(y - L.h * 0.6) + (i % 2), 1, 1, '#3a2a4a');
+  }
+}
+
+/** What a reward balloon gives: one more slot of missiles, bombs or flares. */
+export type Premio = 'misil' | 'bomba' | 'bengala';
+const PRIZE_COL: Record<Premio, [string, string, string]> = {
+  misil: [P.r0, P.r1, P.r3],
+  bomba: ['#2a5a9a', '#74b4f0', '#d8f0ff'],
+  bengala: [P.gold0, P.gold, P.gold1],
+};
+
+/**
+ * A reward balloon. (x, y) is where its string ends (tied to an enemy, or
+ * hanging free). `big` draws the bigger free-floating one with a glow.
+ */
+export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number, big: boolean) {
+  const [c0, c1, c2] = PRIZE_COL[kind];
+  const X = Math.round(x);
+  const Y = Math.round(y);
+  const sway = Math.round(Math.sin(t * 2.4 + x * 0.05) * 1.5);
+  const r = big ? 7 : 5;
+  const by = Y - (big ? 14 : 10) - r;
+  // String.
+  for (let i = 0; i < (big ? 14 : 10); i++) R(g, X + Math.round((sway * i) / 12), Y - i, 1, 1, '#8a7a9a');
+  if (big && Math.floor(t * 3) % 2) {
+    g.globalAlpha = 0.5;
+    D.disc(g, X + sway, by, r + 3, c2);
+    g.globalAlpha = 1;
+  }
+  D.disc(g, X + sway, by, r + 1, c0);
+  D.disc(g, X + sway, by, r, c1);
+  R(g, X + sway - Math.round(r / 2), by - Math.round(r / 2), 2, 2, c2);
+  R(g, X + sway - 1, by + r + 1, 3, 1, c0);
+  // The icon inside.
+  const ix = X + sway;
+  if (kind === 'misil') {
+    R(g, ix - 2, by, 5, 1, P.white);
+    R(g, ix + 3, by, 1, 1, P.red0);
+    R(g, ix - 3, by - 1, 1, 3, P.white);
+  } else if (kind === 'bomba') {
+    D.disc(g, ix, by + 1, 2, '#2a2438');
+    R(g, ix + 1, by - 2, 1, 2, P.gold);
+  } else {
+    R(g, ix, by - 2, 1, 5, P.white);
+    R(g, ix - 2, by, 5, 1, P.white);
+  }
+}
+
 export function drawShell(g: Ctx, x: number, y: number) {
   R(g, x - 1, y - 1, 3, 3, VINK);
   R(g, x, y, 1, 1, P.gold);

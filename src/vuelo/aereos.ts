@@ -13,6 +13,17 @@ import { lineaLibre, nivelIA, type Vista } from './ia';
  *    at it kamikaze-style. 1 hp.
  *  - globo: a slow hot-air balloon that drifts above the plane's altitude and
  *    drops floating mines. 2 hp.
+ *  - ovni: a pastel flying saucer (only in space, above ~1600 px). It slides
+ *    in fast arcs or teleports to a spot above the plane, then either fires a
+ *    laser (0.8 s of blinking aim line first) or switches on a tractor beam
+ *    that slows the plane and drags it up (`ResultadoPaso.tractor`). 4 hp.
+ *
+ * Every enemy shot is telegraphed (`aviso`): helicopters blink before a
+ * burst, drones flash red before diving, balloons blink the mine before the
+ * drop, saucers draw the aim line / beam cone before firing.
+ *
+ * Each type has its own ceiling (`techoTipo`) and the engine should spawn
+ * them near the plane's altitude (`alturaAparicion`).
  *
  * Physics in world units (px, s, y = ALTITUDE up, angles CCW). `paso` only
  * moves the one aircraft it's given (it reads `todos` for flocking) and
@@ -22,7 +33,7 @@ import { lineaLibre, nivelIA, type Vista } from './ia';
 
 type Ctx = CanvasRenderingContext2D;
 
-export type TipoAereo = 'helicoptero' | 'dron' | 'globo';
+export type TipoAereo = 'helicoptero' | 'dron' | 'globo' | 'ovni';
 
 export type Aereo = {
   id: number;
@@ -58,6 +69,39 @@ export type Aereo = {
   salvas: number;
   /** Set when it hit the ground (the engine should blow it up). */
   estrellado?: boolean;
+  /** Seconds left of the visual warning before the next shot / dive / drop. */
+  aviso?: number;
+  /** Saucer-only state. */
+  ov?: EstadoOvni;
+};
+
+/**
+ * Saucer modes: 0 hover, 1 arc slide, 2 teleport out, 3 teleport in,
+ * 4 laser charging (aim line), 5 laser firing, 6 tractor charging, 7 tractor on.
+ */
+export type EstadoOvni = {
+  modo: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  modoT: number;
+  /** Wanted offset from the plane. */
+  ofX: number;
+  ofY: number;
+  /** Arc start and length. */
+  x0: number;
+  y0: number;
+  dur: number;
+  lado: 1 | -1;
+  /** Beam angle (world, CCW) and its length to the ground / max range. */
+  ang: number;
+  largo: number;
+  /** Locked aim point of the laser. */
+  bx: number;
+  by: number;
+  /** 0…1 visibility (teleport). */
+  alfa: number;
+  acerto: boolean;
+  atrapado: boolean;
+  tractorCd: number;
+  rng: number;
 };
 
 export type Disparo = { x: number; y: number; vx: number; vy: number; tipo: 'balin' | 'cohete' | 'mina' };
@@ -67,16 +111,55 @@ const fin = (v: number, d = 0) => (Number.isFinite(v) ? v : d);
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
 const G = GRAVEDAD;
-const TECHO = 360;
 
 let siguienteId = 1;
 let siguienteGrupo = 1;
 
-const HP: Record<TipoAereo, number> = { helicoptero: 3, dron: 1, globo: 2 };
+const HP: Record<TipoAereo, number> = { helicoptero: 3, dron: 1, globo: 2, ovni: 4 };
+
+/** Highest altitude each type flies at, px. */
+const TECHOS: Record<TipoAereo, number> = { helicoptero: 900, dron: 1600, globo: 1300, ovni: 2980 };
+/** Saucers never come down into the clouds. */
+export const PISO_OVNI = 1450;
+/** Saucers only show up when the plane is above this. */
+export const ALTURA_OVNI = 1600;
+/** Laser / tractor warning time, s (constant: it's what makes them dodgeable). */
+export const AVISO_RAYO = 0.8;
+const DUR_LASER = 0.35;
+const ALCANCE_LASER = 520;
+const LARGO_TRACTOR = 240;
+const APERTURA_TRACTOR = 0.3;
+
+/** Altitude ceiling of each type, px (`paso` never lets them above it). */
+export function techoTipo(tipo: TipoAereo): number {
+  return TECHOS[tipo] ?? 900;
+}
+
+/**
+ * Difficulty 0…~1.3: like `nivelIA` but ramps up harder from wave 3
+ * (tighter aim, shorter pauses). Warnings stay as long as ever.
+ */
+export function dificultad(ola: number): number {
+  const n = fin(ola, 1);
+  return nivelIA(n) + (n >= 3 ? Math.min(0.35, (n - 2) * 0.07) : 0);
+}
+const k1 = (ola: number) => Math.min(1, dificultad(ola));
+
+/**
+ * Spawn altitude for a type near the plane's altitude, within its ceiling
+ * (saucers: above the plane, never under ALTURA_OVNI + 50).
+ */
+export function alturaAparicion(tipo: TipoAereo, altitudJugador: number, rnd: () => number = Math.random): number {
+  const alt = fin(altitudJugador, 220);
+  const r = rnd();
+  if (tipo === 'ovni') return clamp(alt + 90 + r * 90, ALTURA_OVNI + 50, techoTipo('ovni') - 30);
+  if (tipo === 'globo') return clamp(alt + 30 + r * 80, 160, techoTipo(tipo) - 30);
+  return clamp(alt - 50 + r * 130, 160, techoTipo(tipo) - 30);
+}
 
 /** Collision radius, px. */
 export function radio(a: Aereo): number {
-  return a.tipo === 'helicoptero' ? 10 : a.tipo === 'dron' ? 5 : 10;
+  return a.tipo === 'helicoptero' ? 10 : a.tipo === 'dron' ? 5 : a.tipo === 'ovni' ? 12 : 10;
 }
 
 /** Projectile speeds (exported so the engine can use them if it wants). */
@@ -105,6 +188,15 @@ function nuevo(tipo: TipoAereo, x: number, y: number, rnd: () => number, ola: nu
     semilla: rnd(),
     ola: Math.max(1, Math.floor(fin(ola, 1))),
     salvas: 0,
+    ...(tipo === 'ovni'
+      ? {
+          ov: {
+            modo: 0, modoT: 0.4 + rnd() * 0.4, ofX: (rnd() < 0.5 ? -1 : 1) * (40 + rnd() * 80), ofY: 110 + rnd() * 50,
+            x0: x, y0: y, dur: 0.5, lado: 1, ang: -Math.PI / 2, largo: 0, bx: x, by: y, alfa: 1,
+            acerto: false, atrapado: false, tractorCd: 3 + rnd() * 3, rng: (Math.floor(rnd() * 4294967296) >>> 0) || 1,
+          } as EstadoOvni,
+        }
+      : {}),
   };
 }
 
@@ -133,19 +225,46 @@ export function crear(tipo: TipoAereo, x: number, y: number, rnd: () => number =
   return out;
 }
 
-/** Which aircraft come in each wave (none in wave 1). Each `dron` entry is a whole swarm. */
-export function elegirAereos(ola: number, rnd: () => number = Math.random): TipoAereo[] {
+/**
+ * Which aircraft come in each wave. Each `dron` entry is a whole swarm.
+ * Without `altitudJugador` it's the classic low-level mix (none in wave 1).
+ * With it, only types that can reach that altitude: helicopters up to ~900,
+ * balloons ~1300, drones ~1600, and saucers (only) above 1600 — saucers even
+ * in wave 1, so a player who climbs to space always meets them.
+ */
+export function elegirAereos(ola: number, rnd: () => number = Math.random, altitudJugador?: number): TipoAereo[] {
   const n = Math.floor(fin(ola, 1));
-  if (n < 2) return [];
-  const cuantos = Math.min(6, 1 + Math.floor((n - 2) * 0.6 + rnd() * 0.8));
-  const out: TipoAereo[] = [];
-  for (let i = 0; i < cuantos; i++) {
-    const r = rnd();
-    if (n === 2) out.push(i === 0 ? (r < 0.5 ? 'helicoptero' : 'dron') : 'helicoptero');
-    else if (n < 4) out.push(r < 0.55 ? 'helicoptero' : 'dron');
-    else out.push(r < 0.4 ? 'helicoptero' : r < 0.75 ? 'dron' : 'globo');
+  const alt = altitudJugador === undefined ? undefined : fin(altitudJugador, 0);
+  if (alt !== undefined && alt > ALTURA_OVNI) {
+    const cuantos = clamp(1 + Math.floor((n - 1) * 0.45 + rnd() * 0.8), 1, 5);
+    return Array.from({ length: cuantos }, () => 'ovni' as TipoAereo);
   }
+  if (n < 2) return [];
+  const cuantos = Math.min(7, 1 + Math.floor((n - 2) * 0.7 + rnd() * 0.8));
+  const out: TipoAereo[] = [];
+  for (let i = 0; i < cuantos; i++) out.push(tipoParaAltura(n, rnd, alt, i));
   return out;
+}
+
+/**
+ * One type that makes sense for this wave at this altitude (handy for the
+ * engine to swap a queued type that can't reach the plane any more).
+ */
+export function tipoParaAltura(ola: number, rnd: () => number = Math.random, altitudJugador?: number, i = 1): TipoAereo {
+  const n = Math.max(1, Math.floor(fin(ola, 1)));
+  const alt = altitudJugador === undefined ? undefined : fin(altitudJugador, 0);
+  if (alt !== undefined && alt > ALTURA_OVNI) return 'ovni';
+  const r = rnd();
+  let t: TipoAereo;
+  if (n <= 2) t = i === 0 ? (r < 0.5 ? 'helicoptero' : 'dron') : 'helicoptero';
+  else if (n < 4) t = r < 0.55 ? 'helicoptero' : 'dron';
+  else t = r < 0.4 ? 'helicoptero' : r < 0.75 ? 'dron' : 'globo';
+  if (alt === undefined) return t;
+  // Too high for it? Pick one that can climb there (drones go highest).
+  const llega = (x: TipoAereo) => alt <= techoTipo(x) + 60;
+  if (llega(t)) return t;
+  if (llega('globo') && n >= 3 && r < 0.4) return 'globo';
+  return 'dron';
 }
 
 /* ── Steering helpers ───────────────────────────────────────────────────── */
@@ -177,7 +296,8 @@ function evitarSuelo(a: Aereo, vista: Vista, margen: number, dt: number) {
   // Look a little ahead for a rising hill.
   const hAdel = a.y + a.vy * 0.5 - fin(vista.suelo(a.x + a.vx * 0.5)) - margen;
   if (hAdel < 0 && a.vy < 40) a.vy += Math.min(200, -hAdel * 6) * dt;
-  if (a.y > TECHO) a.vy -= (a.y - TECHO) * 10 * dt;
+  const techo = techoTipo(a.tipo) - 15;
+  if (a.y > techo) a.vy -= (a.y - techo) * 10 * dt;
 }
 
 function apuntar(desde: { x: number; y: number }, vel: number, grav: boolean, av: { x: number; y: number; vx: number; vy: number }, err: number) {
@@ -190,7 +310,20 @@ function apuntar(desde: { x: number; y: number }, vel: number, grav: boolean, av
 
 /* ── One step ───────────────────────────────────────────────────────────── */
 
-export type ResultadoPaso = { disparos?: Disparo[]; embestida?: boolean };
+export type ResultadoPaso = {
+  disparos?: Disparo[];
+  /** A drone rammed the plane (it's gone). */
+  embestida?: boolean;
+  /** A saucer's laser (or a tractor zap) hit the plane at this point: 1 damage. */
+  laser?: { x: number; y: number };
+  /**
+   * The plane is caught in a saucer's tractor beam: add this acceleration
+   * (px/s², y up) to its velocity this frame: `p.vx += fx * dt; p.vy += fy * dt`.
+   * It already includes the braking term (it pulls towards the saucer and
+   * eats speed).
+   */
+  tractor?: { fx: number; fy: number };
+};
 
 export function paso(a: Aereo, todos: Aereo[], vista: Vista, dt: number): ResultadoPaso {
   dt = clamp(fin(dt), 0, 0.1);
@@ -200,9 +333,25 @@ export function paso(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Result
   a.vy = fin(a.vy);
   a.t += dt;
   if (a.hp <= 0 || dt === 0) return {};
-  const r = a.tipo === 'helicoptero' ? pasoHeli(a, todos, vista, dt) : a.tipo === 'dron' ? pasoDron(a, todos, vista, dt) : pasoGlobo(a, todos, vista, dt);
+  const r =
+    a.tipo === 'helicoptero' ? pasoHeli(a, todos, vista, dt)
+    : a.tipo === 'dron' ? pasoDron(a, todos, vista, dt)
+    : a.tipo === 'ovni' ? pasoOvni(a, todos, vista, dt)
+    : pasoGlobo(a, todos, vista, dt);
+  a.vx = fin(a.vx);
+  a.vy = fin(a.vy);
   a.x += a.vx * dt;
   a.y += a.vy * dt;
+  // Hard ceiling per type (and saucers never sink into the clouds).
+  const techo = techoTipo(a.tipo);
+  if (a.y > techo) {
+    a.y = techo;
+    a.vy = Math.min(0, a.vy);
+  }
+  if (a.tipo === 'ovni' && a.y < PISO_OVNI) {
+    a.y = PISO_OVNI;
+    a.vy = Math.max(0, a.vy);
+  }
   if (a.tipo === 'dron') noSolapar(a, todos);
   if (a.y <= fin(vista.suelo(a.x)) + 1) {
     a.y = fin(vista.suelo(a.x)) + 1;
@@ -235,13 +384,14 @@ function separacion(a: Aereo, todos: Aereo[], dist: number) {
 function pasoHeli(a: Aereo, todos: Aereo[], vista: Vista, dt: number): ResultadoPaso {
   const av = vista.avion;
   const k = nivelIA(a.ola);
-  const vMax = lerp(85, 115, k);
+  const kd = k1(a.ola);
+  const vMax = lerp(85, 125, kd);
   // Hover point: on our side of the plane, at stand-off range, a bit above.
   const px = av.x + av.vx * 0.6, py = av.y + av.vy * 0.4;
   const lado = a.x >= px ? 1 : -1;
   const distDeseada = lerp(135, 95, k) + Math.sin(a.t * 0.7 + a.semilla * 6) * 20;
   const tx = px + lado * distDeseada;
-  const ty = clamp(py + 20 + Math.sin(a.t * 1.3 + a.semilla * 9) * 12, fin(vista.suelo(tx)) + 40, TECHO - 10);
+  const ty = clamp(py + 20 + Math.sin(a.t * 1.3 + a.semilla * 9) * 12, fin(vista.suelo(tx)) + 40, techoTipo('helicoptero') - 25);
   let wx = (tx - a.x) * 1.5, wy = (ty - a.y) * 1.5;
   const s = Math.hypot(wx, wy);
   if (s > vMax) {
@@ -255,7 +405,7 @@ function pasoHeli(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
   const sep = separacion(a, todos, 34);
   wx += sep.sx * 80;
   wy += sep.sy * 80;
-  dirigir(a, wx, wy, lerp(110, 150, k), dt);
+  dirigir(a, wx, wy, lerp(110, 170, kd), dt);
   evitarSuelo(a, vista, 30, dt);
   limitar(a, vMax);
   // Lean into the motion (nose down when speeding up), smoothly.
@@ -270,13 +420,21 @@ function pasoHeli(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
   const dx = av.x - a.x, dy = av.y - a.y;
   const dist = Math.hypot(dx, dy);
   a.cd -= dt;
-  if (a.rafaga <= 0 && a.cd <= 0 && av.vivo && dist < lerp(220, 270, k) && Math.sign(dx) === a.mira && lineaLibre(a.x, a.y, av.x, av.y, vista.suelo)) {
+  if (a.rafaga <= 0 && !(a.aviso! > 0) && a.cd <= 0 && av.vivo && dist < lerp(220, 290, kd) && Math.sign(dx) === a.mira && lineaLibre(a.x, a.y, av.x, av.y, vista.suelo)) {
+    // Telegraph first: the nose light blinks (and a "!") before the burst.
     a.salvas++;
-    const cohetes = a.ola >= 3 && a.salvas % 2 === 0;
-    a.rafaga = cohetes ? (a.ola >= 6 ? 3 : 2) : a.ola >= 5 ? 4 : 3;
-    a.rafT = 0;
-    a.cd = lerp(2.8, 1.5, k) + a.semilla * 0.6;
-    a.faseT = cohetes ? 1 : 0; // remembers what this burst fires
+    a.faseT = a.ola >= 3 && a.salvas % 2 === 0 ? 1 : 0; // remembers what this burst fires
+    a.aviso = lerp(0.6, 0.45, kd);
+    a.cd = lerp(2.8, 1.2, kd) + a.semilla * 0.6;
+  }
+  if (a.aviso! > 0) {
+    a.aviso! -= dt;
+    if (a.aviso! <= 0) {
+      a.aviso = 0;
+      const cohetes = a.faseT === 1;
+      a.rafaga = cohetes ? (a.ola >= 6 ? 3 : 2) : a.ola >= 5 ? 4 : 3;
+      a.rafT = 0;
+    }
   }
   if (a.rafaga > 0) {
     a.rafT -= dt;
@@ -286,8 +444,8 @@ function pasoHeli(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
       const n = a.rafaga;
       // Not snipers: the lead is partial and the burst fans out, so a plane
       // that keeps turning or jinks gets missed; one that flies straight, not.
-      const err = (n % 2 === 0 ? 1 : -1) * (0.05 + 0.035 * n) * (1 - 0.4 * k);
-      const f = lerp(0.45, 0.85, k) + 0.15 * Math.sin(a.salvas * 2.1 + a.semilla * 5);
+      const err = (n % 2 === 0 ? 1 : -1) * (0.05 + 0.035 * n) * (1 - 0.55 * kd);
+      const f = lerp(0.45, 0.95, kd) + 0.15 * Math.sin(a.salvas * 2.1 + a.semilla * 5);
       const blanco = { x: av.x, y: av.y, vx: av.vx * f, vy: av.vy * f };
       const v = apuntar(boca, cohete ? VEL_COHETE : VEL_BALIN, !cohete, blanco, err);
       if (v) disparos.push({ x: boca.x, y: boca.y, vx: v.vx, vy: v.vy, tipo: cohete ? 'cohete' : 'balin' });
@@ -327,6 +485,7 @@ function noSolapar(a: Aereo, todos: Aereo[]) {
 function pasoDron(a: Aereo, todos: Aereo[], vista: Vista, dt: number): ResultadoPaso {
   const av = vista.avion;
   const k = nivelIA(a.ola);
+  const kd = k1(a.ola);
   const rAvion = vista.radioAvion ?? 9;
 
   // Kamikaze hit.
@@ -337,21 +496,27 @@ function pasoDron(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
 
   // Phases: circle the plane → dive at it → pull away → circle…
   a.faseT -= dt;
-  if (a.fase === 0 && a.faseT <= 0 && av.vivo) {
-    a.fase = 1;
-    a.faseT = 1.8;
+  // Before diving it flashes red for a moment (the warning).
+  if (a.fase === 0 && a.faseT <= 0 && av.vivo && !(a.aviso! > 0)) a.aviso = 0.4;
+  if (a.aviso! > 0) {
+    a.aviso! -= dt;
+    if (a.aviso! <= 0) {
+      a.aviso = 0;
+      a.fase = 1;
+      a.faseT = 1.8;
+    }
   } else if (a.fase === 1 && (a.faseT <= 0 || !av.vivo)) {
     a.fase = 2;
     a.faseT = 0.7;
   } else if (a.fase === 2 && a.faseT <= 0) {
     a.fase = 0;
-    a.faseT = lerp(3.2, 1.6, k) + a.semilla * 1.5;
+    a.faseT = lerp(3.2, 1.3, kd) + a.semilla * 1.5;
   }
 
   let wx: number, wy: number, vMax: number;
   if (a.fase === 1) {
     // Pursuit with lead (intercept where the plane will be).
-    vMax = Math.min(205, lerp(165, 195, k) + a.ola * 1.5);
+    vMax = Math.min(215, lerp(165, 200, kd) + a.ola * 1.5);
     const d = Math.hypot(av.x - a.x, av.y - a.y);
     const tl = clamp(d / vMax, 0, 1.2);
     wx = av.x + av.vx * tl - a.x;
@@ -365,7 +530,7 @@ function pasoDron(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
     const radioOrbita = 75 + a.semilla * 20;
     const fase = a.t * 1.4 * a.lado + a.grupo * 2.1;
     const ox = av.x + av.vx * 0.5 + Math.cos(fase) * radioOrbita;
-    const oy = clamp(av.y + av.vy * 0.3 + Math.sin(fase) * radioOrbita * 0.6 + 25, fin(vista.suelo(av.x)) + 30, TECHO);
+    const oy = clamp(av.y + av.vy * 0.3 + Math.sin(fase) * radioOrbita * 0.6 + 25, fin(vista.suelo(av.x)) + 30, techoTipo('dron') - 15);
     wx = (ox - a.x) * 2;
     wy = (oy - a.y) * 2;
     if (a.fase === 2) {
@@ -396,7 +561,7 @@ function pasoDron(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
   wx += sep.sx * 260;
   wy += sep.sy * 260;
 
-  dirigir(a, wx, wy, lerp(240, 320, k), dt);
+  dirigir(a, wx, wy, lerp(240, 340, kd), dt);
   evitarSuelo(a, vista, a.fase === 1 ? 8 : 22, dt);
   limitar(a, vMax);
 
@@ -412,7 +577,7 @@ function pasoGlobo(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultad
   const k = nivelIA(a.ola);
   // Drift to a spot a bit ahead of the plane's path and above its altitude.
   const tx = av.x + av.vx * 1.5;
-  const ty = clamp(av.y + 45, fin(vista.suelo(a.x)) + 70, TECHO - 20);
+  const ty = clamp(av.y + 45, fin(vista.suelo(a.x)) + 70, techoTipo('globo') - 20);
   const vMax = lerp(28, 40, k);
   let wx = clamp((tx - a.x) * 0.3, -vMax, vMax);
   let wy = clamp((ty - a.y) * 0.5, -22, 22);
@@ -427,11 +592,270 @@ function pasoGlobo(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultad
 
   a.cd -= dt;
   const dx = av.x - a.x;
-  if (a.cd <= 0 && av.vivo && Math.abs(dx) < 260) {
-    a.cd = lerp(3.4, 2, k) + a.semilla;
+  // The hanging mine blinks before it drops.
+  if (a.cd <= 0 && av.vivo && Math.abs(dx) < 260 && !(a.aviso! > 0)) {
+    a.aviso = 0.5;
+    a.cd = lerp(3.4, 1.7, k1(a.ola)) + a.semilla;
+  }
+  if (a.aviso! > 0) {
+    a.aviso! -= dt;
+    if (a.aviso! > 0) return {};
+    a.aviso = 0;
     return { disparos: [{ x: a.x, y: a.y - 18, vx: a.vx + clamp(dx * 0.1, -15, 15), vy: -12, tipo: 'mina' }] };
   }
   return {};
+}
+
+/* ── Saucer ─────────────────────────────────────────────────────────────── */
+
+/** Per-saucer pseudo-random 0…1 (deterministic, no global state). */
+function azar(o: EstadoOvni): number {
+  o.rng = (Math.imul(o.rng, 1664525) + 1013904223) >>> 0;
+  return o.rng / 4294967296;
+}
+
+const envolver = (x: number) => Math.atan2(Math.sin(x), Math.cos(x));
+
+/** Turns `desde` towards `hacia` by at most `max` rad. */
+function girar(desde: number, hacia: number, max: number): number {
+  const d = envolver(hacia - desde);
+  return desde + clamp(d, -max, max);
+}
+
+/** Distance from (px, py) to the segment from (x0, y0) along `ang` with length L, and the closest point. */
+function aSegmento(px: number, py: number, x0: number, y0: number, ang: number, L: number) {
+  const ux = Math.cos(ang), uy = Math.sin(ang);
+  const s = clamp((px - x0) * ux + (py - y0) * uy, 0, L);
+  const cx = x0 + ux * s, cy = y0 + uy * s;
+  return { d: Math.hypot(px - cx, py - cy), x: cx, y: cy };
+}
+
+/** How far a beam from (x, y) along `ang` goes before it meets the ground (max `L`). */
+function largoRayo(x: number, y: number, ang: number, L: number, suelo: Vista['suelo']): number {
+  const ux = Math.cos(ang), uy = Math.sin(ang);
+  for (let s = 6; s <= L; s += 6) if (y + uy * s <= fin(suelo(x + ux * s))) return s;
+  return L;
+}
+
+function nuevoSitio(a: Aereo, o: EstadoOvni, av: Vista['avion']) {
+  const r = azar(o);
+  // Mostly ahead of the plane (where it's going), sometimes behind.
+  const adelante = Math.abs(av.vx) > 20 ? Math.sign(av.vx) : a.x < av.x ? -1 : 1;
+  const lado = r < 0.7 ? adelante : -adelante;
+  o.ofX = lado * lerp(25, 140, azar(o));
+  o.ofY = lerp(95, 165, azar(o));
+}
+
+function objetivoOvni(o: EstadoOvni, av: Vista['avion'], vista: Vista) {
+  const x = av.x + o.ofX;
+  return { x, y: clamp(av.y + o.ofY, Math.max(PISO_OVNI + 10, fin(vista.suelo(x)) + 60), techoTipo('ovni') - 20) };
+}
+
+function pasoOvni(a: Aereo, todos: Aereo[], vista: Vista, dt: number): ResultadoPaso {
+  const av = vista.avion;
+  const kd = k1(a.ola);
+  const o = a.ov!;
+  const rAvion = vista.radioAvion ?? 9;
+  o.modoT -= dt;
+  a.cd -= dt;
+  o.tractorCd -= dt;
+  o.atrapado = false;
+  const dx = av.x - a.x, dy = av.y - a.y;
+  const dist = Math.hypot(dx, dy);
+  const angAvion = Math.atan2(dy, dx);
+  const frenar = (k: number) => {
+    const f = Math.exp(-k * dt);
+    a.vx *= f;
+    a.vy *= f;
+  };
+  let res: ResultadoPaso = {};
+
+  switch (o.modo) {
+    case 0: {
+      // Hover above the plane with a little wobble; decide what's next.
+      const tg = objetivoOvni(o, av, vista);
+      const vMax = lerp(250, 320, kd);
+      let wx = (tg.x - a.x) * 3 + Math.cos(a.t * 2.3 + a.semilla * 7) * 20;
+      let wy = (tg.y - a.y) * 3 + Math.sin(a.t * 3.1 + a.semilla * 5) * 14;
+      const sep = separacion(a, todos, 50);
+      wx += sep.sx * 260;
+      wy += sep.sy * 260;
+      const m = Math.hypot(wx, wy);
+      if (m > vMax) {
+        wx *= vMax / m;
+        wy *= vMax / m;
+      }
+      if (!av.vivo) {
+        wx = -30;
+        wy = 20;
+      }
+      dirigir(a, wx, wy, 700, dt);
+      if (o.modoT > 0) break;
+      // Only one saucer aims at a time: overlapping beams would be unfair.
+      const otroApunta = todos.some((q) => q !== a && q.hp > 0 && q.ov && q.ov.modo >= 4);
+      if (av.vivo && a.cd <= 0 && !otroApunta && dist < ALCANCE_LASER - 40) {
+        if (o.tractorCd <= 0 && dist < LARGO_TRACTOR - 40 && dy < -40 && azar(o) < 0.4) {
+          o.modo = 6;
+          o.modoT = AVISO_RAYO;
+          o.ang = clamp(angAvion, -Math.PI / 2 - 0.6, -Math.PI / 2 + 0.6);
+        } else {
+          o.modo = 4;
+          o.modoT = AVISO_RAYO;
+          // Lock the aim: where the plane will be when the warning ends
+          // (partial lead early on, full lead later). Fly straight = get hit.
+          // Aimed a hair past the warning so a straight flyer crosses the beam while it's on.
+          const tl = AVISO_RAYO + DUR_LASER * 0.4;
+          const f = lerp(0.85, 1.02, kd) * (0.95 + 0.1 * azar(o));
+          o.bx = av.x + av.vx * tl * f;
+          o.by = av.y + av.vy * tl * f;
+          o.ang = Math.atan2(o.by - a.y, o.bx - a.x);
+        }
+        o.acerto = false;
+      } else if (azar(o) < 0.3) {
+        o.modo = 2;
+        o.modoT = 0.22;
+      } else {
+        o.modo = 1;
+        o.x0 = a.x;
+        o.y0 = a.y;
+        nuevoSitio(a, o, av);
+        o.dur = lerp(0.6, 0.4, kd);
+        o.modoT = o.dur;
+        o.lado = azar(o) < 0.5 ? 1 : -1;
+      }
+      break;
+    }
+    case 1: {
+      // Fast arc to the new spot (it tracks the plane while it goes).
+      const s = clamp(1 - o.modoT / o.dur, 0, 1);
+      const e = s * s * (3 - 2 * s);
+      const tg = objetivoOvni(o, av, vista);
+      const ex = tg.x - o.x0, ey = tg.y - o.y0;
+      const L = Math.hypot(ex, ey) || 1;
+      const b = Math.min(90, L * 0.35) * Math.sin(Math.PI * s) * o.lado;
+      const px = o.x0 + ex * e - (ey / L) * b;
+      const py = o.y0 + ey * e + (ex / L) * b;
+      a.vx = clamp((px - a.x) / dt, -900, 900);
+      a.vy = clamp((py - a.y) / dt, -900, 900);
+      if (o.modoT <= 0) {
+        o.modo = 0;
+        o.modoT = lerp(0.8, 0.45, kd) + azar(o) * 0.4;
+      }
+      break;
+    }
+    case 2: {
+      // Fade out, then pop up somewhere else above the plane.
+      frenar(6);
+      o.alfa = clamp(o.modoT / 0.22, 0, 1);
+      if (o.modoT <= 0) {
+        nuevoSitio(a, o, av);
+        const tg = objetivoOvni(o, av, vista);
+        a.x = tg.x;
+        a.y = tg.y;
+        a.vx = av.vx * 0.8;
+        a.vy = 0;
+        o.modo = 3;
+        o.modoT = 0.22;
+        o.alfa = 0;
+      }
+      break;
+    }
+    case 3: {
+      dirigir(a, av.vx, av.vy, 600, dt);
+      o.alfa = clamp(1 - o.modoT / 0.22, 0, 1);
+      if (o.modoT <= 0) {
+        o.alfa = 1;
+        o.modo = 0;
+        o.modoT = lerp(0.6, 0.35, kd);
+      }
+      break;
+    }
+    case 4: {
+      // Charging: it stops and the thin aim line blinks (locked aim).
+      frenar(7);
+      o.ang = Math.atan2(o.by - a.y, o.bx - a.x);
+      o.largo = largoRayo(a.x, a.y - 6, o.ang, ALCANCE_LASER, vista.suelo);
+      if (o.modoT <= 0) {
+        o.modo = 5;
+        o.modoT = DUR_LASER;
+      }
+      break;
+    }
+    case 5: {
+      // Firing: later waves sweep the beam a little after the plane, slower than it can dodge.
+      frenar(7);
+      const barrido = clamp((dificultad(a.ola) - 0.3) * 0.5, 0, 0.35);
+      o.ang = girar(o.ang, angAvion, barrido * dt);
+      o.largo = largoRayo(a.x, a.y - 6, o.ang, ALCANCE_LASER, vista.suelo);
+      if (av.vivo && !o.acerto) {
+        const h = aSegmento(av.x, av.y, a.x, a.y - 6, o.ang, o.largo);
+        if (h.d < rAvion + 2.5) {
+          o.acerto = true;
+          res = { laser: { x: h.x, y: h.y } };
+        }
+      }
+      // Recoil.
+      a.vx -= Math.cos(o.ang) * 30 * dt;
+      a.vy -= Math.sin(o.ang) * 30 * dt;
+      if (o.modoT <= 0) {
+        o.modo = 0;
+        o.modoT = 0.35;
+        a.salvas++;
+        a.cd = lerp(3.2, 1.3, kd) + a.semilla * 0.6;
+      }
+      break;
+    }
+    case 6: {
+      // Tractor warming up: the cone outline flickers, the saucer holds still.
+      frenar(5);
+      o.ang = girar(o.ang, clamp(angAvion, -Math.PI / 2 - 0.6, -Math.PI / 2 + 0.6), 0.8 * dt);
+      if (o.modoT <= 0) {
+        o.modo = 7;
+        o.modoT = lerp(2.2, 3, kd);
+      }
+      break;
+    }
+    case 7: {
+      // Tractor on: it shadows the plane (slower than it) and the cone turns after it.
+      const vSig = lerp(80, 115, kd);
+      const tx = av.x, ty = clamp(av.y + 110, PISO_OVNI + 10, techoTipo('ovni') - 20);
+      dirigir(a, clamp((tx - a.x) * 2, -vSig, vSig), clamp((ty - a.y) * 2, -vSig, vSig), 250, dt);
+      o.ang = girar(o.ang, clamp(angAvion, -Math.PI / 2 - 0.7, -Math.PI / 2 + 0.7), lerp(1, 1.5, kd) * dt);
+      const dentro = av.vivo && dist < LARGO_TRACTOR && Math.abs(envolver(angAvion - o.ang)) < APERTURA_TRACTOR + Math.atan2(rAvion, Math.max(dist, 1));
+      if (dentro) {
+        o.atrapado = true;
+        const ux = -dx / (dist || 1), uy = -dy / (dist || 1);
+        // Pull towards the saucer and brake (stronger near the axis).
+        const centro = 1 - Math.min(1, Math.abs(envolver(angAvion - o.ang)) / (APERTURA_TRACTOR + 0.1)) * 0.5;
+        const tirar = lerp(85, 120, kd) * centro;
+        const amort = lerp(1.0, 1.4, kd) * centro;
+        res = { tractor: { fx: fin(ux * tirar - av.vx * amort), fy: fin(uy * tirar - av.vy * amort) } };
+        // Dragged all the way in: a zap and it lets go.
+        if (dist < radio(a) + rAvion + 8) {
+          res = { laser: { x: av.x, y: av.y + 4 } };
+          o.modoT = 0;
+          a.vy += 120;
+        }
+      }
+      if (o.modoT <= 0) {
+        o.modo = 0;
+        o.modoT = 0.4;
+        o.tractorCd = lerp(8, 5, kd);
+        a.cd = lerp(2.4, 1.2, kd);
+      }
+      break;
+    }
+  }
+  if (!av.vivo && o.modo >= 4) {
+    o.modo = 0;
+    o.modoT = 1;
+  }
+  if (o.modo !== 2 && o.modo !== 3) o.alfa = 1;
+  limitar(a, 900);
+  a.ang += (clamp(-a.vx / 700, -0.3, 0.3) - a.ang) * Math.min(1, dt * 6);
+  if (av.x > a.x + 6) a.mira = 1;
+  else if (av.x < a.x - 6) a.mira = -1;
+  return res;
 }
 
 /* ── Projectiles (for the engine) ───────────────────────────────────────── */
@@ -576,9 +1000,104 @@ function pintarGlobo(g: Ctx) {
   R(g, -7, 19, 1, 1, P.red);
 }
 
+/** Saucer facing right, origin at the centre of the disc (no lights: they blink, drawn live). */
+function pintarOvni(g: Ctx) {
+  // Glass dome (behind the mouse) with a mint tint.
+  D.oval(g, 0, -6, 10, 9, '#4aa8bc');
+  D.oval(g, 0, -6, 9, 8, '#8ee0ec');
+  D.oval(g, 1, -5, 7, 6, '#b8f4f8');
+  // The mouse astronaut: round head, big pink ears, antennae with gold tips.
+  R(g, -1, -13, 1, 4, '#5a4a96');
+  R(g, 3, -13, 1, 4, '#5a4a96');
+  R(g, -2, -15, 2, 2, P.gold);
+  R(g, 3, -15, 2, 2, P.gold);
+  R(g, -2, -15, 1, 1, P.gold1);
+  D.disc(g, -5, -9, 3, '#8a7ab0');
+  D.disc(g, -5, -9, 2, '#e6def2');
+  R(g, -5, -9, 2, 2, P.p1);
+  D.oval(g, 1, -5, 5, 4, '#8a7ab0');
+  D.oval(g, 1, -5, 4, 3, '#eee8f8');
+  R(g, 5, -5, 2, 2, '#eee8f8');
+  R(g, 7, -5, 1, 1, P.p0);
+  R(g, 1, -7, 1, 2, P.eye);
+  R(g, 4, -7, 1, 2, P.eye);
+  R(g, 1, -7, 1, 1, P.white);
+  R(g, -2, -4, 2, 1, P.blush);
+  R(g, 3, -3, 2, 1, P.p0);
+  // Dome shine.
+  R(g, -7, -11, 2, 1, P.white);
+  R(g, -8, -9, 1, 2, P.white);
+  // Disc: lilac top, pink rim band, darker belly.
+  D.oval(g, 0, 2, 17, 5, '#8a5ac8');
+  D.oval(g, 0, 1, 17, 4, P.p1);
+  D.oval(g, 0, 0, 15, 3, '#d4b8ff');
+  R(g, -13, -1, 26, 1, '#efe4ff');
+  R(g, -9, -2, 18, 1, P.white);
+  R(g, -16, 2, 33, 1, P.p0);
+  // Belly and the beam emitter.
+  D.oval(g, 0, 5, 9, 2, '#6a4aa8');
+  D.oval(g, 0, 6, 4, 1, '#3a2a7a');
+  R(g, -1, 7, 3, 1, '#8ff8e8');
+}
+
+/** A soft light halo around a sprite so it reads on the dark space sky. */
+const halos = new Map<HTMLCanvasElement, HTMLCanvasElement>();
+function halo(src: HTMLCanvasElement) {
+  let c = halos.get(src);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = src.width + 4;
+    c.height = src.height + 4;
+    const g = c.getContext('2d')!;
+    const capa = (offs: number[][], color: string, alfa: number) => {
+      const t = document.createElement('canvas');
+      t.width = c!.width;
+      t.height = c!.height;
+      const q = t.getContext('2d')!;
+      for (const [dx, dy] of offs) q.drawImage(src, 2 + dx, 2 + dy);
+      q.globalCompositeOperation = 'source-in';
+      q.fillStyle = color;
+      q.fillRect(0, 0, t.width, t.height);
+      g.globalAlpha = alfa;
+      g.drawImage(t, 0, 0);
+    };
+    // A faint lilac glow two pixels out and a bright rim one pixel out.
+    capa([[-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, 1], [-1, 1], [1, -1]], '#9a7af0', 0.45);
+    capa([[-1, 0], [1, 0], [0, -1], [0, 1]], '#f4eeff', 0.9);
+    halos.set(src, c);
+  }
+  return c;
+}
+
+const LUCES = ['#ff6a8a', '#ffe048', '#7af0c8', '#8ab8ff', '#ffb0f0'];
+
+/** Blinking rim lights (running chase), in the sprite's frame. */
+function lucesOvni(g: Ctx, t: number, semilla: number, alerta: boolean) {
+  const xs = [-13, -7, -1, 5, 11];
+  const paso_ = Math.floor(t * (alerta ? 14 : 6) + semilla * 10);
+  for (let i = 0; i < xs.length; i++) {
+    const on = (paso_ + i) % 3 !== 0;
+    const c = alerta ? (paso_ % 2 ? P.red : P.white) : LUCES[(i + Math.floor(paso_ / 3)) % LUCES.length];
+    R(g, xs[i], 3, 3, 2, on ? c : '#5a3a8a');
+    if (on) R(g, xs[i], 3, 1, 1, P.white);
+  }
+}
+
+/** "!" over an enemy that's about to fire (screen space, (x, y) is its top). */
+function exclamacion(g: Ctx, x: number, y: number, t: number) {
+  if (Math.floor(t * 10) % 2) return;
+  x = Math.round(x);
+  y = Math.round(y);
+  R(g, x - 1, y - 1, 4, 7, P.white);
+  R(g, x - 1, y + 7, 4, 4, P.white);
+  R(g, x, y, 2, 5, P.red);
+  R(g, x, y + 8, 2, 2, P.red);
+}
+
 type Hoja = { img: HTMLCanvasElement; ox: number; oy: number };
 function hoja(tipo: TipoAereo, var_: number): Hoja {
   if (tipo === 'helicoptero') return { img: D.outlined('aereo|heli', VINK, 40, 24, 20, 12, pintarHeli), ox: 20, oy: 12 };
+  if (tipo === 'ovni') return { img: D.outlined('aereo|ovni', VINK, 40, 30, 20, 17, pintarOvni), ox: 20, oy: 17 };
   if (tipo === 'dron') return { img: D.outlined(`aereo|dron|${var_}`, VINK, 20, 18, 10, 9, (g) => pintarDron(g, var_ === 1)), ox: 10, oy: 9 };
   return { img: D.outlined('aereo|globo', '#7a2a5a', 28, 38, 14, 15, pintarGlobo), ox: 14, oy: 15 };
 }
@@ -617,29 +1136,176 @@ function aspa(g: Ctx, cx: number, cy: number, largo: number, t: number, vel: num
  * shows the white hit silhouette.
  */
 export function dibujar(g: Ctx, a: Aereo, sx: number, sy: number, t: number, flash: boolean): void {
-  const h = hoja(a.tipo, a.tipo === 'dron' && a.fase === 1 ? 1 : 0);
+  const avisando = (a.aviso ?? 0) > 0;
+  const h = hoja(a.tipo, a.tipo === 'dron' && (a.fase === 1 || avisando) ? 1 : 0);
   g.save();
   g.translate(Math.round(sx), Math.round(sy + (a.tipo === 'globo' ? Math.round(Math.sin(t * 1.5 + a.semilla * 9)) : 0)));
   g.rotate(Math.round(-a.ang / 0.06) * 0.06);
   g.scale(a.mira, 1);
-  g.drawImage(flash ? blanco(h.img) : h.img, -h.ox, -h.oy);
+  if (a.tipo === 'ovni') {
+    const o = a.ov;
+    const alfa = o ? o.alfa : 1;
+    if (alfa < 1) {
+      // Teleport: it flickers and squashes into a line of light.
+      g.globalAlpha = Math.floor(t * 30) % 2 ? alfa : alfa * 0.5;
+      g.scale(1 + (1 - alfa) * 0.8, Math.max(0.15, alfa));
+    }
+    const bob = Math.round(Math.sin(t * 3 + a.semilla * 9));
+    g.translate(0, bob);
+    g.drawImage(halo(h.img), -h.ox - 2, -h.oy - 2);
+    g.globalAlpha = alfa < 1 ? (Math.floor(t * 30) % 2 ? alfa : alfa * 0.5) : 1;
+    g.drawImage(flash ? blanco(h.img) : h.img, -h.ox, -h.oy);
+    const alerta = !!o && (o.modo === 4 || o.modo === 5 || o.modo === 6);
+    if (!flash) lucesOvni(g, t, a.semilla, alerta);
+    // The emitter glows while charging / firing.
+    if (o && o.modo >= 4) {
+      const c = o.modo <= 5 ? '#ff5a8a' : '#7af0c8';
+      const f = Math.floor(t * 16) % 2;
+      R(g, -2 - f, 6, 5 + f * 2, 2, c);
+      R(g, -1, 6, 3, 1, P.white);
+    }
+    if (alfa < 1) {
+      g.globalAlpha = 1;
+      R(g, -18, 0, 37, 1, '#e8fcff');
+    }
+  } else {
+    g.drawImage(flash ? blanco(h.img) : h.img, -h.ox, -h.oy);
+  }
   if (a.tipo === 'helicoptero') {
     aspa(g, 1, -10, 13, t + a.semilla, 36);
     // Tail rotor: a little spinning cross.
     const f = Math.floor((t + a.semilla) * 30) % 2;
     R(g, -18, -10 + f, 1, 4 - f * 2, VINK);
     R(g, -19 - (1 - f), -8, 3 - f * 2 + 2, 1, P.metal);
+    // About to fire: the gun blinks.
+    if (avisando && Math.floor(t * 14) % 2 === 0) {
+      R(g, 9, -6, 4, 4, P.white);
+      R(g, 10, -5, 2, 2, P.red);
+      R(g, 4, 3, 4, 4, P.white);
+      R(g, 5, 4, 2, 2, P.red);
+    }
   } else if (a.tipo === 'dron') {
     aspa(g, -5, -7, 3, t * 1.3 + a.semilla, 50);
     aspa(g, 4, -7, 3, t * 1.3 + a.semilla + 0.37, 50);
     if (a.fase === 1 && Math.floor(t * 12) % 2 === 0) R(g, -8, -1, 2, 2, P.gold);
-  } else {
+    if (avisando && Math.floor(t * 16) % 2 === 0) {
+      R(g, 6, -1, 3, 3, P.white);
+      R(g, 7, 0, 1, 1, P.red);
+    }
+  } else if (a.tipo === 'globo') {
     // Burner flame flickers over the basket.
     const f = Math.floor(t * 10 + a.semilla * 5) % 3;
     R(g, 0, 11 - f, 2, 1 + f, P.gold);
     R(g, 0, 12, 2, 1, '#ff9a3c');
+    // The mine about to drop blinks red/white.
+    if (avisando) {
+      const on = Math.floor(t * 12) % 2 === 0;
+      D.disc(g, -7, 19, 3, on ? P.white : P.red);
+      R(g, -7, 19, 1, 1, on ? P.red : P.white);
+    }
   }
   g.restore();
+  if (avisando && a.tipo !== 'dron') exclamacion(g, sx - 1, sy - (a.tipo === 'globo' ? 30 : 22), t);
+}
+
+/**
+ * Draws a saucer's laser (aim line while charging, the beam while firing)
+ * or its tractor beam (flickering cone outline while charging, the cone
+ * while on). Call it after `dibujar` with the same screen centre (sx, sy).
+ * Does nothing for other types or when the saucer is idle.
+ */
+export function dibujarRayo(g: Ctx, a: Aereo, sx: number, sy: number, t: number): void {
+  const o = a.ov;
+  if (a.tipo !== 'ovni' || !o || o.modo < 4 || a.hp <= 0) return;
+  const ox = Math.round(sx), oy = Math.round(sy + 7 + Math.round(Math.sin(t * 3 + a.semilla * 9)));
+  // World angle (y up) → screen direction (y down).
+  const ux = Math.cos(o.ang), uy = -Math.sin(o.ang);
+  g.save();
+  if (o.modo === 4) {
+    // Aim line: thin, dashed, blinking faster as the shot gets closer.
+    const k = 1 - clamp(o.modoT / AVISO_RAYO, 0, 1);
+    const vel = 6 + k * 18;
+    if (Math.floor(t * vel) % 2 === 0 || k > 0.85) {
+      g.fillStyle = k > 0.7 ? P.white : '#ff6a9a';
+      const L = o.largo;
+      for (let s = 4; s < L; s += 4) if ((s / 4 + Math.floor(t * 20)) % 2 < 1) g.fillRect(Math.round(ox + ux * s), Math.round(oy + uy * s), 2, 2);
+    }
+    // Reticle on the locked point (if it's within reach).
+    const L = Math.min(o.largo, Math.hypot(o.bx - a.x, o.by - a.y));
+    const rx = Math.round(ox + ux * L), ry = Math.round(oy + uy * L);
+    const r = Math.round(lerp(9, 4, k));
+    g.fillStyle = Math.floor(t * 12) % 2 ? '#ff4a6a' : P.white;
+    g.fillRect(rx - r, ry, 3, 1);
+    g.fillRect(rx + r - 2, ry, 3, 1);
+    g.fillRect(rx, ry - r, 1, 3);
+    g.fillRect(rx, ry + r - 2, 1, 3);
+    // Charging orb under the saucer.
+    D.disc(g, ox, oy + 1, Math.round(1 + k * 3), '#ff7aa8');
+    D.disc(g, ox, oy + 1, Math.round(k * 2), P.white);
+  } else if (o.modo === 5) {
+    const L = o.largo;
+    const ex = ox + ux * L, ey = oy + uy * L;
+    const f = Math.floor(t * 30) % 2;
+    g.lineCap = 'butt';
+    g.strokeStyle = 'rgba(255,74,138,0.35)';
+    g.lineWidth = 9 + f * 2;
+    linea(g, ox, oy, ex, ey);
+    g.strokeStyle = '#ff5a96';
+    g.lineWidth = 5;
+    linea(g, ox, oy, ex, ey);
+    g.strokeStyle = f ? P.white : '#ffe4f0';
+    g.lineWidth = 2;
+    linea(g, ox, oy, ex, ey);
+    D.disc(g, ox, oy + 1, 4, '#ff5a96');
+    D.disc(g, ox, oy + 1, 2, P.white);
+    D.disc(g, Math.round(ex), Math.round(ey), 3 + f, '#ffb0d0');
+    D.disc(g, Math.round(ex), Math.round(ey), 1 + f, P.white);
+  } else {
+    // Tractor cone.
+    const L = LARGO_TRACTOR;
+    const a1 = o.ang - APERTURA_TRACTOR, a2 = o.ang + APERTURA_TRACTOR;
+    const p1 = { x: ox + Math.cos(a1) * L, y: oy - Math.sin(a1) * L };
+    const p2 = { x: ox + Math.cos(a2) * L, y: oy - Math.sin(a2) * L };
+    if (o.modo === 6) {
+      if (Math.floor(t * 12) % 2 === 0) {
+        g.fillStyle = '#7af0c8';
+        for (let s = 6; s < L; s += 5) {
+          for (const an of [a1, a2]) g.fillRect(Math.round(ox + Math.cos(an) * s), Math.round(oy - Math.sin(an) * s), 2, 2);
+        }
+      }
+    } else {
+      const grad = g.createLinearGradient(ox, oy, ox + ux * L, oy + uy * L);
+      grad.addColorStop(0, o.atrapado ? 'rgba(160,255,220,0.55)' : 'rgba(122,240,200,0.4)');
+      grad.addColorStop(1, 'rgba(122,240,200,0.04)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.moveTo(ox - 3, oy);
+      g.lineTo(p1.x, p1.y);
+      g.lineTo(p2.x, p2.y);
+      g.lineTo(ox + 3, oy);
+      g.closePath();
+      g.fill();
+      // Rings rising up the beam.
+      g.fillStyle = 'rgba(220,255,245,0.8)';
+      for (let i = 0; i < 5; i++) {
+        const s = L * (1 - (((t * 0.9 + i / 5) % 1)));
+        const w = Math.tan(APERTURA_TRACTOR) * s;
+        const cx = ox + ux * s, cy = oy + uy * s;
+        for (let j = -w; j <= w; j += 3) g.fillRect(Math.round(cx - uy * j), Math.round(cy + ux * j), 2, 1);
+      }
+      // Bright edges.
+      g.fillStyle = '#c8fff0';
+      for (let s = 4; s < L; s += 3) for (const an of [a1, a2]) g.fillRect(Math.round(ox + Math.cos(an) * s), Math.round(oy - Math.sin(an) * s), 1, 1);
+    }
+  }
+  g.restore();
+}
+
+function linea(g: Ctx, x0: number, y0: number, x1: number, y1: number) {
+  g.beginPath();
+  g.moveTo(x0, y0);
+  g.lineTo(x1, y1);
+  g.stroke();
 }
 
 /** Draws a projectile from this module at screen (sx, sy). */

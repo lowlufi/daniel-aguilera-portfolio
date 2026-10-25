@@ -821,6 +821,522 @@ function bocanadas(a: Ambiente) {
   });
 }
 
+/* ── Gran altura: mar de nubes, estratosfera y espacio ──────────────────── */
+
+/** Curva suave 0→1 entre `a` y `b`. */
+const ss = (a: number, b: number, x: number) => {
+  const k = x <= a ? 0 : x >= b ? 1 : (x - a) / (b - a);
+  return k * k * (3 - 2 * k);
+};
+const P = (h: string) => pack(hex(h));
+
+export type Zona = 'campo' | 'nubes' | 'estratosfera' | 'espacio';
+
+/** Zona del cielo a una altitud (px sobre el suelo). */
+export function zonaAltitud(alt: number): Zona {
+  return alt < 500 ? 'campo' : alt < 1300 ? 'nubes' : alt < 1900 ? 'estratosfera' : 'espacio';
+}
+
+const NOMBRES: Record<Zona, string> = {
+  campo: 'Cielo del valle',
+  nubes: 'Mar de nubes',
+  estratosfera: 'Estratosfera',
+  espacio: 'Espacio exterior',
+};
+
+/** Nombre bonito de una zona (o de la zona de una altitud) para un letrero. */
+export function nombreZona(z: Zona | number): string {
+  return NOMBRES[typeof z === 'number' ? zonaAltitud(z) : z];
+}
+
+/* El cielo alto se indexa por altitud real: fila 0 = ALTO_HI. Abajo se funde
+ * (tramado) con el cielo de siempre, que va anclado al horizonte. */
+const ALTO_LO = 420;
+const ALTO_HI = 3600;
+const ALTO_H = ALTO_HI - ALTO_LO;
+const ALTO_OPACO = 920;
+
+const CIELO_ALTO: Record<Ambiente, [number, string][]> = {
+  dia: [[420, '#5ea4f2'], [800, '#4c8eea'], [1150, '#4278de'], [1450, '#4262c8'], [1700, '#454caa'], [1950, '#3a3686'], [2250, '#2c2560'], [2700, '#22194c'], [3600, '#1d1544']],
+  tarde: [[420, '#7c66c8'], [700, '#9a6cc2'], [1000, '#8a5eb8'], [1300, '#6e50ac'], [1600, '#513c94'], [1950, '#3a2c72'], [2250, '#2b2158'], [2700, '#22194c'], [3600, '#1d1544']],
+  noche: [[420, '#29216a'], [900, '#221c5c'], [1500, '#1f1852'], [2200, '#1e164a'], [3600, '#1d1544']],
+};
+
+function capaCieloAlto(a: Ambiente) {
+  const st = CIELO_ALTO[a];
+  const colorAt = (el: number): RGB => {
+    if (el <= st[0][0]) return hex(st[0][1]);
+    for (let i = 0; i < st.length - 1; i++) {
+      const [e0, c0] = st[i];
+      const [e1, c1] = st[i + 1];
+      if (el <= e1) return lerp(hex(c0), hex(c1), (el - e0) / (e1 - e0));
+    }
+    return hex(st[st.length - 1][1]);
+  };
+  const W = 64;
+  const b = new Buf(W, ALTO_H);
+  const BAND = 10;
+  for (let y = 0; y < ALTO_H; y++) {
+    const el = ALTO_HI - y;
+    const i = Math.floor(el / BAND);
+    const p = el - i * BAND;
+    const here = pack(colorAt(i * BAND + BAND / 2));
+    const below = pack(colorAt((i - 1) * BAND + BAND / 2));
+    const dens = ss(ALTO_LO + 10, ALTO_OPACO, el);
+    for (let x = 0; x < W; x++) {
+      if (!tramado(x, y, dens)) continue;
+      b.d[y * W + x] = p === 0 && (x + y) % 2 === 0 ? below : p === 1 && (x + y) % 4 === 0 ? below : here;
+    }
+  }
+  return { cv: b.canvas(), top: css(colorAt(ALTO_HI)) };
+}
+
+/** Mar de nubes visto desde arriba: una fila lejana y otra cercana de lomos esponjosos. */
+function capaMar(a: Ambiente) {
+  const W = 960;
+  const fila = (seed: number, H: number, base: number, r0: number, r1: number, k: number, periodo: number) => {
+    const p = palNube(a, k);
+    const b = new Buf(W, H);
+    const r = rng(seed);
+    const S = pack(p.sombra);
+    const C = pack(p.cuerpo);
+    const L = pack(p.luz);
+    const M = pack(lerp(p.cuerpo, p.sombra, 0.5));
+    const bolas: [number, number, number][] = [];
+    for (let x = 0; x < W - r0; ) {
+      const rr = r0 + Math.floor(r() * (r1 - r0));
+      bolas.push([x, base - Math.round(rr * (0.25 + r() * 0.55)), rr]);
+      x += Math.max(4, Math.round(rr * (1 + r() * 0.7)));
+    }
+    for (const [x, y, rr] of bolas) b.disc(x, y, rr, S);
+    b.rect(0, base, W, H - base, S);
+    for (const [x, y, rr] of bolas) b.disc(x - 1, y - 1, rr - 1, C);
+    b.rect(0, base + 2, W, H - base - 2, C);
+    // Lomos de más cerca, en filas: un pliegue de sombra bajo cada uno.
+    for (let fy = base + 6, j = 0; fy < H + 8; fy += periodo / 2, j++) {
+      const rr = Math.round(r0 * 0.6);
+      const paso = Math.round(W / Math.round(W / (rr * 2.6)));
+      for (let x = (j % 2) * Math.round(paso / 2); x < W + paso; x += paso) {
+        const dy = (x * 7) % 3;
+        const yy = fy + dy;
+        b.oval(x, yy, rr + 1, Math.max(1, Math.round(rr * 0.42)), M);
+        b.oval(x - 1, yy - 1, rr, Math.max(1, Math.round(rr * 0.42)), C);
+        b.rect(x - Math.round(rr * 0.5), yy - Math.round(rr * 0.42), Math.max(1, Math.round(rr * 0.5)), 1, L);
+      }
+    }
+    for (const [x, y, rr] of bolas) if (rr > 5) b.disc(x - rr * 0.35 - 1, y - rr * 0.4 - 1, Math.max(1, Math.round(rr * 0.38)), L);
+    // Solo el borde de arriba lleva contorno (el resto está lleno).
+    b.outline(pack(p.tinta));
+    return b.canvas();
+  };
+  const PER = 24;
+  return {
+    lejos: fila(93, 34, 18, 5, 11, 0.38, PER),
+    cerca: fila(91, 30 + PER * 2, 30, 10, 21, 0.1, PER),
+    base: 30,
+    periodo: PER,
+  };
+}
+
+/** Cirro alto, largo y deshilachado. */
+function capaCirrosAltos(a: Ambiente) {
+  const p = palNube(a, 0.3);
+  const luz = pack(p.luz);
+  const cuerpo = pack(lerp(p.cuerpo, p.sombra, 0.4));
+  // Hebras finas que se deshilachan en tramado, con una colita curva.
+  return [130, 170, 96, 150].map((w, i) => {
+    const b = new Buf(w, 12);
+    const r = rng(300 + i);
+    for (let j = 0; j < 4; j++) {
+      const x0 = Math.round(r() * w * 0.3);
+      const x1 = Math.round(w * (0.6 + r() * 0.4)) - 1;
+      const y = 3 + j * 2 + Math.round(r());
+      const col = j % 2 ? cuerpo : luz;
+      for (let x = x0; x <= x1; x++) {
+        const k = Math.min(1, (x - x0) / 14, (x1 - x) / 22);
+        const yy = y - Math.round(Math.sin((x / w) * Math.PI * 2 + j) * 0.8);
+        if (tramado(x, yy, k * (j % 2 ? 0.7 : 1))) b.px(x, yy, col);
+      }
+      if (j % 2 === 0) {
+        b.px(x1 + 1, y - 1, luz);
+        b.px(x1 + 2, y - 2, luz);
+      }
+    }
+    return b.canvas();
+  });
+}
+
+type PalTierra = { glow: [string, string]; limbo: string; atm: string; mar: string[]; nube: string; nubeS: string; tierra: [string, string]; luces: string | null };
+const TIERRA: Record<Ambiente, PalTierra> = {
+  dia: { glow: ['#7cb4f0', '#b4e4ff'], limbo: '#f4fcff', atm: '#9ad8ff', mar: ['#78b4f2', '#6aa2ea', '#5c8ede', '#507ccc'], nube: '#f6fbff', nubeS: '#cfe0f6', tierra: ['#a2dcaa', '#8ccc9c'], luces: null },
+  tarde: { glow: ['#c87ab8', '#ffc0b8'], limbo: '#fff0dc', atm: '#ffaabc', mar: ['#a088dc', '#8a76ce', '#7466be', '#6258ac'], nube: '#ffe6ee', nubeS: '#e6b8d6', tierra: ['#d0b4d4', '#bca2c8'], luces: '#ffe08a' },
+  noche: { glow: ['#4e44a0', '#8a7ce0'], limbo: '#d4c8ff', atm: '#7c6cd4', mar: ['#423e9c', '#3a368e', '#322e80', '#2c2872'], nube: '#6c68b6', nubeS: '#55519e', tierra: ['#45508e', '#3e4884'], luces: '#ffd870' },
+};
+
+/** La Tierra vista desde arriba: un arco con atmósfera brillante, nubes y continentes. */
+function capaTierra(a: Ambiente, y0: number, y1: number, b: Buf) {
+  const W = b.w;
+  const R = 2600;
+  const ap = 22;
+  const cx = W / 2;
+  const pt = TIERRA[a];
+  const g0 = P(pt.glow[0]);
+  const g1 = P(pt.glow[1]);
+  const limbo = P(pt.limbo);
+  const atm = P(pt.atm);
+  const mar = pt.mar.map(P);
+  const nb = P(pt.nube);
+  const nbS = P(pt.nubeS);
+  const tie = pt.tierra.map(P);
+  const luz = pt.luces ? P(pt.luces) : 0;
+  const TH = [26, 62, 112];
+  for (let y = y0; y < y1; y++)
+    for (let x = 0; x < W; x++) {
+      const dx = x - cx;
+      const dy = y - (ap + R);
+      const h = R - Math.sqrt(dx * dx + dy * dy);
+      if (h < -20) continue;
+      let c = 0;
+      if (h < 0) {
+        const k = 1 + h / 20;
+        if (tramado(x, y, k * k * 0.9)) c = k > 0.6 ? g1 : g0;
+      } else if (h < 2) c = limbo;
+      else if (h < 7) c = h < 3 && (x + y) % 2 ? limbo : atm;
+      else {
+        let i = 0;
+        for (let j = 0; j < 3; j++) {
+          const th = TH[j];
+          if (h > th + 5) i = j + 1;
+          else if (h > th - 5 && tramado(x, y, (h - th + 5) / 10)) i = j + 1;
+        }
+        c = mar[i];
+        const s = Math.sqrt(h - 7) * 9;
+        const u = dx;
+        const lt = Math.sin(u * 0.006 + 1) + Math.sin(u * 0.0115 + s * 0.028 + 2) + 0.5 * Math.sin(s * 0.05 - u * 0.004);
+        if (lt > 1.3) {
+          c = tie[lt > 1.62 ? 1 : 0];
+          if (luz && ((x * 73856093) ^ (y * 19349663)) % 37 === 0) c = luz;
+        }
+        const f = Math.sin(u * 0.031 + Math.sin(s * 0.09) * 2) + Math.sin(u * 0.013 - s * 0.05 + 1.3) + 0.6 * Math.sin(u * 0.07 + s * 0.11);
+        if (f > 1.25) c = f > 1.55 || h < 14 ? nb : nbS;
+        else if (f > 1.0 && tramado(x, y, (f - 1.0) / 0.25)) c = nbS;
+      }
+      if (c) b.d[y * W + x] = c;
+    }
+}
+
+/** Campo de estrellas que se repite en x e y. `capa` 0 = lejos, 2 = cerca. */
+function campoEstrellas(capa: number) {
+  const T = 256;
+  const b = new Buf(T, T);
+  const r = rng(500 + capa);
+  if (capa === 0) {
+    const cs = ['#4c4690', '#5e589e', '#6e66aa', '#5a5ca8'].map(P);
+    for (let i = 0; i < 190; i++) b.px(r() * T, r() * T, cs[i % 4]);
+  } else if (capa === 1) {
+    const cs = ['#a49ad8', '#d8d0f4', '#f4c8e2', '#bfe4f4', '#fff0c8'].map(P);
+    for (let i = 0; i < 70; i++) b.px(r() * T, r() * T, cs[i % 5]);
+  } else {
+    const c = P('#ffffff');
+    const t = P('#9a8ed8');
+    const cs = ['#fff6d6', '#ffd6ec', '#d4f4ff'].map(P);
+    for (let i = 0; i < 16; i++) {
+      const x = Math.floor(r() * (T - 6)) + 3;
+      const y = Math.floor(r() * (T - 6)) + 3;
+      if (i % 3 === 0) {
+        b.px(x, y, c);
+        b.px(x - 1, y, t);
+        b.px(x + 1, y, t);
+        b.px(x, y - 1, t);
+        b.px(x, y + 1, t);
+      } else b.rect(x, y, i % 2 ? 2 : 1, i % 2 ? 1 : 2, cs[i % 3]);
+    }
+  }
+  return b.canvas();
+}
+
+/** Nebulosa pastel tramada: nubes de gas en tres densidades y un corazón. */
+function nebulosa(seed: number, cols: string[], W = 230, H = 136) {
+  const b = new Buf(W, H);
+  const r = rng(seed);
+  const blobs = Array.from({ length: 8 }, () => ({ x: W * (0.18 + 0.64 * r()), y: H * (0.3 + 0.4 * r()), sx: 18 + 34 * r(), sy: 10 + 18 * r(), k: 0.45 + 0.55 * r() }));
+  const cs = cols.map(P);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      let d = 0;
+      for (const o of blobs) {
+        const u = (x - o.x) / o.sx;
+        const v = (y - o.y) / o.sy;
+        d += o.k * Math.exp(-(u * u + v * v));
+      }
+      d *= 0.78 + 0.22 * Math.sin(x * 0.11 + Math.sin(y * 0.08) * 2.4) * Math.sin(y * 0.15 - x * 0.03);
+      let c = 0;
+      if (d > 1.15) c = tramado(x, y, (d - 1.15) / 0.3) ? cs[3] : cs[2];
+      else if (d > 0.75) c = tramado(x, y, (d - 0.75) / 0.25) ? cs[2] : cs[1];
+      else if (d > 0.42) c = tramado(x, y, (d - 0.42) / 0.2) ? cs[1] : cs[0];
+      else if (d > 0.16) c = tramado(x, y, ((d - 0.16) / 0.26) * 0.75) ? cs[0] : 0;
+      if (c) b.d[y * W + x] = c;
+    }
+  const est = P('#fffaf0');
+  for (let i = 0; i < 7; i++) b.px(W * (0.2 + 0.6 * r()), H * (0.25 + 0.5 * r()), est);
+  return b.canvas();
+}
+
+/** Galaxia espiral inclinada, de dos brazos. */
+function galaxia() {
+  const W = 112;
+  const H = 64;
+  const b = new Buf(W, H);
+  const cs = ['#3e3480', '#6450b0', '#9c84e0', '#e8b8e4', '#fff4e0'].map(P);
+  const ang = -0.38;
+  const ca = Math.cos(ang);
+  const sa = Math.sin(ang);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const dx = x - W / 2 + 0.5;
+      const dy = y - H / 2 + 0.5;
+      const gx = dx * ca + dy * sa;
+      const gy = (-dx * sa + dy * ca) / 0.4;
+      const rr = Math.sqrt(gx * gx + gy * gy);
+      if (rr > 54) continue;
+      const th = Math.atan2(gy, gx);
+      const arm = 0.5 + 0.5 * Math.cos(2 * th - 3.4 * Math.log(rr + 1.5));
+      const d = Math.exp(-rr / 17) * (0.15 + 1.1 * arm * arm * arm) + 1.3 * Math.exp(-(rr * rr) / 30);
+      let c = -1;
+      if (d > 1.0) c = tramado(x, y, (d - 1) / 0.25) ? 4 : 3;
+      else if (d > 0.55) c = tramado(x, y, (d - 0.55) / 0.45) ? 3 : 2;
+      else if (d > 0.3) c = tramado(x, y, (d - 0.3) / 0.25) ? 2 : 1;
+      else if (d > 0.12) c = tramado(x, y, (d - 0.12) / 0.18) ? 1 : tramado(x, y, 0.35) ? 0 : -1;
+      if (c >= 0) b.d[y * W + x] = cs[c];
+    }
+  return b.canvas();
+}
+
+/** Planeta durazno con anillos lila. */
+function planeta() {
+  const W = 76;
+  const H = 46;
+  const b = new Buf(W, H);
+  const cx = 38;
+  const cy = 23;
+  const R = 14;
+  const ang = -0.22;
+  const ca = Math.cos(ang);
+  const sa = Math.sin(ang);
+  const anillo = (frente: boolean) => {
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const u = dx * ca + dy * sa;
+        const v = -dx * sa + dy * ca;
+        const q = Math.sqrt((u / 34) ** 2 + (v / 8.5) ** 2);
+        if (q < 0.6 || q > 1) continue;
+        if ((v > 0) !== frente) continue;
+        if (frente === false && dx * dx + dy * dy <= R * R) continue;
+        b.d[y * W + x] = q > 0.9 ? P('#b8a4ec') : q > 0.8 ? P('#e4d8ff') : q > 0.74 ? P('#8e7ccc') : P('#cbbcf6');
+      }
+  };
+  anillo(false);
+  b.disc(cx, cy, R + 1, P('#a8689a'));
+  b.disc(cx, cy, R, P('#f6b8a0'));
+  for (let y = -R; y <= R; y++)
+    for (let x = -R; x <= R; x++) {
+      if (b.at(cx + x, cy + y) !== P('#f6b8a0')) continue;
+      const band = (y + 40) % 7;
+      let c = band < 2 ? P('#ffd6b6') : band === 4 ? P('#e8a2a0') : 0;
+      if (x * 0.8 + y * 0.6 > 6 && tramado(x + 40, y + 40, Math.min(1, (x * 0.8 + y * 0.6 - 6) / 6))) c = P('#d090b0');
+      if (c) b.px(cx + x, cy + y, c);
+    }
+  b.rect(cx - 8, cy - 9, 3, 2, P('#fff0e0'));
+  anillo(true);
+  return b.canvas();
+}
+
+/** Luna grande con cráteres, fase gibosa tramada y carita dormida. */
+function lunaGrande() {
+  const S = 92;
+  const b = new Buf(S, S);
+  const c = S / 2;
+  const R = 30;
+  for (const [rr, k, h] of [[44, 0.14, '#3c3488'], [38, 0.26, '#564aa6'], [34, 0.4, '#7a6cc4']] as const)
+    for (let y = -rr; y <= rr; y++)
+      for (let x = -rr; x <= rr; x++) if (x * x + y * y <= rr * rr && tramado(x + c, y + c, k)) b.px(c + x, c + y, P(h));
+  b.disc(c, c, R + 1, P('#c8b0e4'));
+  b.disc(c, c, R, P('#fff4dc'));
+  const cuerpo = P('#fff4dc');
+  for (const [x, y, r] of [[-12, -10, 6], [10, -14, 4], [-16, 8, 4], [6, 13, 5], [16, 0, 3], [-3, -19, 2], [19, 12, 2], [-20, -2, 2]] as const) {
+    b.disc(c + x, c + y, r, P('#ecdcbc'));
+    b.disc(c + x + 1, c + y + 1, Math.max(1, r - 1), P('#f6e8cc'));
+    b.rect(c + x - r + 1, c + y - r, Math.max(1, r), 1, P('#dcc6a4'));
+  }
+  // Sombra de fase a la derecha, con borde tramado.
+  for (let y = -R; y <= R; y++) {
+    const w = Math.sqrt(R * R - y * y);
+    for (let x = -R; x <= R; x++) {
+      if (b.at(c + x, c + y) === 0 || x * x + y * y > R * R) continue;
+      const e = x - w * 0.42;
+      if (e > 3 || (e > -3 && tramado(c + x, c + y, (e + 3) / 6))) b.px(c + x, c + y, P('#d2bee6'));
+    }
+  }
+  void cuerpo;
+  // Carita.
+  const ojo = P('#a6889a');
+  for (const s of [-1, 1]) {
+    b.rect(c + s * 7 - 2, c + 2, 4, 1, ojo);
+    b.px(c + s * 7 - 3, c + 1, ojo);
+    b.px(c + s * 7 + 2, c + 1, ojo);
+    b.rect(c + s * 10 - 2, c + 6, 4, 2, P('#ffc4c8'));
+  }
+  b.rect(c - 1, c + 7, 3, 1, ojo);
+  b.rect(c - 18, c - 20, 4, 2, P('#ffffff'));
+  b.rect(c - 20, c - 17, 2, 3, P('#ffffff'));
+  return b.canvas();
+}
+
+/** Sol de gran altura: más grande, halo amplio y núcleo casi blanco. */
+function solAlto() {
+  const S = 104;
+  const b = new Buf(S, S);
+  const c = S / 2;
+  for (const [rr, k, h] of [[50, 0.14, '#fff8dc'], [42, 0.28, '#fffae4'], [33, 0.5, '#fffcec']] as const)
+    for (let y = -rr; y <= rr; y++)
+      for (let x = -rr; x <= rr; x++) if (x * x + y * y <= rr * rr && tramado(x + c, y + c, k)) b.px(c + x, c + y, P(h));
+  for (let i = 0; i < 12; i++) {
+    const ang = (i / 12) * TAU;
+    b.disc(c + Math.cos(ang) * 25, c + Math.sin(ang) * 25, i % 2 ? 2 : 3, P('#ffe888'));
+  }
+  b.disc(c, c, 18, P('#ffb848'));
+  b.disc(c, c, 17, P('#fff09a'));
+  b.disc(c - 2, c - 2, 12, P('#fffad8'));
+  b.rect(c - 9, c - 10, 4, 2, P('#ffffff'));
+  const ojo = P('#d08a3a');
+  for (const s of [-1, 1]) {
+    b.rect(c + s * 6 - 1, c + 2, 3, 1, ojo);
+    b.px(c + s * 6 - 2, c + 1, ojo);
+    b.px(c + s * 6 + 2, c + 1, ojo);
+    b.rect(c + s * 9 - 1, c + 5, 3, 1, P('#ffa088'));
+  }
+  b.rect(c - 1, c + 6, 3, 1, ojo);
+  return b.canvas();
+}
+
+/** Platillo volador con cúpula y un marcianito; las luces se pintan por cuadro. */
+function ovni(chico: boolean) {
+  if (chico) {
+    const b = new Buf(15, 9);
+    b.disc(7, 3, 2, P('#9ef0dc'));
+    b.oval(7, 5, 6, 1, P('#c8c2ec'));
+    b.rect(2, 6, 11, 1, P('#8e88c0'));
+    b.outline(P('#5a5296'));
+    return b.canvas();
+  }
+  const b = new Buf(32, 19);
+  // Cúpula.
+  for (let y = -6; y <= 0; y++) {
+    const w = Math.round(Math.sqrt(36 - y * y + 3));
+    b.rect(16 - w, 9 + y, w * 2 + 1, 1, P('#a6eedc'));
+  }
+  b.rect(14, 6, 4, 3, P('#94e08a'));
+  b.rect(15, 5, 2, 1, P('#94e08a'));
+  b.px(14, 7, P('#2e3a5a'));
+  b.px(17, 7, P('#2e3a5a'));
+  b.rect(12, 4, 2, 2, P('#eafffa'));
+  b.px(11, 6, P('#eafffa'));
+  // Platillo.
+  b.oval(16, 12, 14, 3, P('#d6d2f2'));
+  b.rect(4, 11, 25, 1, P('#f6f4ff'));
+  b.rect(4, 13, 25, 2, P('#a8a2d4'));
+  b.oval(16, 15, 6, 1, P('#8a84bc'));
+  b.outline(P('#625a9c'));
+  return b.canvas();
+}
+
+/** Rayo del ovni: un cono tramado de luz menta. */
+function rayo() {
+  const W = 46;
+  const H = 64;
+  const b = new Buf(W, H);
+  const c1 = P('#d4ffee');
+  const c0 = P('#9ef0d8');
+  for (let y = 0; y < H; y++) {
+    const w = 4 + (y / H) * 18;
+    const k = 0.75 * (1 - y / H) + 0.1;
+    for (let x = Math.round(W / 2 - w); x <= Math.round(W / 2 + w); x++) {
+      const borde = Math.abs(x - W / 2) > w - 2;
+      if (tramado(x, y, borde ? k * 1.2 : k)) b.px(x, y, borde || (y + x) % 9 < 2 ? c1 : c0);
+    }
+  }
+  return b.canvas();
+}
+
+function satelite() {
+  const b = new Buf(24, 11);
+  const panel = P('#7ea8f0');
+  const reja = P('#4c68b8');
+  for (const x0 of [1, 15]) {
+    b.rect(x0, 3, 8, 5, reja);
+    for (let y = 4; y < 7; y++) for (let x = x0 + 1; x < x0 + 7; x++) if (x % 2 === 0 || y === 5) b.px(x, y, panel);
+  }
+  b.rect(9, 5, 6, 1, P('#a8a0c8'));
+  b.rect(10, 3, 4, 5, P('#ffd68a'));
+  b.rect(10, 6, 4, 2, P('#d8a050'));
+  b.rect(11, 1, 1, 2, P('#c8c0e0'));
+  b.px(11, 0, P('#ffffff'));
+  return b.canvas();
+}
+
+/** Cometa: cabeza brillante y dos colas pastel que se deshacen en tramado. */
+function cometa() {
+  const W = 96;
+  const H = 22;
+  const b = new Buf(W, H);
+  const menta = P('#a6f2dc');
+  const rosa = P('#ffb4d6');
+  const lila = P('#d6c8ff');
+  for (let x = 8; x < W; x++) {
+    const k = (x - 8) / (W - 8);
+    const yc = 11 - k * 9;
+    const w = 1 + k * 4;
+    for (let y = Math.round(yc - w); y <= Math.round(yc + w); y++) {
+      const dens = (1 - k) * (1 - Math.abs(y - yc) / (w + 1)) * 1.3;
+      if (tramado(x, y, dens)) b.px(x, y, y < yc - 1 ? menta : y > yc + 1 ? rosa : lila);
+    }
+  }
+  b.disc(6, 11, 4, P('#bff4ff'));
+  b.disc(6, 11, 3, P('#f4fdff'));
+  b.rect(5, 10, 2, 2, P('#ffffff'));
+  return b.canvas();
+}
+
+/** Avión de pasajeros lejano (mira a la derecha) y su estela de condensación. */
+function avionLejano() {
+  const b = new Buf(34, 12);
+  b.rect(4, 5, 26, 4, P('#ffffff'));
+  b.rect(29, 6, 3, 3, P('#ffffff'));
+  b.px(32, 7, P('#ffffff'));
+  for (let x = 8; x < 28; x += 2) b.px(x, 6, P('#8cc4f0'));
+  b.rect(29, 6, 2, 1, P('#6aa4e0'));
+  b.rect(3, 1, 4, 4, P('#ff9ab4'));
+  b.rect(2, 1, 2, 2, P('#ff9ab4'));
+  b.rect(1, 6, 4, 1, P('#ff9ab4'));
+  b.rect(13, 9, 9, 1, P('#d6dcf0'));
+  b.rect(15, 10, 6, 1, P('#d6dcf0'));
+  b.rect(17, 8, 3, 2, P('#c0c8e4'));
+  b.rect(4, 8, 26, 1, P('#e4e8f6'));
+  b.outline(P('#8a96c8'));
+  const e = new Buf(170, 4);
+  const blanco = P('#ffffff');
+  for (let x = 0; x < 170; x++) {
+    const k = x / 170;
+    for (let y = 0; y < 4; y++) {
+      const borde = y === 0 || y === 3;
+      if (tramado(x, y, borde ? k * k * 0.5 : k * 0.95)) e.px(x, y, blanco);
+    }
+  }
+  return { avion: b.canvas(), estela: e.canvas() };
+}
+
 /* ── Escenario fijo (posiciones de nubes, globos, estrellas) ─────────────── */
 
 const NUBE_W = 2600;
@@ -841,8 +1357,27 @@ const LUCIERNAGAS: { x: number; e: number; f: number }[] = (() => {
   const r = rng(66);
   return Array.from({ length: 22 }, () => ({ x: r() * 1, e: 4 + r() * 30, f: r() * 10 }));
 })();
+/** Cirros altos: `el` es la altitud de cámara a la que pasan por el centro. */
+const CIRROS_ALTOS = mkNubes(41, 9, 620, 1650, 4, 1.2);
+const TITILA_ALTA: { x: number; y: number; f: number; c: number }[] = (() => {
+  const r = rng(57);
+  return Array.from({ length: 26 }, () => ({ x: r(), y: r(), f: r() * 10, c: Math.floor(r() * 4) }));
+})();
+const COLOR_TITILA = ['#ffffff', '#fff0c4', '#ffd6ec', '#d4f4ff'];
+const LUCES_OVNI = ['#ff9ac8', '#fff09a', '#9ef0d8', '#c8b4ff'];
+const OVNIS_LEJOS: { x: number; y: number; f: number }[] = [
+  { x: 380, y: 0.42, f: 0 },
+  { x: 1150, y: 0.2, f: 2.1 },
+];
+/** Nebulosas y galaxia: [sprite, x en el mundo, paralaje x, fila (fracción de vh), altitud ancla, paralaje y]. */
+const DECOR: [number, number, number, number, number, number][] = [
+  [0, 260, 0.03, 0.34, 2300, 0.08],
+  [1, 920, 0.03, 0.56, 2650, 0.08],
+  [2, 1330, 0.03, 0.3, 2050, 0.08],
+  [3, 640, 0.05, 0.24, 2450, 0.12],
+];
 
-/* ── Caché por ambiente ─────────────────────────────────────────────────── */
+/* ── Caché ──────────────────────────────────────────────────────────────── */
 
 type Capas = {
   cielo: { cv: Cv; top: string; bottom: string };
@@ -866,8 +1401,35 @@ type Capas = {
   pajaro: string | null;
 };
 
-type Tarea = (c: Partial<Capas>) => void;
-const tareas = (a: Ambiente): Tarea[] => [
+/** Capas de gran altura que dependen del ambiente. */
+type Alto = {
+  cielo: { cv: Cv; top: string };
+  mar: ReturnType<typeof capaMar> & { fondo: string };
+  cirros: Cv[];
+  tierraBuf: Buf;
+  tierra: { cv: Cv; fondo: string };
+};
+
+/** Capas del espacio, iguales en todos los ambientes. */
+type Espacio = {
+  estrellas: Cv[];
+  deco: Cv[];
+  planeta: Cv;
+  luna: Cv;
+  sol: Cv;
+  ovni: Cv;
+  ovniChico: Cv;
+  rayo: Cv;
+  satelite: Cv;
+  cometa: Cv;
+  avion: Cv;
+  estela: Cv;
+  aurora: Cv;
+};
+
+type Tarea<T> = (c: Partial<T>) => void;
+
+const tareas = (a: Ambiente): Tarea<Capas>[] => [
   (c) => (c.cielo = capaCielo(a)),
   (c) => (c.estrellas = capaEstrellas(a)),
   (c) => (c.aurora = a === 'noche' ? capaAurora() : null),
@@ -897,48 +1459,110 @@ const tareas = (a: Ambiente): Tarea[] => [
   },
 ];
 
-const listo = new Map<Ambiente, Capas>();
-const parcial = new Map<Ambiente, { c: Partial<Capas>; n: number }>();
-const AMBIENTES: Ambiente[] = ['dia', 'tarde', 'noche'];
+const TIERRA_W = 1600;
+const TIERRA_H = 200;
+const TIERRA_AP = 22;
 
-function paso(a: Ambiente): boolean {
-  if (listo.has(a)) return false;
-  let p = parcial.get(a);
-  if (!p) parcial.set(a, (p = { c: {}, n: 0 }));
-  const ts = tareas(a);
-  ts[p.n++](p.c);
-  if (p.n >= ts.length) {
-    listo.set(a, p.c as Capas);
-    parcial.delete(a);
+const tareasAlto = (a: Ambiente): Tarea<Alto>[] => [
+  (c) => (c.cielo = capaCieloAlto(a)),
+  (c) => (c.mar = { ...capaMar(a), fondo: css(palNube(a, 0.1).cuerpo) }),
+  (c) => (c.cirros = capaCirrosAltos(a)),
+  (c) => {
+    c.tierraBuf = new Buf(TIERRA_W, TIERRA_H);
+    capaTierra(a, 0, 50, c.tierraBuf);
+  },
+  (c) => capaTierra(a, 50, 100, c.tierraBuf!),
+  (c) => capaTierra(a, 100, 150, c.tierraBuf!),
+  (c) => {
+    capaTierra(a, 150, TIERRA_H, c.tierraBuf!);
+    c.tierra = { cv: c.tierraBuf!.canvas(), fondo: TIERRA[a].mar[3] };
+  },
+];
+
+const tareasEspacio = (): Tarea<Espacio>[] => [
+  (c) => (c.estrellas = [0, 1, 2].map(campoEstrellas)),
+  (c) => (c.deco = [nebulosa(611, ['#3c2c74', '#6a428e', '#b46aa8', '#f2a6c8'])]),
+  (c) => c.deco!.push(nebulosa(612, ['#21305e', '#2e5a7a', '#4e9a98', '#9ae6c8'])),
+  (c) => c.deco!.push(nebulosa(613, ['#2e2870', '#4c4296', '#7c6cc8', '#c4b0f0'], 200, 120)),
+  (c) => c.deco!.push(galaxia()),
+  (c) => ((c.planeta = planeta()), (c.luna = lunaGrande()), (c.sol = solAlto())),
+  (c) => {
+    c.ovni = ovni(false);
+    c.ovniChico = ovni(true);
+    c.rayo = rayo();
+    c.satelite = satelite();
+    c.cometa = cometa();
+    const av = avionLejano();
+    c.avion = av.avion;
+    c.estela = av.estela;
+  },
+  (c) => (c.aurora = capaAurora()),
+];
+
+/** Una lista de tareas de pintura que se hace de a una. */
+class Obra<T> {
+  private c: Partial<T> = {};
+  private n = 0;
+  hecho: T | null = null;
+  constructor(private readonly ts: Tarea<T>[]) {}
+  paso(): boolean {
+    if (this.hecho) return false;
+    this.ts[this.n++](this.c);
+    if (this.n >= this.ts.length) this.hecho = this.c as T;
+    return true;
   }
-  return true;
+  todo(): T {
+    while (!this.hecho) this.paso();
+    return this.hecho;
+  }
 }
-function capas(a: Ambiente): Capas {
-  while (!listo.has(a)) paso(a);
-  return listo.get(a)!;
+
+const AMBIENTES: Ambiente[] = ['dia', 'tarde', 'noche'];
+const BAJO = {} as Record<Ambiente, Obra<Capas>>;
+const ALTO = {} as Record<Ambiente, Obra<Alto>>;
+for (const a of AMBIENTES) {
+  BAJO[a] = new Obra(tareas(a));
+  ALTO[a] = new Obra(tareasAlto(a));
 }
+const ESPACIO = new Obra(tareasEspacio());
+const ORDEN: Obra<unknown>[] = [BAJO.dia, BAJO.tarde, BAJO.noche, ESPACIO, ALTO.dia, ALTO.tarde, ALTO.noche] as Obra<unknown>[];
 
 /**
- * Pinta por adelantado los ambientes que falten, de a poco (unos ms por
- * llamada). `dibujarFondo` ya lo hace solo; sirve para llamarlo en momentos
- * tranquilos (menú, pausa).
+ * Pinta por adelantado lo que falte, de a poco (unos ms por llamada; cada
+ * tarea sola tarda menos de ~10 ms). `dibujarFondo` ya lo hace solo; sirve
+ * para llamarlo en momentos tranquilos (menú, pausa).
  */
 export function precalentarFondo(presupuestoMs = 6) {
   const t0 = performance.now();
-  for (const a of AMBIENTES) while (!listo.has(a)) {
-    paso(a);
-    if (performance.now() - t0 > presupuestoMs) return false;
-  }
+  for (const ob of ORDEN)
+    while (!ob.hecho) {
+      ob.paso();
+      if (performance.now() - t0 > presupuestoMs) return false;
+    }
   return true;
 }
 
 /* ── Dibujo por cuadro ──────────────────────────────────────────────────── */
 
+let VH = 0;
+
 function tira(g: Ctx, c: Cv, off: number, yBase: number, vw: number) {
   const W = c.width;
-  let x = -mod(Math.round(off), W);
   const y = Math.round(yBase - c.height);
+  if (y >= VH || y + c.height <= 0) return;
+  let x = -mod(Math.round(off), W);
   for (; x < vw; x += W) g.drawImage(c, x, y);
+}
+
+/** Repite `c` en x e y sobre las filas [0, y1), desplazado (ox, oy). */
+function mosaico(g: Ctx, c: Cv, ox: number, oy: number, vw: number, y1: number) {
+  const W = c.width;
+  const H = c.height;
+  const x0 = -mod(Math.round(ox), W);
+  for (let y = -mod(Math.round(oy), H); y < y1; y += H) {
+    const h = Math.min(H, y1 - y);
+    for (let x = x0; x < vw; x += W) g.drawImage(c, 0, 0, W, h, x, y, W, h);
+  }
 }
 
 function nubes(g: Ctx, lista: Nube[], spr: Cv[], par: number, base: number, o: OpcionesFondo, drift: number) {
@@ -953,79 +1577,393 @@ function nubes(g: Ctx, lista: Nube[], spr: Cv[], par: number, base: number, o: O
   }
 }
 
+/** Sprite de fondo lejano: x envuelto en el mundo, y anclado a una altitud de cámara. */
+function pon(g: Ctx, o: OpcionesFondo, s: Cv, X: number, kx: number, fy: number, A: number, k: number) {
+  const x = Math.round(mod(X - o.camX * kx, 1500) - 200);
+  if (x > o.vw || x + s.width < 0) return;
+  const y = Math.round(o.vh * fy + (o.camY - A) * k - s.height / 2);
+  if (y > o.vh || y + s.height < 0) return;
+  g.drawImage(s, x, y);
+}
+
+/** Bandada en V de `n` pajaritos que aletean. */
+function bandada(g: Ctx, col: string, bx: number, by: number, t: number, n: number) {
+  g.fillStyle = col;
+  for (let i = 0; i < n; i++) {
+    const side = i === 0 ? 0 : i % 2 ? 1 : -1;
+    const rank = Math.ceil(i / 2);
+    const x = Math.round(bx + rank * 7);
+    const y = by + side * rank * 5 + rank * 1;
+    if (Math.floor(t * 5 + i * 1.3) % 2) {
+      g.fillRect(x - 2, y - 1, 1, 1);
+      g.fillRect(x + 2, y - 1, 1, 1);
+      g.fillRect(x - 1, y, 1, 1);
+      g.fillRect(x + 1, y, 1, 1);
+      g.fillRect(x, y + 1, 1, 1);
+    } else {
+      g.fillRect(x - 2, y + 1, 2, 1);
+      g.fillRect(x + 1, y + 1, 2, 1);
+      g.fillRect(x, y, 1, 2);
+    }
+  }
+}
+
+/** Estrella fugaz / meteorito: cabeza y estela diagonal de 2 px. */
+function fugaz(g: Ctx, x0: number, y0: number, cab: string, cola: string, largo: number) {
+  g.fillStyle = cab;
+  g.fillRect(x0, y0, 2, 1);
+  g.fillStyle = cola;
+  for (let i = 1; i < largo; i++) g.fillRect(x0 - i * 2, y0 - Math.round(i * 0.85), 2, 1);
+}
+
+/** Luces del ovni grande, que corren por el borde del platillo. */
+function lucesOvni(g: Ctx, x: number, y: number, t: number) {
+  for (let i = 0; i < 5; i++) {
+    g.fillStyle = LUCES_OVNI[(i + Math.floor(t * 6)) % 4];
+    g.fillRect(x + 6 + i * 5, y + 12, 2, 1);
+  }
+}
+
 export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
   const { vw, vh, camX, camY, ambiente: a } = o;
-  const C = capas(a);
+  VH = vh;
   const t = o.quieto ? 0 : o.t;
   const hz = Math.round(o.horizonte);
   /** Línea base de una capa con paralaje vertical k (0.5 = el horizonte). */
   const ys = (k: number) => Math.round(hz + camY * (k - 0.5));
   g.imageSmoothingEnabled = false;
 
-  // Cielo.
-  const sky = C.cielo;
-  const skyTop = hz - SKY_H;
-  if (skyTop > 0) {
-    g.fillStyle = sky.top;
-    g.fillRect(0, 0, vw, skyTop);
-  }
-  for (let x = 0; x < vw; x += sky.cv.width) g.drawImage(sky.cv, x, skyTop);
-  if (hz < vh) {
-    g.fillStyle = sky.bottom;
-    g.fillRect(0, hz, vw, vh - hz);
-  }
+  // Altitud real de la fila de arriba, la de abajo y el centro de la vista.
+  const cy = Math.round(camY);
+  const altTop = cy + vh - 16;
+  const altBot = cy - 15;
+  const altMid = cy + vh * 0.5;
+  const C = BAJO[a].todo();
+  const alto = altTop > ALTO_LO - 30;
+  const H = alto ? ALTO[a].todo() : null;
+  const E = alto ? ESPACIO.todo() : null;
 
-  // Estrellas, aurora y estrellas que titilan.
-  const yEst = ys(0.2);
-  if (C.estrellas) tira(g, C.estrellas, camX * 0.02, yEst, vw);
-  if (C.aurora) {
-    const ya = ys(0.15) - 196;
-    g.globalAlpha = 0.4 + 0.1 * Math.sin(t * 0.5);
-    tira(g, C.aurora, camX * 0.03 + t * 3, ya, vw);
-    g.globalAlpha = 1;
-  }
-  if (a === 'noche') {
-    g.fillStyle = '#fffbe8';
-    for (let i = 0; i < TITILA.length; i++) {
-      const s = TITILA[i];
-      const x = Math.round(mod(s.x * (vw + 20) - camX * 0.02, vw + 20)) - 10;
-      const y = yEst - Math.round(s.el);
-      if (y < -2 || y > vh) continue;
-      const ph = Math.sin(t * 1.7 + s.f * 6);
-      g.fillRect(x, y, 1, 1);
-      if (ph > -0.2) {
-        g.fillRect(x - 1, y, 3, 1);
-        g.fillRect(x, y - 1, 1, 3);
+  // Cielo bajo (anclado al horizonte), mientras se vea.
+  if (altBot < ALTO_OPACO) {
+    const sky = C.cielo;
+    const skyTop = hz - SKY_H;
+    if (skyTop > 0) {
+      g.fillStyle = sky.top;
+      g.fillRect(0, 0, vw, skyTop);
+    }
+    if (skyTop < vh && hz > 0) for (let x = 0; x < vw; x += sky.cv.width) g.drawImage(sky.cv, x, skyTop);
+    if (hz < vh) {
+      g.fillStyle = sky.bottom;
+      g.fillRect(0, hz, vw, vh - hz);
+    }
+
+    // Estrellas, aurora y estrellas que titilan.
+    const yEst = ys(0.2);
+    if (C.estrellas) tira(g, C.estrellas, camX * 0.02, yEst, vw);
+    if (C.aurora) {
+      const ya = ys(0.15) - 196;
+      g.globalAlpha = 0.4 + 0.1 * Math.sin(t * 0.5);
+      tira(g, C.aurora, camX * 0.03 + t * 3, ya, vw);
+      g.globalAlpha = 1;
+    }
+    if (a === 'noche') {
+      g.fillStyle = '#fffbe8';
+      for (let i = 0; i < TITILA.length; i++) {
+        const s = TITILA[i];
+        const x = Math.round(mod(s.x * (vw + 20) - camX * 0.02, vw + 20)) - 10;
+        const y = yEst - Math.round(s.el);
+        if (y < -2 || y > vh) continue;
+        const ph = Math.sin(t * 1.7 + s.f * 6);
+        g.fillRect(x, y, 1, 1);
+        if (ph > -0.2) {
+          g.fillRect(x - 1, y, 3, 1);
+          g.fillRect(x, y - 1, 1, 3);
+        }
+        if (ph > 0.75) {
+          g.fillRect(x - 2, y, 5, 1);
+          g.fillRect(x, y - 2, 1, 5);
+        }
       }
-      if (ph > 0.75) {
-        g.fillRect(x - 2, y, 5, 1);
-        g.fillRect(x, y - 2, 1, 5);
+      // Estrella fugaz de vez en cuando.
+      if (!o.quieto) {
+        const ciclo = Math.floor(t / 7);
+        const f = t / 7 - ciclo;
+        if (f < 0.1) {
+          const k = f / 0.1;
+          const sx = ((ciclo * 397) % 100) / 100;
+          fugaz(g, Math.round(vw * (0.15 + sx * 0.6) + k * 70), yEst - 330 + ((ciclo * 53) % 120) + Math.round(k * 30), '#ffffff', '#e6dcff', 6);
+        }
       }
     }
-    // Estrella fugaz de vez en cuando.
-    if (!o.quieto) {
-      const ciclo = Math.floor(t / 7);
-      const f = t / 7 - ciclo;
-      if (f < 0.1) {
-        const k = f / 0.1;
-        const sx = ((ciclo * 397) % 100) / 100;
-        const x0 = Math.round(vw * (0.15 + sx * 0.6) + k * 70);
-        const y0 = yEst - 330 + ((ciclo * 53) % 120) + Math.round(k * 30);
-        g.fillStyle = '#ffffff';
-        g.fillRect(x0, y0, 2, 1);
-        g.fillStyle = '#e6dcff';
-        for (let i = 1; i < 6; i++) g.fillRect(x0 - i * 2, y0 - Math.round(i * 0.85), 2, 1);
+  }
+
+  // Cielo alto, indexado por altitud: se funde tramado con el de abajo.
+  if (H) {
+    const cv = H.cielo.cv;
+    let sy = ALTO_HI - altTop;
+    let dy = 0;
+    if (sy < 0) {
+      g.fillStyle = H.cielo.top;
+      g.fillRect(0, 0, vw, Math.min(vh, -sy));
+      dy = -sy;
+      sy = 0;
+    }
+    const h = Math.min(vh - dy, ALTO_H - sy);
+    if (h > 0) for (let x = 0; x < vw; x += cv.width) g.drawImage(cv, 0, sy, cv.width, h, x, dy, cv.width, h);
+  }
+
+  // Estrellas del espacio (3 profundidades), nebulosas y galaxia.
+  const kEst = E ? ss(1250, 2050, altMid) : 0;
+  const kEsp = E ? ss(1750, 2150, altMid) : 0;
+  if (E && kEst > 0) {
+    const yLim = Math.min(vh, altTop - 1200);
+    if (yLim > 0) {
+      g.globalAlpha = kEst;
+      mosaico(g, E.estrellas[0], camX * 0.02, 40 - camY * 0.03, vw, yLim);
+      mosaico(g, E.estrellas[1], camX * 0.05 + 97, 101 - camY * 0.07, vw, yLim);
+      if (kEsp > 0) {
+        g.globalAlpha = kEsp * 0.9;
+        for (let i = 0; i < DECOR.length; i++) {
+          const d = DECOR[i];
+          pon(g, o, E.deco[d[0]], d[1], d[2], d[3], d[4], d[5]);
+        }
+        g.globalAlpha = kEst;
       }
+      mosaico(g, E.estrellas[2], camX * 0.1 + 31, 17 - camY * 0.14, vw, yLim);
+      // Estrellas que titilan.
+      for (let i = 0; i < TITILA_ALTA.length; i++) {
+        const s = TITILA_ALTA[i];
+        const x = Math.round(mod(s.x * (vw + 20) - camX * 0.06, vw + 20)) - 10;
+        const y = Math.round(mod(s.y * (vh + 20) + camY * 0.1, vh + 20)) - 10;
+        if (y >= yLim || y < -3) continue;
+        const ph = Math.sin(t * 1.9 + s.f * 6);
+        g.fillStyle = COLOR_TITILA[s.c];
+        g.fillRect(x, y, 1, 1);
+        if (ph > -0.1) {
+          g.fillRect(x - 1, y, 3, 1);
+          g.fillRect(x, y - 1, 1, 3);
+        }
+        if (ph > 0.8) {
+          g.fillRect(x - 2, y, 5, 1);
+          g.fillRect(x, y - 2, 1, 5);
+        }
+      }
+      g.globalAlpha = 1;
     }
   }
 
-  // Sol, sol poniente o luna.
+  // Aurora pastel de la estratósfera.
+  if (E) {
+    const kA = ss(1300, 1600, altMid) * (1 - ss(1850, 2150, altMid));
+    if (kA > 0.02) {
+      g.globalAlpha = kA * (0.28 + 0.05 * Math.sin(t * 0.5));
+      tira(g, E.aurora, camX * 0.03 + t * 3, Math.round(vh * 0.5 + (cy - 1750) * 0.3), vw);
+      g.globalAlpha = 1;
+    }
+  }
+
+  // Sol, sol poniente o luna: bajan con la cámara solo al principio.
   {
+    const cE = camY > 0 ? 200 * (1 - Math.exp(-camY / 200)) : camY;
+    const ysA = (k: number) => Math.round(hz - camY * 0.5 + cE * k);
     const s = C.astro;
     const x = Math.round(vw * (a === 'tarde' ? 0.7 : 0.8) - s.width / 2);
-    const cy = a === 'tarde' ? ys(0.3) - 100 : a === 'dia' ? ys(0.25) - 168 : ys(0.22) - 172;
-    g.drawImage(s, x, cy - s.height / 2);
+    const cyA = a === 'tarde' ? ysA(0.3) - 100 : a === 'dia' ? ysA(0.25) - 168 : ysA(0.22) - 172;
+    const kSol = a === 'dia' && E ? ss(300, 1000, altMid) : 0;
+    const kLuna = a === 'noche' ? 1 - ss(1500, 1950, altMid) : 1;
+    if (kLuna > 0 && kSol < 1) {
+      g.globalAlpha = kLuna;
+      g.drawImage(s, x, Math.round(cyA - s.height / 2));
+      g.globalAlpha = 1;
+    }
+    if (E && kSol > 0) {
+      g.globalAlpha = kSol;
+      const so = E.sol;
+      g.drawImage(so, Math.round(vw * 0.8 - so.width / 2), Math.round(cyA - so.height / 2));
+      g.globalAlpha = 1;
+    }
   }
+
+  // Planeta con anillos, Luna grande, cometa, satélite y meteoritos.
+  if (E && kEsp > 0) {
+    g.globalAlpha = kEsp;
+    const dX = 1600 - camX;
+    const pl = E.planeta;
+    g.drawImage(pl, Math.round(vw * 0.13 + dX * 0.03 - pl.width / 2), Math.round(vh * 0.3 + (cy - 2300) * 0.12 - pl.height / 2));
+    const lu = E.luna;
+    g.drawImage(lu, Math.round(vw * 0.58 + dX * 0.05 - lu.width / 2), Math.round(vh * 0.24 + (cy - 2650) * 0.18 - lu.height / 2));
+    if (!o.quieto) {
+      const ciclo = Math.floor(t / 34);
+      const f = t / 34 - ciclo;
+      if (f < 0.7) {
+        const k = f / 0.7;
+        const co = E.cometa;
+        g.drawImage(co, Math.round(vw + 40 - k * (vw + 180)), Math.round(vh * (0.05 + ((ciclo * 3) % 5) * 0.03) + k * vh * 0.2));
+      }
+    }
+    g.globalAlpha = 1;
+  }
+  if (E && !o.quieto) {
+    const kSat = ss(1550, 1850, altMid);
+    if (kSat > 0) {
+      const f = mod(t / 23, 1);
+      if (f < 0.55) {
+        const k = f / 0.55;
+        const sa = E.satelite;
+        const x = Math.round(vw + 20 - k * (vw + 50));
+        const y = Math.round(vh * 0.1 + k * vh * 0.07);
+        g.globalAlpha = kSat;
+        g.drawImage(sa, x, y);
+        if (Math.floor(t * 2) % 2) {
+          g.fillStyle = '#ff7a9a';
+          g.fillRect(x + 11, y, 1, 1);
+        }
+        g.globalAlpha = 1;
+      }
+    }
+    if (kEst > 0.15) {
+      const ciclo = Math.floor(t / 4.3);
+      const f = t / 4.3 - ciclo;
+      if (f < 0.09) {
+        const k = f / 0.09;
+        const sx = ((ciclo * 397) % 100) / 100;
+        const sy = ((ciclo * 211) % 100) / 100;
+        g.globalAlpha = kEst;
+        fugaz(g, Math.round(vw * (0.1 + sx * 0.7) + k * 80), Math.round(vh * (0.05 + sy * 0.4) + k * 34), '#ffffff', ciclo % 2 ? '#ffc8e4' : '#bfeeff', 7);
+        g.globalAlpha = 1;
+      }
+    }
+  }
+
+  // Cirros altos (mar de nubes y estratósfera).
+  if (H) {
+    for (let i = 0; i < CIRROS_ALTOS.length; i++) {
+      const n = CIRROS_ALTOS[i];
+      const s = H.cirros[n.i];
+      const y = Math.round(vh * 0.4 + (cy - n.el) * 0.4);
+      if (y > vh || y + s.height < 0) continue;
+      const x = mod(n.x - camX * 0.05 - t * n.v, NUBE_W) - 170;
+      if (x > vw) continue;
+      g.drawImage(s, Math.round(x), y);
+    }
+  }
+
+  // La Tierra: un arco con atmósfera, abajo, desde la estratósfera.
+  if (H) {
+    const top = vh * 0.68 + (1 - ss(1150, 1750, cy)) * vh * 0.6 + ss(1900, 2900, cy) * vh * 0.12;
+    const y = Math.round(top) - TIERRA_AP;
+    if (y < vh) {
+      g.drawImage(H.tierra.cv, Math.round(vw / 2 - TIERRA_W / 2 + (1600 - camX) * 0.02), y);
+      if (y + TIERRA_H < vh) {
+        g.fillStyle = H.tierra.fondo;
+        g.fillRect(0, y + TIERRA_H, vw, vh - y - TIERRA_H);
+      }
+    }
+  }
+
+  // Todo el paisaje de abajo (solo si asoma).
+  if (ys(0.2) - 380 < vh) dibujarCampo(g, o, C, t, ys);
+
+  // Mar de nubes: sube a tapar el campo y se hunde al llegar a la estratósfera.
+  if (H) {
+    const m = H.mar;
+    const top = Math.round(vh * 0.6 + (1 - ss(200, 750, cy)) * vh * 0.45 + ss(1250, 1800, cy) * vh * 0.55);
+    if (top < vh) {
+      tira(g, m.lejos, camX * 0.04 + t, top + m.lejos.height, vw);
+      const yc = top + 14;
+      const cc = m.cerca;
+      tira(g, cc, camX * 0.09 + t * 2.2, yc + cc.height, vw);
+      // Debajo, la textura de lomos se repite hacia abajo.
+      const sy = cc.height - m.periodo;
+      const off = -mod(Math.round(camX * 0.09 + t * 2.2), cc.width);
+      for (let y = yc + cc.height; y < vh; y += m.periodo)
+        for (let x = off; x < vw; x += cc.width) g.drawImage(cc, 0, sy, cc.width, m.periodo, x, y, cc.width, m.periodo);
+    }
+  }
+
+  // Cosas que vuelan sobre el mar de nubes: globo, aves y un avión lejano.
+  if (H && E) {
+    const gl = C.globos[2];
+    const yg = Math.round(vh * 0.45 + (cy - 880) * 0.6 + Math.sin(t * 0.8) * 2);
+    if (yg < vh && yg + gl.height > 0) {
+      const x = mod(700 - camX * 0.2 - t * 2, 2000) - 30;
+      if (x < vw) g.drawImage(gl, Math.round(x), yg);
+    }
+    if (C.pajaro) {
+      for (let j = 0; j < 2; j++) {
+        const by = Math.round(vh * 0.4 + (cy - (760 + j * 330)) * 0.5 + Math.sin(t * 0.7 + j) * 4);
+        if (by < -20 || by > vh + 20) continue;
+        const bx = mod(1200 + j * 900 - t * 14 - camX * 0.3, 2200) - 200;
+        if (bx > -40 && bx < vw + 40) bandada(g, C.pajaro, bx, by, t, 3 + j * 2);
+      }
+    }
+    const ya = Math.round(vh * 0.35 + (cy - 1120) * 0.45);
+    if (ya > -20 && ya < vh) {
+      const av = E.avion;
+      const x = Math.round(mod(t * 10 - camX * 0.12 + 300, 2000) - 200);
+      if (x > -av.width && x - E.estela.width < vw) {
+        g.globalAlpha = 0.75;
+        g.drawImage(E.estela, x - E.estela.width + 2, ya + 5);
+        g.globalAlpha = 1;
+        g.drawImage(av, x, ya);
+        if (Math.floor(t * 1.5) % 2) {
+          g.fillStyle = '#ff6a8a';
+          g.fillRect(x + 17, ya + 11, 1, 1);
+        }
+      }
+    }
+  }
+
+  // Ovnis: dos lejanos que flotan y uno que cruza (a veces con su rayo).
+  if (E && kEsp > 0.05) {
+    g.globalAlpha = kEsp;
+    const oc = E.ovniChico;
+    for (let i = 0; i < OVNIS_LEJOS.length; i++) {
+      const u = OVNIS_LEJOS[i];
+      const x = Math.round(mod(u.x - camX * 0.2 + Math.sin(t * 0.4 + u.f) * 20, 1500) - 200);
+      if (x < -20 || x > vw) continue;
+      const y = Math.round(vh * u.y + (cy - 2400) * 0.25 + Math.sin(t * 1.3 + u.f) * 3);
+      g.drawImage(oc, x, y);
+      g.fillStyle = LUCES_OVNI[(Math.floor(t * 3) + i) % 4];
+      g.fillRect(x + 3 + (Math.floor(t * 3) % 3) * 4, y + 6, 1, 1);
+    }
+    if (!o.quieto) {
+      const PER = 13;
+      const ciclo = Math.floor(t / PER);
+      const k = (t / PER - ciclo) / 0.62;
+      if (k < 1) {
+        const pos = 0.5 * ss(0, 0.38, k) + 0.5 * ss(0.62, 1, k);
+        const dir = ciclo % 2 ? -1 : 1;
+        const ov = E.ovni;
+        const x = Math.round(dir > 0 ? -40 + pos * (vw + 80) : vw + 40 - pos * (vw + 80)) - 16;
+        const y = Math.round(vh * (0.14 + ((ciclo * 7) % 5) * 0.05) + Math.sin(t * 3) * 2);
+        if (k > 0.4 && k < 0.6 && ciclo % 3 !== 1) {
+          const kr = Math.min(1, (k - 0.4) * 25, (0.6 - k) * 25);
+          g.globalAlpha = kEsp * kr * (0.55 + 0.15 * Math.sin(t * 20));
+          g.drawImage(E.rayo, x + 16 - 23, y + 16);
+          g.globalAlpha = kEsp;
+        }
+        g.drawImage(ov, x, y);
+        lucesOvni(g, x, y, t);
+      }
+    }
+    g.globalAlpha = 1;
+  }
+
+  // Precalienta de a poco lo que falte (una tarea por cuadro).
+  if (!ALTO[a].hecho) ALTO[a].paso();
+  else if (!ESPACIO.hecho) ESPACIO.paso();
+  else
+    for (let i = 0; i < ORDEN.length; i++)
+      if (!ORDEN[i].hecho) {
+        ORDEN[i].paso();
+        break;
+      }
+}
+
+/** El paisaje de siempre: nubes, cordillera, colinas, pueblito, bosque y luciérnagas. */
+function dibujarCampo(g: Ctx, o: OpcionesFondo, C: Capas, t: number, ys: (k: number) => number) {
+  const { vw, vh, camX, ambiente: a } = o;
 
   // Cirros altos y nubes lejanas.
   const drift = t;
@@ -1051,6 +1989,7 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
       const x = mod(400 + i * 870 - camX * 0.16 - t * (2 + i), 2600) - 30;
       if (x > vw) continue;
       const y = base - 110 - i * 34 - s.height + Math.round(Math.sin(t * 0.8 + i * 2) * 2);
+      if (y > vh) continue;
       g.drawImage(s, Math.round(x), y);
     }
   }
@@ -1073,52 +2012,36 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
     g.fillRect(0, yP, vw, vh - yP);
   }
   const top = yP - PUEBLO_H;
-  const x0 = -mod(Math.round(offP), PUEBLO_W);
-  const geo = geoPueblo();
-  for (let rep = x0; rep < vw; rep += PUEBLO_W) {
-    const [mx, my] = geo.molino;
-    const ax = rep + mx;
-    if (ax > -20 && ax < vw + 20) {
-      const f = C.aspas[Math.floor(t * 4) % C.aspas.length];
-      g.drawImage(f, ax - 16, top + my - 24 - 16 + 3);
-    }
-    const ch = geo.chimeneas;
-    for (let i = 0; i < ch.length; i += 2) {
-      const cx = rep + ch[i];
-      if (cx < -20 || cx > vw + 10) continue;
-      for (let j = 0; j < 3; j++) {
-        const ph = mod(t * 0.35 + j / 3 + i * 0.13, 1);
-        const sp = C.humo[Math.min(2, Math.floor(ph * 3))];
-        const hx = Math.round(cx + ph * 9 + Math.sin(ph * 6 + i) * 1.5 - sp.width / 2 + 1);
-        const hy = Math.round(top + ch[i + 1] - 3 - ph * 16 - sp.height / 2);
-        g.drawImage(sp, hx, hy);
+  if (top - 50 < vh) {
+    const x0 = -mod(Math.round(offP), PUEBLO_W);
+    const geo = geoPueblo();
+    for (let rep = x0; rep < vw; rep += PUEBLO_W) {
+      const [mx, my] = geo.molino;
+      const ax = rep + mx;
+      if (ax > -20 && ax < vw + 20) {
+        const f = C.aspas[Math.floor(t * 4) % C.aspas.length];
+        g.drawImage(f, ax - 16, top + my - 24 - 16 + 3);
+      }
+      const ch = geo.chimeneas;
+      for (let i = 0; i < ch.length; i += 2) {
+        const cx = rep + ch[i];
+        if (cx < -20 || cx > vw + 10) continue;
+        for (let j = 0; j < 3; j++) {
+          const ph = mod(t * 0.35 + j / 3 + i * 0.13, 1);
+          const sp = C.humo[Math.min(2, Math.floor(ph * 3))];
+          const hx = Math.round(cx + ph * 9 + Math.sin(ph * 6 + i) * 1.5 - sp.width / 2 + 1);
+          const hy = Math.round(top + ch[i + 1] - 3 - ph * 16 - sp.height / 2);
+          g.drawImage(sp, hx, hy);
+        }
       }
     }
   }
 
   // Pajaritos (bandada en V).
   if (C.pajaro) {
-    g.fillStyle = C.pajaro;
     const bx = mod(1800 - t * 16 - camX * 0.45, 2400) - 200;
     const by = ys(0.5) - 120 + Math.round(Math.sin(t * 0.7) * 4);
-    if (bx > -40 && bx < vw + 40)
-      for (let i = 0; i < 5; i++) {
-        const side = i === 0 ? 0 : i % 2 ? 1 : -1;
-        const rank = Math.ceil(i / 2);
-        const x = Math.round(bx + rank * 7);
-        const y = by + side * rank * 5 + rank * 1;
-        if (Math.floor(t * 5 + i * 1.3) % 2) {
-          g.fillRect(x - 2, y - 1, 1, 1);
-          g.fillRect(x + 2, y - 1, 1, 1);
-          g.fillRect(x - 1, y, 1, 1);
-          g.fillRect(x + 1, y, 1, 1);
-          g.fillRect(x, y + 1, 1, 1);
-        } else {
-          g.fillRect(x - 2, y + 1, 2, 1);
-          g.fillRect(x + 1, y + 1, 2, 1);
-          g.fillRect(x, y, 1, 2);
-        }
-      }
+    if (bx > -40 && bx < vw + 40 && by < vh + 10) bandada(g, C.pajaro, bx, by, t, 5);
   }
 
   // Nubes cercanas.
@@ -1133,7 +2056,7 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
   }
 
   // Luciérnagas.
-  if (a === 'noche') {
+  if (a === 'noche' && yB - 70 < vh) {
     for (let i = 0; i < LUCIERNAGAS.length; i++) {
       const l = LUCIERNAGAS[i];
       const x = Math.round(mod(l.x * (vw + 40) - camX * 0.5, vw + 40) - 20 + Math.sin(t * 0.7 + l.f) * 6);
@@ -1148,11 +2071,5 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
       g.fillStyle = ph > 0.2 ? '#fcffb0' : '#a8a070';
       g.fillRect(x, y, 1, 1);
     }
-  }
-
-  // Precalienta de a poco los otros ambientes (una tarea por cuadro).
-  for (const b of AMBIENTES) if (b !== a && !listo.has(b)) {
-    paso(b);
-    break;
   }
 }

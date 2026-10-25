@@ -57,7 +57,9 @@ export const ESCALA: { metrosPorPx: number; segundoReal: number; g: number } = {
 
 /** Air density (game units, 1 at y = 0). */
 export function densidad(y: number): number {
-  return Math.exp(-Math.max(-200, Math.min(2000, y)) / 1200);
+  // A cartoon atmosphere: it thins slowly enough that the planes can still
+  // fly up near space (≈ half the air at 3000 px), just slower to turn.
+  return Math.exp(-Math.max(-200, Math.min(3600, y)) / 4500);
 }
 /** Altitude at which cruise parameters are trimmed. */
 const ALT_REF = 100;

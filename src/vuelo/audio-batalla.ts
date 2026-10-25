@@ -13,9 +13,19 @@ import { sampleOut } from '../game/audio';
  * importa para sobrevivir (misiles cerca y tono de fijación) va más fuerte y
  * baja («ducking») el viento, el fuego y el motor dañado.
  *
- * Presupuesto: ~21 nodos en el peor caso continuo (3 misiles × 3, tono 2,
- * viento 3, fuego 2, motor 2, latido 1, bus 2); los efectos sueltos se
- * recortan con un tope global y las explosiones se roban por prioridad.
+ * Presupuesto: ~38 nodos en el peor caso continuo (3 misiles × 3, tonos de
+ * fijación 2 + 3, viento 3, fuego 2, motor 2, latido 1, ambiente de altitud
+ * 2–4, ovnis 2 × 3, bus 4); los efectos sueltos se recortan con un tope
+ * global y las explosiones se roban por prioridad.
+ *
+ * Altitud: cada zona (campo, nubes, estratosfera, espacio) tiene su cama de
+ * ambiente en bucle estéreo y se funden entre sí con potencia constante. Con
+ * la altura el aire se adelgaza: el viento de velocidad baja, las explosiones
+ * se apagan (en el espacio solo llega lo que transmite el fuselaje) y el motor
+ * grabado se ahoga vía atenuacionMotor().
+ *
+ * Alarmas: mientras suena una fijación, las explosiones van por un bus que
+ * se agacha, así el «bip» nunca queda tapado por un estallido lejano.
  *
  * Todas las funciones son seguras de llamar siempre: si no hay contexto de
  * audio o no está corriendo, no hacen nada.
@@ -47,11 +57,12 @@ const hacia = (p: AudioParam, v: number, t: number, tc: number) => p.setTargetAt
 
 /* ────────────────────────── mezcla ────────────────────────── */
 
-type Mezcla = { ctx: Ctx; dest: AudioNode; bus: GainNode; comp: DynamicsCompressorNode };
+type Mezcla = { ctx: Ctx; dest: AudioNode; bus: GainNode; comp: DynamicsCompressorNode; tibio: BiquadFilterNode; explo: GainNode };
 let inyectado: { ctx: Ctx; dest: AudioNode } | null = null;
 let mz: Mezcla | null = null;
 let vivos = 0; // nodos creados por este módulo que siguen conectados
-const LIMITE = 25; // tope para efectos sueltos de baja prioridad
+const LIMITE = 44; // tope para efectos sueltos de baja prioridad
+const LIMITE_AMB = 38; // los adornos de ambiente (pájaros, hielo, estrellas) ceden antes
 
 function salida(): Mezcla | null {
   const o = inyectado ?? sampleOut();
@@ -70,9 +81,17 @@ function salida(): Mezcla | null {
   comp.release.value = 0.12;
   const bus = ctx.createGain();
   bus.gain.value = 0.85;
-  bus.connect(comp).connect(o.dest);
-  vivos += 2;
-  mz = { ctx, dest: o.dest, bus, comp };
+  // Repisa suave en agudos: en sesiones largas lo que cansa son los 6–12 kHz.
+  const tibio = ctx.createBiquadFilter();
+  tibio.type = 'highshelf';
+  tibio.frequency.value = 6500;
+  tibio.gain.value = -3;
+  bus.connect(tibio).connect(comp).connect(o.dest);
+  // Bus de explosiones: se agacha mientras suena una alarma.
+  const explo = ctx.createGain();
+  explo.connect(bus);
+  vivos += 4;
+  mz = { ctx, dest: o.dest, bus, comp, tibio, explo };
   return mz;
 }
 
@@ -299,12 +318,14 @@ function explosionHorno(sr: number, e: Explo) {
 
 type Nombre =
   | 'silbido' | 'viento' | 'crepitar' | 'tos' | 'petardo' | 'rechinido' | 'latido'
-  | 'explo-chica' | 'explo-grande' | 'derribo' | 'pieza-metal' | 'pieza-cabina';
+  | 'explo-chica' | 'explo-grande' | 'derribo' | 'pieza-metal' | 'pieza-cabina'
+  | 'brisa' | 'nubes' | 'estrato' | 'espacio' | 'pajaro' | 'pajaro2' | 'hielo' | 'estrella'
+  | 'whoosh' | 'whoosh-baja' | 'campanas' | 'ovni' | 'zap';
 
-const HORNO: Record<Nombre, (sr: number) => Float32Array> = {
+const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
   silbido: (sr) => {
-    const silb = new Bq(sr, 'bp', 3900, 16);
+    const silb = new Bq(sr, 'bp', 3500, 16);
     const sis = new Bq(sr, 'bp', 2400, 2.5);
     const rug = new Bq(sr, 'lp', 320, 0.7);
     const zum = new Bq(sr, 'lp', 1100, 0.7);
@@ -313,7 +334,7 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array> = {
       fz += (150 + 6 * Math.sin(2 * Math.PI * 3 * t)) / sr;
       const saw = (fz % 1) * 2 - 1;
       const flutter = 1 + 0.18 * Math.sin(2 * Math.PI * 23 * t) + 0.08 * ruido();
-      return (silb.run(ruido()) * 3.2 + sis.run(ruido()) * 0.7 + rug.run(ruido()) * 0.9 + zum.run(saw) * 0.35) * flutter;
+      return (silb.run(ruido()) * 2.6 + sis.run(ruido()) * 0.7 + rug.run(ruido()) * 0.9 + zum.run(saw) * 0.35) * flutter;
     });
   },
   viento: (sr) => bucle(sr, 2, () => ruido()),
@@ -381,6 +402,19 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array> = {
   },
   'pieza-metal': (sr) => pieza(sr, false),
   'pieza-cabina': (sr) => pieza(sr, true),
+  brisa: hornoBrisa,
+  nubes: hornoNubes,
+  estrato: hornoEstrato,
+  espacio: hornoEspacio,
+  pajaro: (sr) => hornoPajaro(sr, false),
+  pajaro2: (sr) => hornoPajaro(sr, true),
+  hielo: hornoHielo,
+  estrella: hornoEstrella,
+  whoosh: (sr) => hornoWhoosh(sr, true),
+  'whoosh-baja': (sr) => hornoWhoosh(sr, false),
+  campanas: hornoCampanas,
+  ovni: hornoOvni,
+  zap: hornoZap,
 };
 
 function pieza(sr: number, vidrio: boolean) {
@@ -397,14 +431,269 @@ function pieza(sr: number, vidrio: boolean) {
   return normaliza(a, 0.9);
 }
 
+/* ── hornos de altitud ── */
+
+const TAU = 2 * Math.PI;
+
+/** Escala varios canales juntos (sin fundir bordes: son bucles). */
+function escala(chs: Float32Array[], pico: number) {
+  let m = 0;
+  for (const c of chs) for (let i = 0; i < c.length; i++) m = Math.max(m, Math.abs(c[i]));
+  if (m > 0) for (const c of chs) for (let i = 0; i < c.length; i++) c[i] *= pico / m;
+  return chs;
+}
+
+/** Normaliza un sonido suelto estéreo con bordes a cero. */
+function normalizaEst(chs: Float32Array[], pico: number) {
+  escala(chs, pico);
+  for (const a of chs) {
+    const f = Math.min(256, a.length >> 2);
+    for (let i = 0; i < f; i++) {
+      a[i] *= i / f;
+      a[a.length - 1 - i] *= i / f;
+    }
+  }
+  return chs;
+}
+
+/** Suma un mono en dos canales con paneo de potencia constante. */
+function aEstereo(L: Float32Array, R: Float32Array, i: number, y: number, pan: number) {
+  const p = clamp(pan, -1, 1);
+  L[i] += y * Math.sqrt((1 - p) / 2);
+  R[i] += y * Math.sqrt((1 + p) / 2);
+}
+
+/** Campo: brisa baja que respira, con un roce de hojas apenas presente. */
+function hornoBrisa(sr: number) {
+  const L = 6;
+  return escala(
+    [0, 1].map((c) => {
+      const lp = new Bq(sr, 'lp', 500, 0.6);
+      const hp = new Bq(sr, 'hp', 2600, 0.7);
+      const lp2 = new Bq(sr, 'lp', 5000, 0.7);
+      const ph = c * 1.7;
+      return bucle(sr, L, (i, t) => {
+        if ((i & 63) === 0) lp.f(360 + 280 * (0.5 + 0.5 * Math.sin((TAU * t) / L + ph)));
+        const sw = 0.6 + 0.4 * Math.sin((TAU * t) / (L / 2) + ph);
+        return lp.run(ruido()) * sw + lp2.run(hp.run(ruido())) * 0.06 * sw * sw;
+      });
+    }),
+    0.9,
+  );
+}
+
+/** Nubes: viento hueco (dos formantes que se mueven) y ráfagas, ancho. */
+function hornoNubes(sr: number) {
+  const L = 8;
+  return escala(
+    [0, 1].map((c) => {
+      const b1 = new Bq(sr, 'bp', 320, 2.5);
+      const b2 = new Bq(sr, 'bp', 820, 3);
+      const lp = new Bq(sr, 'lp', 240, 0.7);
+      const ph = c * 0.9;
+      return bucle(sr, L, (i, t) => {
+        if ((i & 63) === 0) {
+          b1.f(300 + 90 * Math.sin((TAU * t) / L + ph));
+          b2.f(760 + 220 * Math.sin((TAU * t) / (L / 2) + ph * 2));
+        }
+        const racha = 0.4 + 0.6 * Math.pow(0.5 + 0.5 * Math.sin((TAU * t) / L - 1.2 + ph * 0.3), 3) + 0.25 * Math.pow(0.5 + 0.5 * Math.sin((TAU * t) / (L / 3) + ph), 4);
+        return (b1.run(ruido()) * 1.4 + b2.run(ruido()) * 0.75 + lp.run(ruido()) * 0.9) * racha;
+      });
+    }),
+    0.9,
+  );
+}
+
+/** Estratosfera: viento delgado (sin graves) y un zumbido grave tenue que late. */
+function hornoEstrato(sr: number) {
+  const L = 8;
+  const chs = [0, 1].map((c) => {
+    const hp = new Bq(sr, 'hp', 1700, 0.7);
+    const lp = new Bq(sr, 'lp', 4800, 0.7);
+    const ph = c * 2.1;
+    return bucle(sr, L, (_i, t) => lp.run(hp.run(ruido())) * (0.45 + 0.55 * Math.pow(0.5 + 0.5 * Math.sin((TAU * t) / (L / 2) + ph), 2)));
+  });
+  // Frecuencias múltiplo de 1/L: el zumbido es periódico y el bucle no tiene costura.
+  chs.forEach((ch, c) => {
+    const d = c ? 0.125 : -0.125;
+    for (let i = 0; i < ch.length; i++) {
+      const t = i / sr;
+      const z = Math.sin(TAU * (46 + d) * t) * 0.5 + Math.sin(TAU * 69 * t) * 0.22 + Math.sin(TAU * (92 - d) * t) * 0.2 + Math.sin(TAU * 138 * t) * 0.06;
+      ch[i] = ch[i] * 0.4 + z * (0.75 + 0.25 * Math.sin((TAU * t) / L));
+    }
+  });
+  return escala(chs, 0.9);
+}
+
+/** Espacio: pad de acorde abierto (La–Mi–Si) sostenido, con coro lento. */
+function hornoEspacio(sr: number) {
+  const L = 12;
+  const n = Math.round(sr * L);
+  // [frecuencia, amplitud, ciclos de respiración por bucle, fase]
+  const notas: [number, number, number, number][] = [
+    [55, 0.5, 1, 0], [82.5, 0.34, 2, 1], [110, 0.34, 3, 2], [165, 0.22, 1, 3.5], [247.5, 0.11, 2, 4.2], [330, 0.05, 3, 5.1], [440, 0.025, 1, 0.7],
+  ];
+  return escala(
+    [0, 1].map((c) => {
+      const a = new Float32Array(n);
+      for (let i = 0; i < n; i++) {
+        const t = i / sr;
+        let s = 0;
+        notas.forEach(([f, amp, k, ph], j) => {
+          // Desafinación ±1/L Hz entre canales: batido lento y ancho, sin costura.
+          const fd = f + ((c ? 1 : -1) * (j % 2 ? 1 : -1)) / L;
+          const resp = 0.6 + 0.4 * Math.sin((TAU * k * t) / L + ph + c * 0.8);
+          s += amp * resp * (Math.sin(TAU * fd * t) + 0.12 * Math.sin(TAU * 2 * fd * t));
+        });
+        a[i] = s;
+      }
+      return a;
+    }),
+    0.9,
+  );
+}
+
+/** Pajarito lejano: trino o silbido de dos notas, ya filtrado por la distancia. */
+function hornoPajaro(sr: number, silbo: boolean) {
+  const a = new Float32Array(Math.floor(sr * 1.1));
+  const lp = new Bq(sr, 'lp', 3800, 0.7);
+  const notas = silbo ? 2 : 5 + Math.floor(Math.random() * 3);
+  let t0 = 0.02;
+  for (let k = 0; k < notas; k++) {
+    const dur = silbo ? 0.22 : rand(0.04, 0.07);
+    const fa = silbo ? (k ? 2300 : 2900) : rand(3000, 3600);
+    const fb = silbo ? (k ? 2100 : 2800) : fa * rand(1.12, 1.25);
+    let ph = 0;
+    const i0 = Math.floor(t0 * sr);
+    for (let j = 0; j < dur * sr && i0 + j < a.length; j++) {
+      const u = j / (dur * sr);
+      ph += (fa + (fb - fa) * u) / sr;
+      a[i0 + j] += (Math.sin(TAU * ph) + 0.15 * Math.sin(2 * TAU * ph)) * Math.sin(Math.PI * u);
+    }
+    t0 += dur + (silbo ? 0.08 : rand(0.02, 0.04));
+  }
+  for (let i = 0; i < a.length; i++) a[i] = lp.run(a[i]);
+  return normaliza(a, 0.8);
+}
+
+/** Crujido de hielo en el fuselaje: grietas finas + un quejido de chapa fría. */
+function hornoHielo(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.8));
+  chasquidos(sr, a, 0, 0.35, (t) => 220 * Math.exp(-t / 0.12), { hp: 2200, amp: 1, largo: [0.0006, 0.003] });
+  friccion(sr, a, 0.05, 0.45, 130, 70, [600, 1300], 0.25);
+  for (let k = 0; k < 4; k++) ping(sr, a, rand(0.02, 0.3), rand(1800, 3200), rand(0.01, 0.03), rand(0.05, 0.12));
+  const lp = new Bq(sr, 'lp', 6000, 0.7);
+  for (let i = 0; i < a.length; i++) a[i] = lp.run(a[i]);
+  return normaliza(a, 0.85);
+}
+
+/** Estrella que titila: campanita suave con temblor y eco lejano. */
+function hornoEstrella(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 2.4));
+  const f = 1320;
+  for (const [d, amp] of [[0, 1], [0.21, 0.32], [0.43, 0.12]]) {
+    const i0 = Math.floor(d * sr);
+    for (let j = 0; i0 + j < a.length; j++) {
+      const t = j / sr;
+      const env = Math.min(1, t / 0.015) * Math.exp(-t / 0.55) * (0.75 + 0.25 * Math.sin(TAU * 9 * t));
+      a[i0 + j] += amp * env * (Math.sin(TAU * f * t) + 0.25 * Math.sin(TAU * 2 * f * t) * Math.exp(-t / 0.15) + 0.08 * Math.sin(TAU * 3 * f * t) * Math.exp(-t / 0.08));
+    }
+  }
+  return normaliza(a, 0.8);
+}
+
+/** «Whoosh» de cambio de zona: ruido que barre hacia arriba (o abajo) y cruza el estéreo. */
+function hornoWhoosh(sr: number, sube: boolean) {
+  const n = Math.floor(sr * 2);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  const bp = new Bq(sr, 'bp', 300, 1.4);
+  const lp = new Bq(sr, 'lp', 180, 0.7);
+  for (let i = 0; i < n; i++) {
+    const u = i / n;
+    const k = Math.min(1, u / 0.75);
+    if ((i & 31) === 0) bp.f(sube ? 250 * Math.pow(9, k) : 2250 / Math.pow(9, k));
+    const env = u < 0.45 ? Math.pow(u / 0.45, 2) : Math.exp(-(u - 0.45) / 0.12);
+    aEstereo(L, R, i, (bp.run(ruido()) + lp.run(ruido()) * 0.6) * env, (sube ? -0.6 : 0.6) * (1 - 2 * u));
+  }
+  return normalizaEst([L, R], 0.9);
+}
+
+/** Llegada al espacio: campanitas FM en arpegio (del acorde del pad) con eco y un whoosh debajo. */
+function hornoCampanas(sr: number) {
+  const n = Math.floor(sr * 2.6);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  const notas = [440, 550, 660, 825, 880];
+  notas.forEach((f, k) => {
+    const pan = -0.7 + (1.4 * k) / (notas.length - 1);
+    for (const [d, amp, lado] of [[0, 0.5 * (1 - k * 0.08), pan], [0.27, 0.16, -pan], [0.55, 0.07, pan]]) {
+      const i0 = Math.floor((0.08 + k * 0.13 + d) * sr);
+      for (let j = 0; i0 + j < n && j < sr * 1.9; j++) {
+        const t = j / sr;
+        const mod = Math.sin(TAU * f * 3.5 * t) * 1.2 * Math.exp(-t / 0.25);
+        aEstereo(L, R, i0 + j, Math.sin(TAU * f * t + mod) * Math.exp(-t / 0.7) * Math.min(1, t / 0.003) * amp, lado);
+      }
+    }
+  });
+  const [wl, wr] = hornoWhoosh(sr, true);
+  for (let i = 0; i < n && i < wl.length; i++) {
+    L[i] += wl[i] * 0.3;
+    R[i] += wr[i] * 0.3;
+  }
+  return normalizaEst([L, R], 0.9);
+}
+
+/** Platillo volador: theremín que ondula + zumbido pulsante. Periódico en 4 s. */
+function hornoOvni(sr: number) {
+  const Lp = 4;
+  const n = Math.round(sr * Lp);
+  const a = new Float32Array(n);
+  const f0 = 520; // f0·Lp entero, y todas las modulaciones dan ciclos enteros: bucle sin costura
+  const w = TAU / Lp;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    // Fase integrada analíticamente de f0·(1 + 0.18 sin ωt + 0.07 sin(3ωt+1) + 0.015 sin(2π6t)).
+    const ph =
+      f0 * t +
+      ((f0 * 0.18) / w) * (1 - Math.cos(w * t)) +
+      ((f0 * 0.07) / (3 * w)) * (Math.cos(1) - Math.cos(3 * w * t + 1)) +
+      ((f0 * 0.015) / (TAU * 6)) * (1 - Math.cos(TAU * 6 * t));
+    const ther = Math.sin(TAU * ph) + 0.22 * Math.sin(2 * TAU * ph) + 0.07 * Math.sin(3 * TAU * ph);
+    const hum = (Math.sin(TAU * 110 * t) * 0.5 + Math.sin(TAU * 165 * t) * 0.18) * (0.55 + 0.45 * Math.sin(TAU * 8 * t));
+    a[i] = ther * 0.55 + hum * 0.6;
+  }
+  return escala([a], 0.9)[0];
+}
+
+/** Rayo del ovni: «piuu» que cae, con vibrato, chisporroteo y un eco corto. */
+function hornoZap(sr: number) {
+  const n = Math.floor(sr * 0.75);
+  const a = new Float32Array(n);
+  const lp = new Bq(sr, 'lp', 4500, 0.7);
+  let ph = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const f = (220 + 1700 * Math.exp(-t / 0.09)) * (1 + 0.12 * Math.sin(TAU * 38 * t));
+    ph += f / sr;
+    const env = Math.min(1, t / 0.004) * Math.exp(-t / 0.16);
+    a[i] = lp.run((Math.tanh(2.2 * Math.sin(TAU * ph)) * 0.7 + Math.sin(2 * TAU * ph) * 0.2) * env);
+  }
+  chasquidos(sr, a, 0, 0.25, () => 120, { hp: 2500, amp: 0.25, largo: [0.0008, 0.003] });
+  const eco = Math.floor(sr * 0.11);
+  for (let i = n - 1; i >= eco; i--) a[i] += a[i - eco] * 0.35;
+  return normaliza(a, 0.85);
+}
+
 const hornos = new Map<Nombre, AudioBuffer>();
 function buf(m: Mezcla, n: Nombre) {
   let b = hornos.get(n);
   if (!b) {
     const sr = m.ctx.sampleRate;
     const d = HORNO[n](sr);
-    b = m.ctx.createBuffer(1, d.length, sr);
-    b.getChannelData(0).set(d);
+    const chs = Array.isArray(d) ? d : [d];
+    b = m.ctx.createBuffer(chs.length, chs[0].length, sr);
+    chs.forEach((c, k) => b!.getChannelData(k).set(c));
     hornos.set(n, b);
   }
   return b;
@@ -492,6 +781,8 @@ export function persecucion(amenazas: Amenaza[], dt: number): void {
 
 /** Tono de fijación de cabina: bip-bip que se acelera hasta tono continuo. */
 function fijacion(m: Mezcla, t: number, d: number) {
+  alarmaFij = d > 460 ? 0 : 0.5 + 0.5 * clamp(1 - (d - 40) / 420, 0, 1);
+  actualizaAlarma(m, t);
   if (d > 460) {
     if (fij) {
       if (fij.prox > 0) {
@@ -518,7 +809,8 @@ function fijacion(m: Mezcla, t: number, d: number) {
   }
   const f = fij;
   const cerca = clamp(1 - (d - 40) / 420, 0, 1);
-  const nivel = 0.13 + 0.07 * cerca;
+  // Si suena la alarma fuerte, el bip normal da un paso atrás (no compiten).
+  const nivel = (0.13 + 0.07 * cerca) * (1 - 0.6 * nivelFuerte);
   hacia(f.osc.frequency, d <= 40 ? 1320 : 980 + 160 * cerca, t, 0.02);
   if (d <= 40) {
     if (!f.continuo) {
@@ -563,8 +855,9 @@ export function pasada(dx: number, dy: number, velocidad: number): void {
   const p = panner(m.ctx);
   voz(src, [g, p], m.bus, true);
   // Se acerca agudo y se aleja grave: la caída de tono es el «fiuuum».
-  const alto = C_JUEGO / (C_JUEGO - v * 0.9);
-  const bajo = C_JUEGO / (C_JUEGO + v * 0.9);
+  const k = rand(0.95, 1.05);
+  const alto = (C_JUEGO / (C_JUEGO - v * 0.9)) * k;
+  const bajo = (C_JUEGO / (C_JUEGO + v * 0.9)) * k;
   src.playbackRate.setValueAtTime(clamp(alto, 0.5, 2.2) * 1.05, t);
   src.playbackRate.setTargetAtTime(clamp(bajo, 0.4, 1), t + 0.1, 0.13);
   const pico = 0.95 * clamp(1 - r / 90, 0.45, 1);
@@ -588,7 +881,7 @@ let fuegoL: Loop | null = null;
 let vientoL: Loop | null = null;
 let tosHasta = 0;
 
-const ambiente = () => 1 - 0.55 * duck;
+const ambiente = () => 1 - 0.55 * Math.max(duck, alarma * 0.6);
 
 /** Mantiene un bucle vivo; con volumen 0 se apaga y a los 1.5 s se libera. */
 function loop(m: Mezcla, actual: Loop | null, nombre: Nombre, vol: number, filtro?: () => BiquadFilterNode): Loop | null {
@@ -622,7 +915,8 @@ export function motorDanado(nivel: number, aceleracion: number): void {
   const t = m.ctx.currentTime;
   const n = clamp(num(nivel), 0, 1);
   const acc = clamp(num(aceleracion), 0, 1);
-  const vol = n < 0.03 ? 0 : (0.08 + 0.42 * n) * ambiente();
+  // Es el mismo motor: con la altura también se oye ahogado.
+  const vol = n < 0.03 ? 0 : (0.08 + 0.42 * n) * ambiente() * (0.3 + 0.7 * atenMotor);
   motorL = loop(m, motorL, 'tos', vol);
   if (!motorL || vol === 0) return;
   // Más dañado: más grave, más irregular.
@@ -648,7 +942,7 @@ export function fuego(intensidad: number): void {
   const m = salida();
   if (!m) return;
   const i = clamp(num(intensidad), 0, 1);
-  const vol = i < 0.02 ? 0 : 0.6 * Math.pow(i, 0.8) * ambiente();
+  const vol = i < 0.02 ? 0 : 0.6 * Math.pow(i, 0.8) * ambiente() * (0.5 + 0.5 * Math.sqrt(aire));
   fuegoL = loop(m, fuegoL, 'crepitar', vol);
   if (!fuegoL || vol === 0) return;
   const t = m.ctx.currentTime;
@@ -662,7 +956,7 @@ export function viento(velocidad: number, carga: number): void {
   const v = clamp(num(velocidad) / 230, 0, 1.4);
   const w = clamp((Math.abs(num(carga)) - 2) / 4, 0, 1); // silba desde ~2 g
   const q = 0.8 + 8 * w;
-  const vol = (0.03 + 0.2 * v * v + 0.16 * w) * Math.sqrt(q) * 0.75 * ambiente();
+  const vol = (0.03 + 0.2 * v * v + 0.16 * w) * Math.sqrt(q) * 0.75 * ambiente() * Math.pow(aire, 0.7);
   vientoL = loop(m, vientoL, 'viento', vol, () => {
     const f = m.ctx.createBiquadFilter();
     f.type = 'bandpass';
@@ -671,7 +965,7 @@ export function viento(velocidad: number, carga: number): void {
   if (!vientoL || !vientoL.f) return;
   const t = m.ctx.currentTime;
   hacia(vientoL.g.gain, vol, t, 0.12);
-  hacia(vientoL.f.frequency, 280 + 650 * v + 1900 * w, t, 0.1);
+  hacia(vientoL.f.frequency, (280 + 650 * v + 1900 * w) * (1 + 1.2 * (1 - aire)), t, 0.1);
   hacia(vientoL.f.Q, q, t, 0.1);
   hacia(vientoL.src.playbackRate, 0.8 + 0.4 * v, t, 0.2);
 }
@@ -701,8 +995,10 @@ export function intensidad(nivel: number): void {
   // «Pum-pum» como un corazón: el segundo golpe más suave y algo más agudo.
   while (pulsoProx < t + 0.15) {
     const b = pulsoProx;
-    latido(m, b, vol, 1);
-    latido(m, b + Math.min(0.17, periodo * 0.32), vol * 0.55, 1.12);
+    // Pequeñas variaciones: ningún golpe suena idéntico al anterior.
+    const r = rand(0.97, 1.03);
+    latido(m, b, vol * rand(0.92, 1), r);
+    latido(m, b + Math.min(0.17, periodo * 0.32) * rand(0.96, 1.04), vol * rand(0.5, 0.6), 1.12 * r);
     pulsoProx += periodo;
   }
 }
@@ -718,8 +1014,8 @@ function latido(m: Mezcla, t: number, vol: number, rate: number) {
 /* ────────────────────────── eventos ────────────────────────── */
 
 /** Un efecto suelto de baja prioridad (respeta el tope de nodos). */
-function unaVez(m: Mezcla, n: Nombre, vol: number, rate: number, t: number, pan = 0) {
-  if (vivos + 3 > LIMITE) return;
+function unaVez(m: Mezcla, n: Nombre, vol: number, rate: number, t: number, pan = 0, tope = LIMITE) {
+  if (vivos + 3 > tope) return;
   const src = fuente(m, buf(m, n), false, rate);
   const g = ganancia(m, vol);
   const cadena: AudioNode[] = [g];
@@ -743,7 +1039,8 @@ export function explosion(energia: number, distancia: number, pan: number): void
   const e = clamp(num(energia, 1), 0.2, 12);
   const d = Math.max(0, num(distancia));
   const size = Math.cbrt(e); // 0.6 … 2.3, como el radio de la explosión
-  const vol = clamp((0.45 + 0.28 * size) / (1 + d / 320), 0, 1.1);
+  // Sin aire no hay onda expansiva: en el espacio solo llega lo que vibra el fuselaje.
+  const vol = clamp((0.45 + 0.28 * size) / (1 + d / 320), 0, 1.1) * (1 - 0.4 * pesos.espacio);
   if (vol < 0.02) return;
   const nombre: Nombre = e >= 3 ? 'explo-grande' : 'explo-chica';
   // Más energía: más grave y más larga (playbackRate baja).
@@ -764,12 +1061,12 @@ export function explosion(energia: number, distancia: number, pan: number): void
   const src = fuente(m, b, false, rate);
   const lp = m.ctx.createBiquadFilter();
   lp.type = 'lowpass';
-  lp.frequency.value = 350 + 17000 * Math.exp(-d / 200);
+  lp.frequency.value = Math.max(200, (350 + 17000 * Math.exp(-d / 200)) * (1 - 0.8 * pesos.espacio - 0.3 * pesos.estratosfera));
   lp.Q.value = 0.5;
   const g = ganancia(m, vol);
   const p = panner(m.ctx);
   panea(p, num(pan), t, 0.001);
-  const v = voz(src, [lp, g, p], m.bus, true);
+  const v = voz(src, [lp, g, p], m.explo, true);
   src.start(t0);
   explos.push({ v, g, prioridad: vol, inicio: t0, dur });
 }
@@ -799,6 +1096,272 @@ export function derribo(): void {
   unaVez(m, 'rechinido', 0.25, 0.55, t + 1.2, -0.3);
 }
 
+/* ────────────────────────── altitud y ambiente ────────────────────────── */
+
+export type Zona = 'campo' | 'nubes' | 'estratosfera' | 'espacio';
+const ZONAS: Zona[] = ['campo', 'nubes', 'estratosfera', 'espacio'];
+const suave = (a: number, b: number, x: number) => {
+  const u = clamp((x - a) / (b - a), 0, 1);
+  return u * u * (3 - 2 * u);
+};
+
+const capas: Record<Zona, { nombre: Nombre; l: Loop | null }> = {
+  campo: { nombre: 'brisa', l: null },
+  nubes: { nombre: 'nubes', l: null },
+  estratosfera: { nombre: 'estrato', l: null },
+  espacio: { nombre: 'espacio', l: null },
+};
+let pesos: Record<Zona, number> = { campo: 1, nubes: 0, estratosfera: 0, espacio: 0 };
+let aire = 1; // densidad relativa: 1 a ras de suelo, ~0 en el espacio
+let atenMotor = 1;
+let alarma = 0; // 0…1: hay una fijación sonando (agacha explosiones y ambiente)
+let alarmaFij = 0;
+let ultimaEstrella = -1;
+
+/**
+ * Cama de ambiente según la altitud (llamar ~cada 80 ms). Las cuatro zonas se
+ * funden en franjas de 160 px alrededor de 500, 1300 y 1900.
+ */
+export function altitud(alt: number, velocidad: number): void {
+  const a = clamp(num(alt), 0, 5000);
+  const v = clamp(num(velocidad) / 230, 0, 1.4);
+  const s1 = suave(420, 580, a), s2 = suave(1220, 1380, a), s3 = suave(1820, 1980, a);
+  pesos = { campo: 1 - s1, nubes: s1 * (1 - s2), estratosfera: s2 * (1 - s3), espacio: s3 };
+  aire = Math.pow(clamp(1 - a / 2000, 0, 1), 1.2);
+  const objetivo = 1 - 0.03 * pesos.nubes - 0.15 * pesos.estratosfera - 0.65 * pesos.espacio;
+  atenMotor += (objetivo - atenMotor) * 0.15; // ~0.5 s de constante con llamadas cada 80 ms
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const amb = 1 - 0.6 * Math.max(duck, alarma * 0.7);
+  const base: Record<Zona, number> = {
+    campo: 0.07 + 0.03 * v,
+    nubes: 0.12 + 0.08 * v,
+    estratosfera: 0.1 + 0.02 * v,
+    espacio: 0.065,
+  };
+  for (const z of ZONAS) {
+    const c = capas[z];
+    // Raíz del peso: cruce de potencia constante (sin bache a mitad del fundido).
+    const vol = pesos[z] < 0.01 ? 0 : base[z] * Math.sqrt(pesos[z]) * (z === 'espacio' ? Math.sqrt(amb) : amb);
+    c.l = loop(m, c.l, c.nombre, vol);
+    if (!c.l || vol === 0) continue;
+    hacia(c.l.g.gain, vol, t, 0.5);
+    if (z === 'nubes') hacia(c.l.src.playbackRate, 0.9 + 0.18 * v, t, 0.4);
+  }
+  // Adornos sueltos, siempre con tono, volumen y paneo al azar.
+  const tranquilo = duck < 0.15 && alarma < 0.1;
+  if (pesos.campo > 0.6 && tranquilo && Math.random() < 0.012)
+    unaVez(m, Math.random() < 0.6 ? 'pajaro' : 'pajaro2', rand(0.025, 0.05) * pesos.campo, rand(0.85, 1.2), t, rand(-0.8, 0.8), LIMITE_AMB);
+  if (pesos.estratosfera > 0.5 && Math.random() < 0.018)
+    unaVez(m, 'hielo', rand(0.06, 0.13) * amb, rand(0.8, 1.25), t, rand(-0.6, 0.6), LIMITE_AMB);
+  if (pesos.espacio > 0.5 && Math.random() < 0.03) {
+    // Notas del acorde del pad (pentatónica): titileo consonante, nunca la misma dos veces.
+    const RAZONES = [0.5, 0.5625, 0.625, 0.75, 0.8333, 1, 1.125];
+    let k = Math.floor(Math.random() * RAZONES.length);
+    if (k === ultimaEstrella) k = (k + 1 + Math.floor(Math.random() * (RAZONES.length - 1))) % RAZONES.length;
+    ultimaEstrella = k;
+    unaVez(m, 'estrella', rand(0.025, 0.055), RAZONES[k] * rand(0.997, 1.003), t, rand(-0.9, 0.9), LIMITE_AMB);
+  }
+  mantenerOvnis(m, t);
+}
+
+/** Factor 0..1 para el bucle del motor grabado: en el espacio se oye ahogado (~0.35). */
+export function atenuacionMotor(): number {
+  return clamp(atenMotor, 0, 1);
+}
+
+let ultimaZona: Zona | null = null;
+let ultimoStinger = -10;
+
+/** Stinger de ~2 s al cruzar a una zona nueva (ignora repeticiones y titubeos en el borde). */
+export function zonaNueva(zona: Zona): void {
+  if (!ZONAS.includes(zona) || zona === ultimaZona) return;
+  const antes = ultimaZona;
+  ultimaZona = zona;
+  const m = salida();
+  if (!m || antes === null) return; // la zona inicial no suena
+  const t = m.ctx.currentTime;
+  if (t - ultimoStinger < 1.5) return;
+  ultimoStinger = t;
+  const sube = ZONAS.indexOf(zona) > ZONAS.indexOf(antes);
+  const k = rand(0.96, 1.04);
+  if (zona === 'espacio' && sube) {
+    unaVez(m, 'campanas', 0.34, k, t, 0, LIMITE + 4);
+  } else if (sube) {
+    unaVez(m, 'whoosh', 0.3, (zona === 'estratosfera' ? 1.12 : 0.95) * k, t, 0, LIMITE + 4);
+  } else {
+    unaVez(m, 'whoosh-baja', 0.26, (zona === 'campo' ? 0.8 : 0.92) * k, t, 0, LIMITE + 4);
+  }
+}
+
+/* ────────────────────────── ovnis ────────────────────────── */
+
+type VozOvni = { id: number; v: Voz; src: AudioBufferSourceNode; g: GainNode; p: Pan; r: number; tr: number; vr: number; visto: number; base: number; dx: number; libre: number };
+const ovnis: VozOvni[] = [];
+const MAX_OVNIS = 2;
+
+/** Zumbido/theremín de un platillo (llamar cada tick por ovni; activo=false lo apaga). */
+export function ovni(dx: number, dy: number, activo: boolean, id: number): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const x = num(dx), y = num(dy);
+  const r = Math.hypot(x, y);
+  let o = ovnis.find((q) => q.id === id);
+  if (!activo || r > 900) {
+    if (o && o.libre < 0) {
+      o.libre = t;
+      hacia(o.g.gain, 0, t, 0.15);
+    }
+    return;
+  }
+  if (!o) {
+    if (ovnis.length >= MAX_OVNIS) {
+      // Cede la voz que ya se apaga o, si no, la del platillo más lejano.
+      const peor = ovnis.slice().sort((p, q) => (q.libre >= 0 ? 1e9 : q.r) - (p.libre >= 0 ? 1e9 : p.r))[0];
+      if (peor.libre < 0 && peor.r <= r) return;
+      apagar(peor.v, peor.g, t, 0.03);
+      ovnis.splice(ovnis.indexOf(peor), 1);
+    }
+    const src = fuente(m, buf(m, 'ovni'), true);
+    const g = ganancia(m, 0);
+    const p = panner(m.ctx);
+    const v = voz(src, [g, p], m.bus, false);
+    // Cada platillo con su propio tono: dos a la vez no suenan al unísono.
+    const base = (ovnis.some((q) => q.base > 0.92) ? 0.82 : 1) * rand(0.96, 1.04);
+    src.playbackRate.value = base;
+    src.start(t, rand(0, 4));
+    o = { id, v, src, g, p, r, tr: t, vr: 0, visto: t, base, dx: x, libre: -1 };
+    ovnis.push(o);
+  }
+  o.libre = -1;
+  const dt = t - o.tr;
+  if (dt > 0.02) {
+    o.vr += (clamp((r - o.r) / dt, -600, 600) - o.vr) * 0.5;
+    o.r = r;
+    o.tr = t;
+  }
+  o.visto = t;
+  o.dx = x;
+  const dop = clamp(C_JUEGO / (C_JUEGO + o.vr), 0.6, 1.7);
+  hacia(o.src.playbackRate, o.base * dop, t, 0.08);
+  const prox = clamp(1 - r / 800, 0, 1);
+  hacia(o.g.gain, (0.03 + 0.3 * prox * prox) * (1 - 0.35 * Math.max(duck, alarma)), t, 0.1);
+  panea(o.p, (x / 320) * 0.9, t, 0.08);
+}
+
+/** Platillos que el juego dejó de reportar: se apagan solos. */
+function mantenerOvnis(m: Mezcla, t: number) {
+  void m;
+  for (let i = ovnis.length - 1; i >= 0; i--) {
+    const o = ovnis[i];
+    if (o.libre < 0 && t - o.visto > 0.4) {
+      o.libre = t;
+      hacia(o.g.gain, 0, t, 0.15);
+    } else if (o.libre >= 0 && t - o.libre > 1) {
+      apagar(o.v, o.g, t);
+      ovnis.splice(i, 1);
+    }
+  }
+}
+
+let ultimoRayo = -1;
+/** Rayo láser de un ovni: sale del lado del platillo más cercano. */
+export function rayoOvni(): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  if (t - ultimoRayo < 0.08) return;
+  ultimoRayo = t;
+  mantenerOvnis(m, t);
+  const cerca = ovnis.filter((o) => o.libre < 0).sort((p, q) => p.r - q.r)[0];
+  const pan = cerca ? clamp(cerca.dx / 320, -1, 1) * 0.8 : rand(-0.2, 0.2);
+  const vol = cerca ? 0.28 + 0.24 * clamp(1 - cerca.r / 700, 0, 1) : 0.38;
+  unaVez(m, 'zap', vol, rand(0.9, 1.1), t, pan || 0.001, LIMITE + 4);
+}
+
+/* ────────────────────────── fijación fuerte ────────────────────────── */
+
+type Fuerte = { v: Voz; osc: OscillatorNode; g: GainNode; prox: number; paso: number; quieto: number; inicio: number; activo: boolean };
+let fuerte: Fuerte | null = null;
+let nivelFuerte = 0;
+
+function actualizaAlarma(m: Mezcla, t: number) {
+  alarma = Math.max(alarmaFij, nivelFuerte > 0 ? 0.7 + 0.3 * nivelFuerte : 0);
+  hacia(m.explo.gain, 1 - 0.45 * alarma, t, 0.08);
+}
+
+/**
+ * Alarma de amenaza difícil (misil de largo alcance o varios fijados):
+ * «di-da-di-da ·» de dos tonos, más agudo y rápido con el nivel (llamar cada
+ * tick; 0 la apaga). Pierde un poco de volumen si dura mucho, para no cansar.
+ */
+export function fijacionFuerte(nivel: number): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const n = clamp(num(nivel), 0, 1);
+  if (n < 0.05) {
+    nivelFuerte = 0;
+    if (fuerte) {
+      if (fuerte.activo) {
+        sujeta(fuerte.g.gain, t);
+        fuerte.g.gain.setTargetAtTime(0, t, 0.015);
+        fuerte.activo = false;
+        fuerte.quieto = t;
+      } else if (t - fuerte.quieto > 2) {
+        apagar(fuerte.v, fuerte.g, t);
+        fuerte = null;
+      }
+    }
+    actualizaAlarma(m, t);
+    return;
+  }
+  nivelFuerte = n;
+  if (!fuerte) {
+    const osc = m.ctx.createOscillator();
+    // Casi cuadrada pero con pocos armónicos y paso bajo: urgente sin chillar.
+    osc.setPeriodicWave(m.ctx.createPeriodicWave(new Float32Array(6), new Float32Array([0, 1, 0, 0.22, 0, 0.08])));
+    const lp = m.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2600;
+    lp.Q.value = 0.5;
+    const g = ganancia(m, 0);
+    const v = voz(osc, [lp, g], m.bus, false);
+    osc.start(t);
+    fuerte = { v, osc, g, prox: t + 0.01, paso: 0, quieto: t, inicio: t, activo: false };
+  }
+  const f = fuerte;
+  if (!f.activo) {
+    f.activo = true;
+    f.inicio = t;
+    f.paso = 0;
+    f.prox = t + 0.01;
+  }
+  const intervalo = 0.15 - 0.075 * n;
+  const lo = 640 + 220 * n;
+  const hi = lo * 1.26;
+  const fatiga = 1 - 0.3 * clamp((t - f.inicio - 5) / 8, 0, 1);
+  const vol = (0.1 + 0.07 * n) * fatiga;
+  if (f.prox < t) f.prox = t + 0.01;
+  while (f.prox < t + 0.14) {
+    const b = f.prox;
+    const k = f.paso % 5; // cuatro notas y un silencio: ritmo, no un muro
+    if (k < 4) {
+      const largo = intervalo * 0.78;
+      f.osc.frequency.setValueAtTime(k % 2 === 0 ? hi : lo, b);
+      f.g.gain.setValueAtTime(0, b);
+      f.g.gain.linearRampToValueAtTime(vol, b + 0.004);
+      f.g.gain.setValueAtTime(vol, b + largo - 0.005);
+      f.g.gain.linearRampToValueAtTime(0, b + largo);
+    }
+    f.paso++;
+    f.prox += intervalo;
+  }
+  actualizaAlarma(m, t);
+}
+
 /* ────────────────────────── apagar ────────────────────────── */
 
 function apagarContinuos(t: number, tc: number) {
@@ -815,6 +1378,20 @@ function apagarContinuos(t: number, tc: number) {
   pulsoProx = 0;
   duck = 0;
   tosHasta = 0;
+  for (const z of ZONAS) {
+    const c = capas[z];
+    if (c.l) apagar(c.l.v, c.l.g, t, tc * 3);
+    c.l = null;
+  }
+  for (const o of ovnis) apagar(o.v, o.g, t, tc);
+  ovnis.length = 0;
+  if (fuerte) apagar(fuerte.v, fuerte.g, t, tc);
+  fuerte = null;
+  nivelFuerte = alarma = alarmaFij = 0;
+  if (mz) {
+    sujeta(mz.explo.gain, t);
+    mz.explo.gain.setTargetAtTime(1, t, 0.05);
+  }
 }
 
 /** Apaga todo (pausa o salir): fundido de ~50 ms y libera los nodos. */
@@ -840,11 +1417,23 @@ function reiniciar() {
   fij = null;
   for (const v of [...sueltos]) liberar(v);
   explos.length = 0;
+  for (const z of ZONAS) {
+    const c = capas[z];
+    if (c.l) liberar(c.l.v);
+    c.l = null;
+  }
+  for (const o of ovnis) liberar(o.v);
+  ovnis.length = 0;
+  if (fuerte) liberar(fuerte.v);
+  fuerte = null;
+  nivelFuerte = alarma = alarmaFij = 0;
   pulsoG?.disconnect();
   pulsoG = null;
   if (mz) {
     mz.bus.disconnect();
+    mz.tibio.disconnect();
     mz.comp.disconnect();
+    mz.explo.disconnect();
   }
   mz = null;
   vivos = 0;

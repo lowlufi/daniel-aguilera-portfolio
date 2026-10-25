@@ -226,6 +226,19 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     onPointerCancel: () => game.current?.touch({ [key]: false }),
   });
 
+  // A sign when the plane crosses into a new layer of sky.
+  const [zoneSign, setZoneSign] = useState('');
+  const lastZone = useRef('');
+  const zone = phase === 'play' ? hud?.zone ?? '' : '';
+  useEffect(() => {
+    const first = !lastZone.current;
+    lastZone.current = zone;
+    if (!zone || first) return;
+    setZoneSign(zone);
+    const id = window.setTimeout(() => setZoneSign(''), 2600);
+    return () => window.clearTimeout(id);
+  }, [zone]);
+
   const spec = PLANES.find((p) => p.id === plane)!;
 
   return (
@@ -257,11 +270,17 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 </span>
                 <span className={CHIP}>⭐ {hud.score}</span>
                 <span className={CHIP}>🌊 {hud.wave} · 🐭 {hud.left}</span>
+                <span className={CHIP} title="Altura">⛰️ {hud.altitude.toLocaleString('es-CL')} m</span>
                 <span className={CHIP} title="Viento: empuja las bombas y el humo" aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}>
                   🌬️ {hud.wind < 0 ? '◀'.repeat(Math.min(3, Math.ceil(-hud.wind / 4))) : hud.wind > 0 ? '▶'.repeat(Math.min(3, Math.ceil(hud.wind / 4))) : '·'}
                 </span>
-                <span className={CHIP} title="Misiles y bengalas">
-                  🚀 <Pips n={hud.ammo} max={hud.rack} on="▮" off="▯" /> · ✨ {hud.flares}
+                <span
+                  className={CHIP}
+                  title="Armamento: atrapa los globos de los enemigos para ganar más puestos"
+                  aria-label={`Misiles ${hud.ammo} de ${hud.rack}, bombas ${hud.bombs} de ${hud.bombMax}, bengalas ${hud.flares} de ${hud.flareMax}`}
+                >
+                  🚀 <Pips n={hud.ammo} max={hud.rack} on="▮" off="▯" /> 💣 <Pips n={hud.bombs} max={hud.bombMax} on="▮" off="▯" /> ✨{' '}
+                  <Pips n={hud.flares} max={hud.flareMax} on="▮" off="▯" />
                 </span>
               </>
             )
@@ -271,6 +290,17 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           {phase === 'play' && (
             <button type="button" aria-label={paused ? 'Seguir' : 'Pausa'} onClick={togglePause} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
               {paused ? '▶️' : '⏸️'}
+            </button>
+          )}
+          {phase === 'play' && hud && (
+            <button
+              type="button"
+              aria-label={`Cielo: ${({ auto: 'automático', dia: 'día', tarde: 'tarde', noche: 'noche' } as Record<string, string>)[hud.sky]}. Cambiar`}
+              title="Cambiar el cielo"
+              onClick={() => game.current?.cycleSky()}
+              className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}
+            >
+              {({ auto: '🌄', dia: '☀️', tarde: '🌅', noche: '🌙' } as Record<string, string>)[hud.sky]}
             </button>
           )}
           {phase === 'play' && hud && hud.zoom[0] > 1 && (
@@ -296,6 +326,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         <div className="pointer-events-none absolute inset-x-0 top-[22%] z-10 text-center">
           <span className="inline-block rounded-3xl bg-[#fff8e7]/95 px-6 py-3 text-2xl md:text-3xl font-black text-[#6b4f3a] shadow-[0_5px_0_rgba(91,70,54,0.2)]">
             {hud.banner}
+          </span>
+        </div>
+      )}
+      {phase === 'play' && zoneSign && !paused && (
+        <div className="pointer-events-none absolute inset-x-0 top-[14%] z-10 text-center">
+          <span className="inline-block rounded-full bg-[#1d1544]/80 px-5 py-2 text-lg font-black tracking-wide text-[#fff6d0] shadow-[0_3px_0_rgba(0,0,0,0.25)] ring-2 ring-[#c8bcf4]">
+            {zoneSign}
           </span>
         </div>
       )}
