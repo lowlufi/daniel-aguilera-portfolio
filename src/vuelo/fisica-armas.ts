@@ -194,6 +194,8 @@ export function pasoMisil(
   dt: number,
   opts: OpcionesMisil,
   suelo: Suelo,
+  /** Sin buscador: las aletas sostienen el vuelo recto mientras quema el motor (misil del jugador). */
+  recto = false,
 ): 'vuela' | 'suelo' | 'agotado' {
   sanear(m);
   m.rumbo = fin(m.rumbo);
@@ -239,6 +241,14 @@ export function pasoMisil(
       ay += T * Math.sin(m.rumbo);
       m.combustible = Math.max(0, m.combustible - h);
       if (m.combustible <= 0) m.guiado = false; // motor apagado: sin energía para maniobrar
+      if (recto && !objetivo) {
+        // Va donde apunta la nariz: anula g y las aletas alinean la velocidad con el morro.
+        ay += G;
+        const cr = Math.cos(m.rumbo), sr = Math.sin(m.rumbo);
+        const lat = -m.vx * sr + m.vy * cr; // velocidad de costado respecto del morro
+        ax += lat * 8 * sr;
+        ay -= lat * 8 * cr;
+      }
     }
     // arrastre
     ax -= k * sp * m.vx;

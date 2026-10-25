@@ -257,7 +257,7 @@ export function crear(tipo: TipoJefe, x: number, y: number, ola = 4): Jefe {
     p.hp = p.hpMax = Math.round(p.hpMax * extra);
     p.cd = 1.5 + (partes.indexOf(p) % 3) * 0.9;
   }
-  const vidaMax = Math.round((tipo === 'dirigible' ? 92 : 100) * extra);
+  const vidaMax = Math.round((tipo === 'dirigible' ? 60 : 62) * extra);
   const j: Jefe = {
     tipo, x: fin(x), y: fin(y, tipo === 'dirigible' ? 900 : 2400), vx: tipo === 'dirigible' ? -20 : -40, vy: 0, ang: 0, mira: -1, giro: -1, girarT: 0,
     partes, vida: vidaMax, vidaMax, fase: 1, ola: n, t: 0, muriendo: -1, muerto: false, heridas: [],
@@ -373,7 +373,7 @@ function herir(j: Jefe, u: number, v: number, peso: number) {
  */
 export function golpear(j: Jefe, x: number, y: number, danio: number): ResultadoGolpe {
   if (j.muerto || j.muriendo >= 0) return {};
-  const d = Math.max(0, fin(danio));
+  let d = Math.max(0, fin(danio));
   if (d <= 0) return {};
   const { u, v } = aLocal(j, fin(x), fin(y));
   let mejor: ParteJefe | null = null;
@@ -385,6 +385,19 @@ export function golpear(j: Jefe, x: number, y: number, danio: number): Resultado
       md = dd;
       mejor = p;
     }
+  }
+  // Parts sunk in the hull still feel a hit on the plating, at 70 %: nearby on
+  // the airship, anywhere on the saucer (seen from the side they're all inside it).
+  if (!mejor) {
+    for (const p of j.partes) {
+      if (!p.viva || !p.vulnerable || p.clase === 'casco') continue;
+      const dd = Math.hypot(u - p.dx, v - p.dy) - p.r;
+      if (dd < (j.tipo === 'nodriza' ? Infinity : 50) && dd < md) {
+        md = dd;
+        mejor = p;
+      }
+    }
+    if (mejor) d *= 0.7;
   }
   const out: ResultadoGolpe = {};
   if (mejor) {
@@ -410,7 +423,7 @@ export function golpear(j: Jefe, x: number, y: number, danio: number): Resultado
   } else {
     const casco = parteDe(j, 'casco');
     out.parte = 'casco';
-    const f = j.tipo === 'dirigible' ? 0.5 : 0.4;
+    const f = j.tipo === 'dirigible' ? 0.7 : 0.6;
     casco.hp = Math.max(0, casco.hp - d * f);
     casco.flash = 0.12;
     j.vida -= d * f;
