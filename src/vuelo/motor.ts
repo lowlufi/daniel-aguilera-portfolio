@@ -2003,6 +2003,18 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
 
+    // Flyers hidden behind the HUD pills get a pink marker just below them.
+    if (s.mode === 'play' && !s.dead) {
+      const band = Math.ceil(56 / view.s);
+      for (const a of s.aereos) {
+        const x = sx(a.x);
+        const y = sy(a.y);
+        if (x < 4 || x > vw - 4 || y > band || y < -40) continue;
+        const k = Math.floor(s.t * 6) % 2;
+        for (let i = 0; i < 4; i++) A.R(g, x - 3 + i, band + 2 + i + k, 7 - 2 * i, 1, i ? P.p1 : '#3a2a6a');
+      }
+    }
+
     // No enemy in view: an arrow at the edge points to the nearest one, with the distance.
     if (s.mode === 'play' && !s.dead) {
       const seen = (x: number, y: number) => sx(x) >= 0 && sx(x) < vw && sy(y) >= 0 && sy(y) < vh;

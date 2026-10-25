@@ -31,6 +31,50 @@ function Pips({ n, max, on, off }: { n: number; max: number; on: string; off: st
   );
 }
 
+/*
+ * Tiny pixel-art icons for the weapons chip, so it matches the game instead of
+ * the system's emoji. Each letter is a colour; '.' is transparent.
+ */
+const ICON_COL: Record<string, string> = { k: '#3a2a6a', w: '#fff8e7', r: '#ff4a5a', o: '#ff9a3c', y: '#ffd84a', g: '#8a8aa8', b: '#2a2438' };
+const ICONS = {
+  misil: ['.k.......', 'krkkkkkk.', 'orgggggwk', 'krkkkkkk.', '.k.......'],
+  bomba: ['..bbbb.k.', '.bbwbbbk.', 'bbbbbbbkk', '.bbbbbbk.', '..bbbb.k.'],
+  bengala: ['....o....', '..oyyyo..', 'ooywwwyoo', '..oyyyo..', '....o....'],
+} as const;
+type Icono = keyof typeof ICONS;
+const iconUrls = new Map<Icono, string>();
+function iconUrl(n: Icono) {
+  let u = iconUrls.get(n);
+  if (!u) {
+    const rows = ICONS[n];
+    const c = document.createElement('canvas');
+    c.width = rows[0].length;
+    c.height = rows.length;
+    const g = c.getContext('2d')!;
+    rows.forEach((row, y) =>
+      [...row].forEach((ch, x) => {
+        if (ch === '.') return;
+        g.fillStyle = ICON_COL[ch];
+        g.fillRect(x, y, 1, 1);
+      }),
+    );
+    u = c.toDataURL();
+    iconUrls.set(n, u);
+  }
+  return u;
+}
+
+/** One pixel icon per slot: full ones bright, empty ones faded. */
+function Slots({ icon, n, max }: { icon: Icono; n: number; max: number }) {
+  return (
+    <span aria-hidden className="inline-flex items-center">
+      {Array.from({ length: max }, (_, i) => (
+        <img key={i} src={iconUrl(icon)} alt="" width={18} height={10} className={i < n ? '' : 'opacity-25 grayscale'} style={{ imageRendering: 'pixelated' }} />
+      ))}
+    </span>
+  );
+}
+
 function Stars({ n }: { n: number }) {
   return (
     <span aria-label={`${n} de 5`} className="tracking-tight text-[#f0a45d]">
@@ -202,12 +246,27 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       return true;
     }
   });
-  // The keys panel folds away by itself after a while so it doesn't hide the road.
+  // The keys panel folds away once missile, bomb and flares have all been
+  // tried (or after a long while), so it doesn't hide the road for good.
   const [keysFolded, setKeysFolded] = useState(false);
   useEffect(() => {
     if (phase !== 'play' || keysFolded) return;
-    const id = window.setTimeout(() => setKeysFolded(true), 20000);
-    return () => window.clearTimeout(id);
+    const used = new Set<string>();
+    let fold = 0;
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase();
+      if (k === ' ' || k === 'j') used.add('misil');
+      else if (k === 'k') used.add('bomba');
+      else if (k === 'l') used.add('bengala');
+      if (used.size === 3 && !fold) fold = window.setTimeout(() => setKeysFolded(true), 4000);
+    };
+    window.addEventListener('keydown', onKey);
+    const id = window.setTimeout(() => setKeysFolded(true), 45000);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.clearTimeout(id);
+      window.clearTimeout(fold);
+    };
   }, [phase, keysFolded]);
   const toggleKeys = () =>
     setShowKeys((v) => {
@@ -273,7 +332,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <span className={CHIP}>⭐ {hud.score}</span>
                 <span className={CHIP}>🌊 {hud.wave} · 🐭 {hud.left}</span>
                 <span className={CHIP} title="Altura">⛰️ {hud.altitude.toLocaleString('es-CL')} m</span>
-                <span className={CHIP} title="Viento: empuja las bombas y el humo" aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}>
+                <span className={`${CHIP} max-[899px]:hidden`} title="Viento: empuja las bombas y el humo" aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}>
                   🌬️ {hud.wind < 0 ? '◀'.repeat(Math.min(3, Math.ceil(-hud.wind / 4))) : hud.wind > 0 ? '▶'.repeat(Math.min(3, Math.ceil(hud.wind / 4))) : '·'}
                 </span>
                 <span
@@ -281,8 +340,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   title="Armamento: atrapa los globos de los enemigos para ganar más puestos"
                   aria-label={`Misiles ${hud.ammo} de ${hud.rack}, bombas ${hud.bombs} de ${hud.bombMax}, bengalas ${hud.flares} de ${hud.flareMax}`}
                 >
-                  🚀 <Pips n={hud.ammo} max={hud.rack} on="▮" off="▯" /> 💣 <Pips n={hud.bombs} max={hud.bombMax} on="▮" off="▯" /> ✨{' '}
-                  <Pips n={hud.flares} max={hud.flareMax} on="▮" off="▯" />
+                  <Slots icon="misil" n={hud.ammo} max={hud.rack} />
+                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
+                  <Slots icon="bomba" n={hud.bombs} max={hud.bombMax} />
+                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
+                  <Slots icon="bengala" n={hud.flares} max={hud.flareMax} />
                 </span>
               </>
             )
@@ -368,7 +430,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {/* Keyboard controls, always on screen (can be folded away). */}
       {phase === 'play' && !touchUi && !paused && (
-        <div className="absolute bottom-10 left-3 z-10">
+        <div className="absolute bottom-10 left-3 z-10 origin-bottom-left [@media(max-height:500px)]:scale-[0.7] [@media(max-height:500px)]:opacity-80">
           {showKeys && !keysFolded ? (
             <div className="rounded-2xl bg-[#fff8e7]/90 p-2.5 text-[11px] font-bold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-2 ring-[#ead6b3]">
               <div className="mb-1 flex items-center justify-between gap-3">
@@ -415,7 +477,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     sfx.select();
                   }}
                   aria-pressed={plane === p.id}
-                  className={`flex items-center gap-3 rounded-2xl p-3 text-left transition-colors sm:flex-col sm:text-center ${
+                  className={`flex items-center gap-3 rounded-2xl p-3 [@media(max-height:500px)]:p-1.5 text-left transition-colors sm:flex-col sm:text-center ${
                     plane === p.id ? 'bg-[#ffe3a3] ring-4 ring-[#f0a45d]' : 'bg-white/70 ring-2 ring-[#ead6b3] hover:bg-white'
                   }`}
                 >
@@ -423,15 +485,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     <img
                       src={thumbs[p.id].pilot}
                       alt=""
-                      className="h-10 w-10 rounded-full bg-[#fff8e7] p-0.5 ring-2 ring-[#ead6b3] sm:h-12 sm:w-12"
+                      className="h-10 w-10 rounded-full bg-[#fff8e7] p-0.5 ring-2 ring-[#ead6b3] sm:h-12 sm:w-12 [@media(max-height:500px)]:h-8 [@media(max-height:500px)]:w-8"
                       style={{ imageRendering: 'pixelated' }}
                     />
-                    <img src={thumbs[p.id].plane} alt="" className="h-10 w-auto sm:h-12" style={{ imageRendering: 'pixelated' }} />
+                    <img src={thumbs[p.id].plane} alt="" className="h-10 w-auto sm:h-12 [@media(max-height:500px)]:h-8" style={{ imageRendering: 'pixelated' }} />
                   </span>
                   <span className="min-w-0">
                     <span className="block font-black">{p.pilot}</span>
                     <span className="block text-xs font-black text-[#e8742a]">{p.name}</span>
-                    <span className="block text-xs font-bold leading-snug text-[#8a6e55]">{p.blurb}</span>
+                    <span className="block text-xs font-bold leading-snug text-[#8a6e55] [@media(max-height:500px)]:hidden">{p.blurb}</span>
                   </span>
                 </button>
               ))}
