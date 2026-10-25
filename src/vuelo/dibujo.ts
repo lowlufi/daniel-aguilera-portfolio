@@ -84,11 +84,16 @@ function almendritaHead(g: Ctx, x: number, y: number) {
 
 /* ── Planes ──────────────────────────────────────────────────────────────── */
 
+/* ── Planes: small, detailed and built from parts that can be shot off ──── */
+
+/** Parts of a plane that a hit can tear off, in the order they're listed per model. */
+export type Parte = 'cola' | 'ala' | 'motor' | 'cabina' | 'bodega';
+
 export type PlaneLook = {
   ink: string;
   w: number;
   h: number;
-  /** Propeller hub or jet nozzle, relative to the centre. */
+  /** Propeller hub [x, y, radius] or jet nozzle [x, y], relative to the centre. */
   prop?: [number, number, number];
   jet?: [number, number];
   /** Where the pilot's scarf starts flapping from, and its two colors. */
@@ -96,125 +101,235 @@ export type PlaneLook = {
   scarfC: [string, string];
   /** Where missiles and bombs leave the plane. */
   rack: [number, number];
+  /** Parts this airframe has, and where each sits (for hits, smoke, debris). */
+  parts: Partial<Record<Parte, [number, number]>>;
 };
 
 export const LOOKS: Record<ModeloAvion, PlaneLook> = {
-  avioneta: { ink: '#9a5a10', w: 50, h: 34, prop: [21, 0, 7], scarf: [-3, -8], scarfC: ['#8a5ad8', '#b48af4'], rack: [2, 6] },
-  caza: { ink: P.o0, w: 62, h: 34, jet: [-23, 0], scarf: [-1, -9], scarfC: [P.r1, P.r2], rack: [0, 5] },
-  bombardero: { ink: '#2a5a9a', w: 76, h: 46, prop: [16, 5, 6], scarf: [9, -13], scarfC: [P.p0, P.p1], rack: [-2, 8] },
+  avioneta: {
+    ink: '#9a5a10', w: 40, h: 26, prop: [15, 0, 5], scarf: [-2, -6], scarfC: ['#8a5ad8', '#b48af4'], rack: [1, 4],
+    parts: { cola: [-13, -4], ala: [1, 3], motor: [12, 0], cabina: [3, -5] },
+  },
+  caza: {
+    ink: P.o0, w: 44, h: 24, jet: [-17, 0], scarf: [0, -7], scarfC: [P.r1, P.r2], rack: [0, 4],
+    parts: { cola: [-14, -5], ala: [-3, 3], motor: [-15, 0] },
+  },
+  bombardero: {
+    ink: '#2a5a9a', w: 54, h: 32, prop: [12, 4, 4], scarf: [7, -9], scarfC: [P.p0, P.p1], rack: [-2, 6],
+    parts: { cola: [-20, -7], ala: [-2, 3], motor: [7, 4], cabina: [16, -1], bodega: [-6, 5] },
+  },
 };
 
-function paintAvioneta(g: Ctx) {
-  const Y = '#ffd84a', Y0 = '#e8a828', Y1 = '#fff2a8';
-  // Tail fin and stabilizer.
-  for (let i = 0; i < 8; i++) R(g, -20 + Math.floor(i / 2), -10 + i, 5, 1, Y);
-  R(g, -19, -10, 2, 1, Y1);
-  R(g, -22, -1, 10, 3, Y0);
-  // Fuselage: shade, body, highlight, a red stripe.
-  D.oval(g, 0, 0, 17, 5, Y0);
-  D.oval(g, 0, -1, 16, 4, Y);
-  R(g, -10, -4, 17, 1, Y1);
-  R(g, -14, 1, 25, 1, P.r1);
-  // Cowling and spinner.
-  D.disc(g, 16, 0, 4, P.r1);
-  D.disc(g, 16, -1, 3, P.r2);
-  R(g, 15, -3, 2, 1, P.r3);
-  R(g, 20, -1, 2, 3, P.metal);
-  // Low wing seen a little from the front.
-  D.oval(g, 2, 3, 11, 2, Y0);
-  R(g, -7, 2, 18, 1, Y1);
-  // Landing gear.
-  R(g, 5, 5, 1, 4, P.metal0);
-  D.disc(g, 5, 9, 2, '#4a3a5a');
-  R(g, 5, 9, 1, 1, P.metal);
-  // Open cockpit, windscreen and Lulu.
-  R(g, -4, -5, 9, 2, Y0);
-  luluHead(g, 0, -4);
-  R(g, 7, -9, 1, 5, P.gl1);
-  R(g, 6, -8, 1, 4, P.gl0);
-}
-
-function paintCaza(g: Ctx) {
-  const O = P.o2, O0 = P.o1, O1 = P.o3;
-  // Swept tail fin.
-  for (let i = 0; i < 9; i++) R(g, -22 + Math.round(i * 0.6), -12 + i, 6 - Math.floor(i / 4), 1, i < 2 ? O1 : O);
-  R(g, -24, 0, 10, 2, O0);
-  // Fuselage and a pointed nose.
-  D.oval(g, -2, 0, 20, 4, O0);
-  D.oval(g, -2, -1, 19, 3, O);
-  R(g, -14, -3, 20, 1, O1);
-  R(g, 16, -3, 3, 6, O);
-  R(g, 19, -2, 3, 4, O);
-  R(g, 22, -1, 3, 2, O0);
-  R(g, 25, 0, 2, 1, O0);
-  R(g, 16, -3, 6, 1, O1);
-  R(g, -16, 1, 30, 1, P.cream);
-  // Swept wing.
-  for (let i = 0; i < 6; i++) R(g, -6 - i, 2 + i, 13 - i, 1, i === 0 ? O1 : O0);
-  // Missile under the wing.
-  R(g, -3, 7, 9, 2, P.white);
-  R(g, 6, 7, 2, 2, P.red);
-  R(g, -4, 6, 2, 1, P.metal);
-  // Nozzle.
-  R(g, -23, -2, 3, 4, P.metal0);
-  // Bubble canopy with Dui inside.
-  D.oval(g, 6, -4, 7, 4, P.gl0);
-  duiHead(g, 5, -1);
-  g.globalAlpha = 0.45;
-  D.oval(g, 6, -4, 6, 3, P.gl1);
-  g.globalAlpha = 1;
-  R(g, 8, -7, 3, 1, P.white);
-}
-
-function paintBombardero(g: Ctx) {
-  const B = '#9ad0ff', B0 = '#5a9ae0', B1 = '#d8f0ff';
-  // Big tail fin.
-  for (let i = 0; i < 12; i++) R(g, -32 + Math.round(i * 0.5), -17 + i, 8, 1, i < 2 ? B1 : B);
-  R(g, -34, -2, 13, 4, B0);
-  // Fat fuselage.
-  D.oval(g, 0, 0, 27, 8, B0);
-  D.oval(g, 0, -1, 26, 7, B);
-  R(g, -18, -7, 30, 2, B1);
-  R(g, -24, 3, 46, 1, P.white);
-  // Round windows.
-  for (let k = 0; k < 4; k++) {
-    D.disc(g, -15 + k * 7, -1, 2, P.gl0);
-    R(g, -16 + k * 7, -2, 1, 1, P.white);
+/** Small pilot heads for the cockpit (the big ones are for the hangar portraits). */
+function miniHead(g: Ctx, m: ModeloAvion, x: number, y: number) {
+  if (m === 'caza') {
+    R(g, x - 3, y - 7, 2, 2, P.o1);
+    R(g, x + 1, y - 7, 2, 2, P.o1);
+    D.disc(g, x, y - 3, 3, P.o2);
+    R(g, x - 2, y - 5, 2, 1, P.o3);
+    R(g, x - 3, y - 4, 6, 1, P.k0);
+    R(g, x + 1, y - 4, 2, 2, P.gl1);
+    R(g, x + 2, y - 1, 1, 1, P.blush);
+  } else if (m === 'avioneta') {
+    const K = '#2e2840';
+    R(g, x - 3, y - 7, 2, 2, K);
+    R(g, x + 1, y - 7, 2, 2, K);
+    D.disc(g, x, y - 3, 3, K);
+    R(g, x - 2, y - 5, 2, 1, '#4e4668');
+    R(g, x - 3, y - 5, 6, 1, P.k0);
+    R(g, x + 1, y - 3, 2, 1, '#ffd23a');
+    R(g, x + 2, y - 3, 1, 1, '#1a1428');
+    R(g, x + 3, y - 1, 1, 1, P.p1);
+  } else {
+    R(g, x - 3, y - 7, 1, 2, '#b07838');
+    R(g, x + 2, y - 7, 1, 2, '#b07838');
+    D.disc(g, x, y - 3, 3, '#d8a060');
+    R(g, x - 3, y - 5, 4, 2, '#7a8aa8');
+    R(g, x - 1, y - 7, 3, 1, P.r2);
+    R(g, x + 1, y - 4, 1, 1, P.eye);
+    D.oval(g, x + 2, y - 2, 1, 1, '#f4cc90');
+    R(g, x + 3, y - 2, 1, 1, '#2a2030');
   }
-  // Glass nose.
-  D.disc(g, 23, 0, 5, P.gl0);
-  D.disc(g, 23, -1, 4, P.gl1);
-  R(g, 23, -4, 2, 1, P.white);
-  // Wing, and the engine under it.
-  D.oval(g, -2, 4, 17, 3, B0);
-  R(g, -16, 3, 28, 1, B1);
-  D.oval(g, 9, 5, 7, 3, P.metal0);
-  D.oval(g, 9, 4, 6, 2, P.metal);
-  // Bomb bay.
-  R(g, -10, 8, 16, 1, B0);
-  // Cockpit bump with Almendrita.
-  D.oval(g, 10, -8, 6, 4, P.gl0);
-  almendritaHead(g, 10, -5);
+}
+
+/** A torn, scorched edge where a part used to be. */
+function stub(g: Ctx, x: number, y: number, w: number, h: number) {
+  R(g, x, y, w, h, '#5a4a5a');
+  for (let i = 0; i < h; i++) R(g, x + (i % 2 ? -1 : w), y + i, 1, 1, i % 3 ? '#3a2a3a' : '#ff9a3c');
+  R(g, x + Math.floor(w / 2), y, 1, 1, P.gold);
+}
+
+/** Black scorch marks that grow with damage. */
+function scorch(g: Ctx, n: number, seed: number) {
+  for (let i = 0; i < n * 3; i++) {
+    const h = (seed * 31 + i * 97) % 211;
+    R(g, (h % 18) - 9, ((h >> 3) % 5) - 2, 2, 1, i % 2 ? '#5a4a5a' : '#7a6a7a');
+  }
+}
+
+type Has = (p: Parte) => boolean;
+
+function paintAvioneta(g: Ctx, has: Has) {
+  const Y = '#ffd84a', Y0 = '#e8a828', Y1 = '#fff2a8';
+  if (has('cola')) {
+    for (let i = 0; i < 6; i++) R(g, -15 + Math.floor(i / 2), -8 + i, 4, 1, i < 2 ? Y1 : Y);
+    R(g, -14, -8, 1, 6, P.r1);
+    R(g, -17, -1, 7, 2, Y0);
+    R(g, -17, -1, 7, 1, Y);
+  } else stub(g, -12, -3, 2, 4);
+  // Fuselage with panel lines and rivets.
+  D.oval(g, 0, 0, 12, 4, Y0);
+  D.oval(g, 0, -1, 11, 3, Y);
+  R(g, -8, -3, 13, 1, Y1);
+  R(g, -10, 1, 19, 1, P.r1);
+  R(g, -4, -2, 1, 3, Y0);
+  R(g, 6, -2, 1, 3, Y0);
+  for (let x = -8; x < 8; x += 4) R(g, x, 2, 1, 1, '#c88a20');
+  if (has('motor')) {
+    D.disc(g, 11, 0, 3, P.r0);
+    D.disc(g, 11, -1, 2, P.r2);
+    R(g, 10, -2, 2, 1, P.r3);
+    R(g, 14, -1, 2, 2, P.metal);
+    R(g, 8, -3, 1, 1, P.metal0);
+    R(g, 8, 2, 1, 1, P.metal0);
+  } else stub(g, 9, -2, 2, 4);
+  if (has('ala')) {
+    D.oval(g, 1, 3, 8, 1, Y0);
+    R(g, -6, 2, 14, 1, Y1);
+    R(g, 7, 3, 2, 1, P.red);
+    R(g, 3, 4, 1, 3, P.metal0);
+    D.disc(g, 3, 7, 1, '#4a3a5a');
+  } else stub(g, -1, 2, 3, 2);
+  // Cockpit, windscreen and Lulu.
+  R(g, -3, -4, 7, 1, Y0);
+  miniHead(g, 'avioneta', 0, -3);
+  if (has('cabina')) {
+    R(g, 5, -7, 1, 4, P.gl1);
+    R(g, 4, -6, 1, 3, P.gl0);
+  } else R(g, 5, -5, 1, 1, P.gl0);
+}
+
+function paintCaza(g: Ctx, has: Has) {
+  const O = P.o2, O0 = P.o1, O1 = P.o3;
+  if (has('cola')) {
+    for (let i = 0; i < 7; i++) R(g, -16 + Math.round(i * 0.6), -9 + i, 4 - Math.floor(i / 4), 1, i < 2 ? O1 : O);
+    R(g, -15, -8, 1, 3, P.cream);
+    R(g, -18, 0, 8, 2, O0);
+  } else stub(g, -13, -3, 2, 4);
+  // Fuselage, intake and a pointed nose.
+  D.oval(g, -1, 0, 15, 3, O0);
+  D.oval(g, -1, -1, 14, 2, O);
+  R(g, -10, -2, 15, 1, O1);
+  R(g, 12, -2, 3, 4, O);
+  R(g, 15, -1, 3, 3, O);
+  R(g, 18, 0, 2, 1, O0);
+  R(g, 12, -2, 5, 1, O1);
+  R(g, -12, 1, 22, 1, P.cream);
+  R(g, 0, 0, 3, 2, '#7a3a2a');
+  for (let x = -9; x < 9; x += 5) R(g, x, -1, 1, 2, O0);
+  if (has('ala')) {
+    for (let i = 0; i < 4; i++) R(g, -4 - i, 2 + i, 10 - i, 1, i === 0 ? O1 : O0);
+    R(g, -2, 6, 6, 1, P.white);
+    R(g, 4, 6, 1, 1, P.red);
+  } else stub(g, -3, 2, 3, 2);
+  if (has('motor')) {
+    R(g, -18, -2, 3, 4, P.metal0);
+    R(g, -18, -1, 1, 2, '#2a2438');
+  } else stub(g, -16, -2, 2, 4);
+  // Bubble canopy with Dui inside.
+  D.oval(g, 5, -3, 5, 3, P.gl0);
+  miniHead(g, 'caza', 4, -1);
   g.globalAlpha = 0.45;
-  D.oval(g, 10, -8, 5, 3, P.gl1);
+  D.oval(g, 5, -3, 4, 2, P.gl1);
+  g.globalAlpha = 1;
+  R(g, 6, -5, 2, 1, P.white);
+}
+
+function paintBombardero(g: Ctx, has: Has) {
+  const B = '#9ad0ff', B0 = '#5a9ae0', B1 = '#d8f0ff';
+  if (has('cola')) {
+    for (let i = 0; i < 9; i++) R(g, -23 + Math.round(i * 0.5), -12 + i, 6, 1, i < 2 ? B1 : B);
+    R(g, -22, -11, 1, 7, P.r1);
+    R(g, -25, -2, 10, 3, B0);
+    R(g, -25, -2, 10, 1, B);
+  } else stub(g, -18, -4, 2, 6);
+  D.oval(g, 0, 0, 20, 6, B0);
+  D.oval(g, 0, -1, 19, 5, B);
+  R(g, -13, -5, 22, 1, B1);
+  R(g, -18, 3, 35, 1, P.white);
+  for (let k = 0; k < 4; k++) {
+    D.disc(g, -11 + k * 5, -1, 1, P.gl0);
+    R(g, -11 + k * 5, -2, 1, 1, P.white);
+  }
+  for (let x = -16; x < 16; x += 6) R(g, x, -4, 1, 7, B0);
+  if (has('cabina')) {
+    D.disc(g, 17, 0, 4, P.gl0);
+    D.disc(g, 17, -1, 3, P.gl1);
+    R(g, 17, -3, 2, 1, P.white);
+  } else stub(g, 15, -2, 2, 5);
+  if (has('ala')) {
+    D.oval(g, -2, 3, 12, 2, B0);
+    R(g, -12, 2, 20, 1, B1);
+    R(g, 9, 3, 2, 1, P.red);
+  } else stub(g, -3, 2, 3, 3);
+  if (has('motor')) {
+    D.oval(g, 7, 4, 5, 2, P.metal0);
+    D.oval(g, 7, 3, 4, 1, P.metal);
+    R(g, 3, 5, 1, 1, '#2a2438');
+  } else stub(g, 5, 3, 3, 3);
+  if (has('bodega')) {
+    R(g, -9, 5, 11, 2, B0);
+    R(g, -8, 5, 9, 1, P.metal);
+  } else {
+    R(g, -9, 5, 11, 2, '#2a2438');
+    R(g, -7, 6, 2, 1, P.s1);
+  }
+  D.oval(g, 7, -6, 4, 3, P.gl0);
+  miniHead(g, 'bombardero', 7, -4);
+  g.globalAlpha = 0.45;
+  D.oval(g, 7, -6, 3, 2, P.gl1);
   g.globalAlpha = 1;
 }
 
-const PAINT: Record<ModeloAvion, (g: Ctx) => void> = { avioneta: paintAvioneta, caza: paintCaza, bombardero: paintBombardero };
+const PAINT: Record<ModeloAvion, (g: Ctx, has: Has) => void> = { avioneta: paintAvioneta, caza: paintCaza, bombardero: paintBombardero };
 
-export function planeSprite(m: ModeloAvion) {
+/** The plane's sprite with the given parts missing (cached per combination). */
+export function planeSprite(m: ModeloAvion, lost: readonly Parte[] = []) {
   const L = LOOKS[m];
-  return D.outlined(`avion|${m}`, L.ink, L.w, L.h, L.w / 2, L.h / 2, PAINT[m]);
+  const key = lost.length ? [...lost].sort().join(',') : '';
+  return D.outlined(`avion2|${m}|${key}`, L.ink, L.w, L.h, L.w / 2, L.h / 2, (g) => {
+    PAINT[m](g, (p) => !lost.includes(p));
+    if (lost.length) scorch(g, lost.length, m.length);
+  });
+}
+
+/** Just one part, drawn alone: the piece that flies off when it's shot away. */
+export function partSprite(m: ModeloAvion, part: Parte) {
+  const L = LOOKS[m];
+  return D.outlined(`pieza|${m}|${part}`, L.ink, L.w, L.h, L.w / 2, L.h / 2, (g) => {
+    // Paint everything, then keep only a box around the part.
+    const c = document.createElement('canvas');
+    c.width = L.w;
+    c.height = L.h;
+    const cg = c.getContext('2d')!;
+    cg.translate(L.w / 2, L.h / 2);
+    PAINT[m](cg, (p) => p === part);
+    const [ax, ay] = L.parts[part] ?? [0, 0];
+    const bx = L.w / 2 + ax - 7;
+    const by = L.h / 2 + ay - 6;
+    g.drawImage(c, bx, by, 14, 12, ax - 7, ay - 6, 14, 12);
+  });
 }
 
 /**
  * The plane at (x, y) on screen, nose along `angle` (screen radians, y down),
  * flipped by `roll` (+1 canopy up, -1 rolled over). `t` animates the
  * propeller, the jet flame and the scarf; `gas` makes the flame bigger.
+ * `lost` lists the parts already shot off.
  */
-export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: number, roll: number, t: number, gas: number, blink = false) {
+export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: number, roll: number, t: number, gas: number, blink = false, lost: readonly Parte[] = []) {
   const L = LOOKS[m];
-  const img = planeSprite(m);
+  const img = planeSprite(m, lost);
   g.save();
   g.translate(Math.round(x), Math.round(y));
   // Quantized so the nearest-neighbour rotation doesn't shimmer every frame.
@@ -223,26 +338,28 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
   g.scale(1, sy);
   // The pilot's scarf flaps behind the cockpit.
   const [sx0, sy0] = L.scarf;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 4; i++) {
     const wave = Math.round(Math.sin(t * 18 - i * 0.9) * (i * 0.4));
-    R(g, sx0 - 3 - i * 2, sy0 + wave + (i > 2 ? 1 : 0), 3, 2, L.scarfC[i % 2]);
+    R(g, sx0 - 3 - i * 2, sy0 + wave + (i > 1 ? 1 : 0), 2, 1, L.scarfC[i % 2]);
   }
   if (!blink) g.drawImage(img, -L.w / 2, -L.h / 2);
-  if (L.prop) {
+  const engine = !lost.includes('motor');
+  if (L.prop && engine) {
     const [px, py, r] = L.prop;
     const f = Math.floor(t * 40) % 3;
+    const hgt = [r, Math.max(1, r - 2), 1][f];
     g.globalAlpha = 0.7;
-    R(g, px + 1, py - [r, r - 3, 2][f], 1, [r, r - 3, 2][f] * 2, P.metal);
+    R(g, px + 1, py - hgt, 1, hgt * 2, P.metal);
     g.globalAlpha = 0.3;
     R(g, px + 1, py - r, 1, r * 2, P.white);
     g.globalAlpha = 1;
   }
-  if (L.jet) {
+  if (L.jet && engine) {
     const [jx, jy] = L.jet;
-    const len = 3 + Math.round(gas * 6) + (Math.floor(t * 30) % 2);
-    D.oval(g, jx - len / 2, jy, Math.ceil(len / 2) + 1, 2, '#ff9a3c');
-    D.oval(g, jx - len / 3, jy, Math.ceil(len / 3), 1, P.gold);
-    R(g, jx - 1, jy, 2, 1, P.white);
+    const len = 2 + Math.round(gas * 5) + (Math.floor(t * 30) % 2);
+    D.oval(g, jx - len / 2, jy, Math.ceil(len / 2) + 1, 1, '#ff9a3c');
+    R(g, jx - Math.ceil(len / 2), jy, Math.ceil(len / 2), 1, P.gold);
+    R(g, jx - 1, jy, 1, 1, P.white);
   }
   g.restore();
 }
@@ -647,29 +764,6 @@ export function drawCrate(g: Ctx, x: number, y: number, sway: number, chute: boo
 }
 
 /* ── Explosions, smoke and sparks ────────────────────────────────────────── */
-
-/** A cartoon blast `k` (0…1) of the way through, with fireball radius r. */
-export function drawBlast(g: Ctx, x: number, y: number, r: number, k: number) {
-  if (k < 0.12) {
-    D.disc(g, x, y, Math.max(2, Math.round(r * (0.5 + k * 4))), P.white);
-    return;
-  }
-  if (k < 0.55) {
-    const rr = Math.round(r * (0.9 + k * 0.4));
-    D.disc(g, x, y, rr + 1, '#ff7090');
-    D.disc(g, x, y, rr, '#ff9a3c');
-    D.disc(g, x, y - 1, Math.round(rr * 0.75), P.gold);
-    D.disc(g, x - 1, y - 2, Math.round(rr * 0.4), P.gold1);
-    return;
-  }
-  // The ring breaks up into a few puffs.
-  const rr = Math.round(r * (1.2 + k * 0.3));
-  const pr = Math.max(1, Math.round(r * (1 - k) * 0.7));
-  for (let i = 0; i < 6; i++) {
-    const a = (i * Math.PI) / 3 + 0.3;
-    D.disc(g, x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.8, pr, k < 0.75 ? '#ff9a3c' : '#ffd0a0');
-  }
-}
 
 export function drawPuff(g: Ctx, x: number, y: number, r: number, dark: boolean, alpha: number) {
   g.globalAlpha = Math.round(alpha * 4) / 4;

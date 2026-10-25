@@ -159,8 +159,8 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
   // elevator alive at low speed, snappy roll.
   avioneta: derivar({
     masa: 1, velCrucero: 100, velMax: 145, clCrucero: 0.22, cl0: 0.2, clAlfa: 5.0,
-    alfaPerdida: 0.25, cd0: 0.028, kInducido: 0.07, cargaMax: 7, cargaMin: -4,
-    tpwCrucero: 0.5, tpwMax: 0.9, inercia: 0.5, accMando: 45, mandoMinimo: 0.35,
+    alfaPerdida: 0.25, cd0: 0.028, kInducido: 0.07, cargaMax: 5.5, cargaMin: -3,
+    tpwCrucero: 0.5, tpwMax: 0.9, inercia: 0.5, accMando: 34, mandoMinimo: 0.35,
     accRigidez: 25, accAmort: 3, accPerdida: 9, wCabeceo: 14, tiempoTonel: 0.35,
     helice: true, panza: 5,
   }),
@@ -168,8 +168,8 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
   // T/W > 1, structural limit caps the turn at high speed → wide circles.
   caza: derivar({
     masa: 1.6, velCrucero: 150, velMax: 230, clCrucero: 0.15, cl0: 0.05, clAlfa: 4.0,
-    alfaPerdida: 0.3, cd0: 0.018, kInducido: 0.12, cargaMax: 7.5, cargaMin: -3,
-    tpwCrucero: 0.6, tpwMax: 1.15, inercia: 1.2, accMando: 30, mandoMinimo: 0.12,
+    alfaPerdida: 0.3, cd0: 0.018, kInducido: 0.12, cargaMax: 6, cargaMin: -2.5,
+    tpwCrucero: 0.6, tpwMax: 1.15, inercia: 1.2, accMando: 23, mandoMinimo: 0.12,
     accRigidez: 18, accAmort: 2.5, accPerdida: 7, wCabeceo: 11, tiempoTonel: 0.5,
     helice: false, panza: 5,
   }),
@@ -177,12 +177,26 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
   // slow roll. It cannot loop at cruise: reversals become stall turns.
   bombardero: derivar({
     masa: 4, velCrucero: 85, velMax: 112, clCrucero: 0.4, cl0: 0.35, clAlfa: 4.8,
-    alfaPerdida: 0.24, cd0: 0.035, kInducido: 0.05, cargaMax: 3.5, cargaMin: -1.2,
-    tpwCrucero: 0.35, tpwMax: 0.55, inercia: 6, accMando: 12, mandoMinimo: 0.2,
+    alfaPerdida: 0.24, cd0: 0.035, kInducido: 0.05, cargaMax: 3, cargaMin: -1,
+    tpwCrucero: 0.35, tpwMax: 0.55, inercia: 6, accMando: 10, mandoMinimo: 0.2,
     accRigidez: 12, accAmort: 2.5, accPerdida: 5, wCabeceo: 6, tiempoTonel: 1.0,
     helice: true, panza: 7,
   }),
 };
+
+// ---------------------------------------------------------------- damage ---
+
+/**
+ * Battle damage as multipliers on the healthy airframe: a lost engine cuts
+ * thrust, a torn wing loses lift (higher stall speed), a lost tail weakens
+ * the elevator, broken panels add drag, and `temblor` shakes the nose.
+ */
+export type Dano = { empuje: number; sustentacion: number; mando: number; arrastre: number; temblor: number };
+export const SANO: Dano = { empuje: 1, sustentacion: 1, mando: 1, arrastre: 1, temblor: 0 };
+const danos = new WeakMap<Avion, Dano>();
+export function fijarDano(a: Avion, d: Dano) {
+  danos.set(a, d);
+}
 
 // --------------------------------------------------------------- helpers ---
 
@@ -306,6 +320,7 @@ function subpaso(
 ): number {
   const p = PARAMS[m];
   const e = estado(a);
+  const dn = danos.get(a) ?? SANO;
   e.t += h;
   const W = p.masa * G;
 
@@ -428,9 +443,11 @@ function subpaso(
   const Mp = a.perdida ? -s * p.momentoPerdida * (0.4 + Math.min(qf, 2)) * clamp(alfaB / as, -1, 1) : 0;
   const wn = p.wCabeceo;
   const accD = wn * wn * wrap(thetaCmd - a.rumbo) + 2 * 0.85 * wn * (gamDotFF - a.omega);
-  const autoridad = p.momentoMando * Math.max(p.mandoMinimo, Math.min(qf, 2.5)) * (a.perdida ? 0.3 : 1) * delgado;
+  const autoridad = p.momentoMando * Math.max(p.mandoMinimo, Math.min(qf, 2.5)) * (a.perdida ? 0.3 : 1) * delgado * dn.mando;
   const Me = clamp(I * accD - Ms - Md, -autoridad, autoridad);
-  a.omega = clamp(a.omega + ((Me + Ms + Md + Mp) / I) * h, -15, 15);
+  // Damage buffeting: random pitch kicks.
+  const Mt = dn.temblor ? (Math.random() - 0.5) * 2 * dn.temblor * p.momentoMando * 0.5 : 0;
+  a.omega = clamp(a.omega + ((Me + Ms + Md + Mp + Mt) / I) * h, -15, 15);
   a.rumbo = wrap(a.rumbo + a.omega * h);
 
   // --- half-roll (rate slowed until the wing is unloaded) ---------------
@@ -441,12 +458,12 @@ function subpaso(
 
   // --- forces ---------------------------------------------------------
   const alfaB2 = wrap(a.rumbo - gam) * (a.alabeo >= 0 ? 1 : -1);
-  const cl = coefSustentacion(p, alfaB2, a.perdida);
+  const cl = coefSustentacion(p, alfaB2, a.perdida) * dn.sustentacion;
   const cd = coefArrastre(p, alfaB2, cl, a.perdida);
   const lIn = q * p.superficie * cl * a.alabeo * delgado; // in-plane lift (CCW of wind)
   // Braking (gas < 0) idles the engine and opens air brakes: extra parasite drag.
   const freno = Math.max(0, -gas);
-  const dr = q * p.superficie * (cd + freno * p.cd0 * 4);
+  const dr = q * p.superficie * (cd * dn.arrastre + freno * p.cd0 * 4);
   const ux = V > 1e-3 ? vax / V : Math.cos(a.rumbo);
   const uy = V > 1e-3 ? vay / V : Math.sin(a.rumbo);
 
@@ -454,6 +471,7 @@ function subpaso(
   const vObj = gas >= 0 ? p.velCrucero + gas * (p.velMax - p.velCrucero) : p.velCrucero - freno * (p.velCrucero - 1.3 * p.velPerdida);
   let tLim = (p.empujeCrucero + Math.max(0, gas) * (p.empujeMax - p.empujeCrucero)) * delgado * (1 - 0.8 * freno);
   if (p.helice) tLim *= clamp(1.25 - 0.25 * (V / p.velCrucero), 0.55, 1.4);
+  tLim *= dn.empuje;
   const tReq = dr + W * Math.sin(gam) + (p.masa * (vObj - V)) / 0.8;
   const T = clamp(tReq, 0, tLim);
   a.gas = clamp(T / (p.empujeMax * delgado + 1e-9), 0, 1);

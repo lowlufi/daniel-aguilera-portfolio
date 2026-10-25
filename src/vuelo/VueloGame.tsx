@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { initAudio, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, sfx } from '../game/audio';
 import { cargarSonidos } from './sonido';
-import { PLANES, createVuelo, dibujo, type Hud, type Result, type Vuelo } from './motor';
+import { PLANES, createVuelo, dibujo, readSave, type Hud, type Result, type SavedGame, type Vuelo } from './motor';
 import type { ModeloAvion } from './fisica-tipos';
 
 /*
@@ -45,7 +45,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const game = useRef<Vuelo | null>(null);
   const [phase, setPhase] = useState<Phase>('menu');
-  const [plane, setPlane] = useState<ModeloAvion>('caza');
+  const [saved, setSaved] = useState<SavedGame | null>(readSave);
+  const [plane, setPlane] = useState<ModeloAvion>(() => readSave()?.pilot ?? 'caza');
   const [hud, setHud] = useState<Hud | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [paused, setPaused] = useState(false);
@@ -75,6 +76,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     const tall = window.matchMedia('(orientation: portrait)');
     const update = () => {
       setTouchUi(coarse.matches);
+      game.current?.setTouch(coarse.matches);
       setPortrait(tall.matches && coarse.matches);
     };
     update();
@@ -92,7 +94,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     return out;
   }, []);
 
-  const play = useCallback(() => {
+  const play = useCallback((resume = false) => {
     // No background music here: only the engines and the effects.
     setMusicVolume(0);
     initAudio(muted);
@@ -101,7 +103,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setResult(null);
     setPaused(false);
     game.current?.setPaused(false);
-    game.current?.start(plane);
+    const from = resume ? readSave() : null;
+    if (from) setPlane(from.pilot);
+    game.current?.start(from ? from.pilot : plane, from);
+    setSaved(null);
     setPhase('play');
   }, [muted, plane]);
 
@@ -117,6 +122,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     game.current?.demo();
     game.current?.setPaused(false);
     setPaused(false);
+    setSaved(readSave());
     setPhase('menu');
   }, []);
 
@@ -195,6 +201,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       return true;
     }
   });
+  // The keys panel folds away by itself after a while so it doesn't hide the road.
+  const [keysFolded, setKeysFolded] = useState(false);
+  useEffect(() => {
+    if (phase !== 'play' || keysFolded) return;
+    const id = window.setTimeout(() => setKeysFolded(true), 20000);
+    return () => window.clearTimeout(id);
+  }, [phase, keysFolded]);
   const toggleKeys = () =>
     setShowKeys((v) => {
       try {
@@ -222,15 +235,22 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       </div>
 
       {/* Top bar: score on the left, the way out on the right. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
           {phase === 'menu' ? (
             <span className={`${CHIP} px-4`}>✈️ Escuadrón Dui</span>
           ) : (
             hud && (
               <>
-                <span className={CHIP} title="Vidas del avión" aria-label={`Vidas: ${hud.hp} de ${hud.hpMax}`}>
-                  <Pips n={hud.hp} max={hud.hpMax} on="❤️" off="🤍" />
+                <span className={CHIP} title="Aviones que te quedan" aria-label={`Aviones: ${hud.lives}`}>
+                  ✈️ ×{hud.lives}
+                </span>
+                <span
+                  className={`${CHIP} ${hud.lost.length ? 'ring-2 ring-[#ff4a5a]' : ''}`}
+                  title={hud.lost.length ? `Dañado: ${hud.lost.join(', ')}` : 'Avión intacto'}
+                  aria-label={`Blindaje: ${hud.hp} de ${hud.hpMax}${hud.lost.length ? `. Perdiste ${hud.lost.join(', ')}` : ''}`}
+                >
+                  <Pips n={hud.hp} max={hud.hpMax} on="🛡️" off="💥" />
                 </span>
                 <span className={CHIP} title="Pescado en la despensa" aria-label={`Despensa: ${hud.meta} de ${hud.metaMax}`}>
                   <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
@@ -289,7 +309,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {phase === 'play' && hud?.stall && !paused && (
         <div className="pointer-events-none absolute inset-x-0 top-[46%] z-10 text-center">
           <span className="inline-block animate-pulse rounded-full bg-[#ffe048] px-4 py-1.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_#e08a10]">
-            ⚠️ ¡Perdiste sustentación! Baja la nariz y acelera
+            ⚠️ ¡Vas muy lento! Apunta hacia abajo y acelera
           </span>
         </div>
       )}
@@ -310,7 +330,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {/* Keyboard controls, always on screen (can be folded away). */}
       {phase === 'play' && !touchUi && !paused && (
         <div className="absolute bottom-10 left-3 z-10">
-          {showKeys ? (
+          {showKeys && !keysFolded ? (
             <div className="rounded-2xl bg-[#fff8e7]/90 p-2.5 text-[11px] font-bold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-2 ring-[#ead6b3]">
               <div className="mb-1 flex items-center justify-between gap-3">
                 <span className="text-xs font-black">Controles</span>
@@ -330,7 +350,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </ul>
             </div>
           ) : (
-            <button type="button" onClick={toggleKeys} className={BTN}>
+            <button type="button" onClick={keysFolded ? () => setKeysFolded(false) : toggleKeys} className={BTN}>
               ⌨️ Controles
             </button>
           )}
@@ -339,10 +359,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {/* Menu: the story, the hangar and the controls. */}
       {phase === 'menu' && (
-        <div className="absolute inset-0 z-30 grid place-items-center overflow-y-auto p-4 pt-20">
-          <div className="w-full max-w-2xl rounded-[2rem] bg-[#fff8e7]/95 p-5 md:p-7 shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
-            <h1 className="text-center text-3xl md:text-4xl font-black text-[#e8742a]">Escuadrón Dui</h1>
-            <p className="mx-auto mt-2 max-w-lg text-center text-[15px] font-bold leading-snug">
+        <div role="dialog" aria-modal="true" aria-label="Hangar" className="absolute inset-0 z-30 grid place-items-center overflow-y-auto p-4 pt-20 [@media(max-height:500px)]:pt-14 [@media(max-height:500px)]:pb-2">
+          <div className="w-full max-w-2xl rounded-[2rem] bg-[#fff8e7]/95 p-5 md:p-7 [@media(max-height:500px)]:p-3 shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
+            <h1 className="text-center text-3xl md:text-4xl font-black text-[#e8742a] [@media(max-height:500px)]:text-2xl">Escuadrón Dui</h1>
+            <p className="mx-auto mt-2 max-w-lg text-center text-[15px] font-bold leading-snug [@media(max-height:500px)]:hidden">
               Los ratones quieren llevarse el pescado de la despensa. Dui, Lulu y Almendrita despegan para detenerlos: esquiva sus misiles y frena sus vehículos antes de que lleguen.
             </p>
             <h2 className="mt-5 text-sm font-black uppercase tracking-wide text-[#a08060]">Elige piloto</h2>
@@ -383,12 +403,17 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <div><dt className="text-xs text-[#a08060]">Misiles</dt><dd><Stars n={spec.stats.misiles} /></dd></div>
               <div><dt className="text-xs text-[#a08060]">Bombas</dt><dd><Stars n={spec.stats.bombas} /></dd></div>
             </dl>
-            <div className="mt-5 flex flex-col items-center gap-3">
-              <button type="button" onClick={play} className={GO}>
-                ¡A volar!
+            <div className="sticky bottom-0 -mx-2 mt-5 flex flex-col items-center gap-3 rounded-2xl bg-[#fff8e7]/95 px-2 pt-2 [@media(max-height:500px)]:mt-2">
+              {saved && (
+                <button type="button" onClick={() => play(true)} className={GO}>
+                  Continuar partida · {PLANES.find((p) => p.id === saved.pilot)?.pilot}, oleada {saved.wave}, ⭐ {saved.score}
+                </button>
+              )}
+              <button type="button" onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>
+                {saved ? 'Nueva partida' : '¡A volar!'}
               </button>
               {touchUi ? (
-                <p className="text-center text-xs font-bold text-[#8a6e55]">Arrastra en la mitad izquierda para pilotear. A la derecha: acelerar, frenar, misil, bomba y bengalas. 🔍 arriba para alejar la cámara.</p>
+                <p className="text-center text-xs font-bold text-[#8a6e55]">Arrastra en la mitad izquierda para pilotear. A la derecha: acelerar, frenar, misil, bomba y bengalas.</p>
               ) : (
                 <p className="text-center text-xs font-bold text-[#8a6e55]">
                   Flechas o WASD: pilotear · E: acelerar · Q: frenar · Espacio: misil · K: bomba · L: bengalas · Z: zoom · Esc: pausa
@@ -401,9 +426,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
 
       {phase === 'over' && result && (
-        <div className="absolute inset-0 z-30 grid place-items-center p-4">
+        <div role="dialog" aria-modal="true" aria-label="Fin del vuelo" className="absolute inset-0 z-30 grid place-items-center p-4">
           <div className="w-full max-w-md rounded-[2rem] bg-[#fff8e7]/95 p-6 text-center shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
-            <h2 className="text-3xl font-black text-[#e8742a]">{result.reason === 'avion' ? '¡Te derribaron!' : '¡Vaciaron la despensa!'}</h2>
+            <h2 className="text-3xl font-black text-[#e8742a]">{result.reason === 'avion' ? '¡Derribaron tus tres aviones!' : '¡Vaciaron la despensa!'}</h2>
             <p className="mt-1 font-bold text-[#8a6e55]">
               {result.reason === 'avion' ? `${result.pilot} saltó en paracaídas y está bien.` : 'Los ratones se llevaron todo el pescado.'}
             </p>
@@ -414,7 +439,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             </div>
             <p className="mt-3 font-black">{result.record ? '🏆 ¡Nuevo récord!' : `Récord: ${result.best}`}</p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              <button type="button" onClick={play} className={GO}>Otra vez</button>
+              <button type="button" autoFocus onClick={() => play()} className={GO}>Otra vez</button>
               <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Cambiar avión</button>
             </div>
           </div>
@@ -422,11 +447,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
 
       {phase === 'play' && paused && (
-        <div className="absolute inset-0 z-30 grid place-items-center bg-[#3a2a6a]/30 p-4">
+        <div role="dialog" aria-modal="true" aria-label="Pausa" className="absolute inset-0 z-30 grid place-items-center bg-[#3a2a6a]/30 p-4">
           <div className="rounded-[2rem] bg-[#fff8e7]/95 p-6 text-center shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
             <h2 className="text-3xl font-black">Pausa</h2>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <button type="button" onClick={togglePause} className={GO}>Seguir</button>
+              <button type="button" autoFocus onClick={togglePause} className={GO}>Seguir</button>
               <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Salir al hangar</button>
             </div>
           </div>
@@ -471,7 +496,7 @@ function TouchButton({ label, big, active, children, ...rest }: { label: string;
       aria-label={label}
       className={`flex flex-col items-center justify-center rounded-full shadow-[0_4px_0_rgba(91,70,54,0.25)] ring-2 active:translate-y-0.5 ${
         active ? 'bg-[#ffe3a3] ring-[#f0a45d]' : 'bg-[#fff8e7]/85 ring-white/70'
-      } ${big ? 'h-20 w-20 text-3xl' : 'h-14 w-14 text-xl'}`}
+      } ${big ? 'h-20 w-20 text-3xl [@media(max-height:420px)]:h-16 [@media(max-height:420px)]:w-16' : 'h-14 w-14 text-xl [@media(max-height:420px)]:h-12 [@media(max-height:420px)]:w-12'} opacity-90`}
       {...rest}
     >
       <span aria-hidden className="leading-none">{children}</span>
