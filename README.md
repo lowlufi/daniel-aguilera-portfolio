@@ -38,13 +38,15 @@ src/
 │   ├── dibujo.ts        ← Arte dulce: aviones con Dui, Lulu y Almendrita, vehículos de ratones, terreno, explosiones
 │   ├── fisica-vuelo.ts  ← Aerodinámica: sustentación, arrastre inducido, pérdida, límite de g, medio tonel
 │   ├── fisica-armas.ts  ← Misiles con navegación proporcional, bombas con arrastre, explosiones, suspensión de vehículos
-│   ├── misiles.ts       ← Catálogo de misiles enemigos (buscador, dardo, zigzag, pesado, racimo, enjambre), choques entre misiles
+│   ├── misiles.ts       ← Catálogo de misiles enemigos (buscador, dardo, zigzag, pesado, racimo, enjambre, estratosférico), choques entre misiles
 │   ├── estelas.ts       ← Estelas de misil: cinta de fuego, humo pastel con contorno, chispas
-│   ├── fondo.ts         ← Fondo cozy por capas: cielo alto, nubes, cordillera, globos, pueblito con molino, bosque, aurora
+│   ├── fondo.ts         ← Fondo cozy por capas que cambia con la altura: valle, mar de nubes, estratosfera y espacio (estrellas, galaxia, luna)
 │   ├── ia.ts            ← Cerebro de los vehículos ratón: esquivar bombas, dispersarse, salvas coordinadas
-│   ├── aereos.ts        ← Ratones voladores: helicóptero, enjambre de drones abejorro, globo con minas
+│   ├── aereos.ts        ← Ratones voladores: helicóptero, enjambre de drones abejorro, globo con minas, ovnis
+│   ├── gigantes.ts      ← Enemigos de tierra de todos los tamaños: motos, infantería con fusil o bazuca, tren blindado, Ratonzilla
+│   ├── jefes.ts         ← Jefes voladores por piezas: Dirigible Gran Queso y Nave nodriza del Emperador Ratón
 │   ├── efectos.ts       ← Explosiones en capas, onda expansiva, escombros, fuego, piezas que caen, restos ardiendo
-│   ├── audio-batalla.ts ← Silbido doppler de los misiles que persiguen, alarma, motor dañado, fuego, viento
+│   ├── audio-batalla.ts ← Silbido doppler de los misiles que persiguen, alarma, motor dañado, fuego, viento, ambiente por altura, avisos de jefe
 │   ├── fisica-tipos.ts  ← Tipos compartidos de la física
 │   └── sonido.ts        ← Muestras grabadas (CC0) y motores en loop con tono según la velocidad
 ├── sitio/               ← Versión clásica (/clasico, /proyectos, /sobre-mi, /privacidad)
@@ -97,6 +99,10 @@ public/
 - **Enemigos con IA y aéreos:** los ratones esquivan bombas, se dispersan y disparan en salvas; desde la oleada 2 llegan helicópteros, drones kamikaze y globos con minas. Combos de derribos hasta ×5.
 - **Sin ayudas de puntería:** los misiles salen derecho por la nariz y no hay mira de bomba. Las explosiones cavan cráteres en el terreno (estilo Worms) y el viento empuja bombas y humo.
 - **Misiles enemigos:** seis tipos, cada uno con su forma de esquivarlo; dos misiles que chocan explotan, las explosiones revientan en cadena a los cercanos y los tuyos pueden derribarlos.
+- **Espacio aéreo hasta el espacio:** se puede subir unos 10 km; el fondo pasa del valle al mar de nubes, la estratosfera y el espacio con ovnis. El botón 🌄 cambia el cielo (automático, día, tarde, noche). Los enemigos solo disparan cuando se ven en pantalla, y una flecha en el borde indica dónde están.
+- **Recompensas y puentes:** se empieza con pocos misiles, bombas y bengalas; algunos enemigos llevan globos que, al derribarlos, quedan flotando y suman un puesto de esa arma. Con el avión muy dañado aparecen globos de reparación 🔧. Si el terreno queda muy roto, los ratones se bajan y arman puentes.
+- **Enemigos de todos los tamaños y jefes:** motos, infantería que salta de los vehículos destruidos, tren blindado, Ratonzilla; el Dirigible Gran Queso y la Nave nodriza llegan cada pocas oleadas y se rompen por piezas.
+- **Al perder:** desde la oleada 3 se puede seguir desde la misma oleada (puntaje a 0).
 - **Sonido:** sin música de fondo; efectos grabados reales con licencia CC0 (motores en loop, misiles, explosiones, antiaéreo, alarma), en estéreo según la posición.
 - **Controles (siempre en pantalla):** flechas o WASD pilotear, E/Shift acelerar, Q/Ctrl frenar (aerofrenos), Espacio/J misil, K bomba, L bengalas, Z o rueda zoom, Esc pausa. En celular, joystick a la izquierda y botones con nombre a la derecha.
 

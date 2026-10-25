@@ -163,8 +163,10 @@ function stub(g: Ctx, x: number, y: number, w: number, h: number) {
 function scorch(g: Ctx, n: number, seed: number) {
   for (let i = 0; i < n * 3; i++) {
     const h = (seed * 31 + i * 97) % 211;
-    R(g, (h % 18) - 9, ((h >> 3) % 5) - 2, 2, 1, i % 2 ? '#5a4a5a' : '#7a6a7a');
+    g.globalAlpha = i % 2 ? 0.5 : 0.8;
+    R(g, (h % 18) - 9, ((h >> 3) % 5) - 2, 3, 2, '#3a2a3a');
   }
+  g.globalAlpha = 1;
 }
 
 type Has = (p: Parte) => boolean;
@@ -333,7 +335,8 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
   g.save();
   g.translate(Math.round(x), Math.round(y));
   // Quantized so the nearest-neighbour rotation doesn't shimmer every frame.
-  g.rotate(Math.round(angle / 0.05) * 0.05);
+  // Without a wing it flies a little crooked.
+  g.rotate(Math.round(angle / 0.05) * 0.05 + (lost.includes('ala') ? 0.05 : 0));
   const sy = Math.abs(roll) < 0.25 ? 0.25 * Math.sign(roll || 1) : Math.round(roll * 4) / 4;
   g.scale(1, sy);
   // The pilot's scarf flaps behind the cockpit.
@@ -360,6 +363,14 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
     D.oval(g, jx - len / 2, jy, Math.ceil(len / 2) + 1, 1, '#ff9a3c');
     R(g, jx - Math.ceil(len / 2), jy, Math.ceil(len / 2), 1, P.gold);
     R(g, jx - 1, jy, 1, 1, P.white);
+  }
+  // Torn edges keep sparking where each part used to be.
+  for (const part of lost) {
+    const [ax, ay] = L.parts[part] ?? [0, 0];
+    const f = Math.floor(t * 16 + ax * 3) % 4;
+    if (f === 3) continue;
+    R(g, ax + (f - 1), ay - 1 + (f % 2), f === 0 ? 2 : 1, 1, f === 1 ? P.gold : '#ff4a3c');
+    if (f === 0) R(g, ax, ay + 1, 1, 1, P.gold1);
   }
   g.restore();
 }
@@ -701,9 +712,10 @@ export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: numbe
     } else line = next;
   }
   if (line) lines.push(line);
-  const w = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width))) + 10;
+  const w = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width))) + 12;
   const h = lines.length * 9 + 6;
-  const bx = Math.round(Math.min(vw - w - 2, Math.max(2, x - w / 2)));
+  // Clear of the altimeter strip on the right edge.
+  const bx = Math.round(Math.min(vw - w - 14, Math.max(2, x - w / 2)));
   const by = Math.round(y - h - 6);
   R(g, bx + 1, by - 1, w - 2, h + 2, '#6a2a4a');
   R(g, bx - 1, by + 1, w + 2, h - 2, '#6a2a4a');
@@ -784,8 +796,9 @@ export function scorchMarks(g: Ctx, k: VehiculoTipo, x: number, y: number, seed:
 }
 
 /** What a reward balloon gives: one more slot of missiles, bombs or flares. */
-export type Premio = 'misil' | 'bomba' | 'bengala';
+export type Premio = 'misil' | 'bomba' | 'bengala' | 'reparar';
 const PRIZE_COL: Record<Premio, [string, string, string]> = {
+  reparar: [P.g0, P.g2, P.g3],
   misil: [P.r0, P.r1, P.r3],
   bomba: ['#2a5a9a', '#74b4f0', '#d8f0ff'],
   bengala: [P.gold0, P.gold, P.gold1],
@@ -822,6 +835,11 @@ export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number,
   } else if (kind === 'bomba') {
     D.disc(g, ix, by + 1, 2, '#2a2438');
     R(g, ix + 1, by - 2, 1, 2, P.gold);
+  } else if (kind === 'reparar') {
+    // A little wrench.
+    for (let i = 0; i < 4; i++) R(g, ix - 2 + i, by + 2 - i, 1, 1, P.white);
+    R(g, ix + 1, by - 3, 1, 2, P.white);
+    R(g, ix + 3, by - 2, 1, 2, P.white);
   } else {
     R(g, ix, by - 2, 1, 5, P.white);
     R(g, ix - 2, by, 5, 1, P.white);

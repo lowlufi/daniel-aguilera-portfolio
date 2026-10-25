@@ -59,6 +59,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       onHud: setHud,
       onOver: (r) => {
         setResult(r);
+        setSaved(readSave());
         setPhase('over');
       },
     });
@@ -264,8 +265,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   aria-label={`Blindaje: ${hud.hp} de ${hud.hpMax}${hud.lost.length ? `. Perdiste ${hud.lost.join(', ')}` : ''}`}
                 >
                   <Pips n={hud.hp} max={hud.hpMax} on="🛡️" off="💥" />
+                  <span className="ml-1 tabular-nums text-[10px] opacity-70">{hud.hp}/{hud.hpMax}</span>
                 </span>
-                <span className={CHIP} title="Pescado en la despensa" aria-label={`Despensa: ${hud.meta} de ${hud.metaMax}`}>
+                <span className={`${CHIP} ${hud.stolen ? 'animate-pulse ring-4 ring-[#ff4a5a]' : ''}`} title="Pescado en la despensa" aria-label={`Despensa: ${hud.meta} de ${hud.metaMax}`}>
                   <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
                 </span>
                 <span className={CHIP}>⭐ {hud.score}</span>
@@ -344,7 +346,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
       {phase === 'play' && hud?.stall && !paused && (
-        <div className="pointer-events-none absolute inset-x-0 top-[46%] z-10 text-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 text-center">
           <span className="inline-block animate-pulse rounded-full bg-[#ffe048] px-4 py-1.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_#e08a10]">
             ⚠️ ¡Vas muy lento! Apunta hacia abajo y acelera
           </span>
@@ -475,8 +477,18 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <div className="rounded-2xl bg-white/70 p-2"><div className="text-xs text-[#a08060]">Vehículos</div>{result.kills}</div>
             </div>
             <p className="mt-3 font-black">{result.record ? '🏆 ¡Nuevo récord!' : `Récord: ${result.best}`}</p>
+            <p className="mt-2 text-sm font-bold text-[#8a6e55]">
+              {result.reason === 'avion'
+                ? 'Tip: cuando un misil se acerque, gira fuerte en el último momento o suelta bengalas ✨'
+                : 'Tip: vuela bajo y vigila el pescado 🐟; las flechas del borde te llevan a los ratones'}
+            </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              <button type="button" autoFocus onClick={() => play()} className={GO}>Otra vez</button>
+              {saved && (
+                <button type="button" autoFocus onClick={() => play(true)} className={GO}>
+                  Seguir desde la oleada {saved.wave}
+                </button>
+              )}
+              <button type="button" autoFocus={!saved} onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>Otra vez</button>
               <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Cambiar avión</button>
             </div>
           </div>

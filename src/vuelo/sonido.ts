@@ -40,17 +40,63 @@ export function cargarSonidos() {
   }
 }
 
-/** Plays a one-shot. Returns false if it isn't loaded yet. */
-export function suena(n: Muestra, o: { vol?: number; rate?: number; pan?: number } = {}) {
+type Voz = { n: Muestra; src: AudioBufferSourceNode; g: GainNode; t: number };
+const voces = new Set<Voz>();
+// At most this many copies of a sample at once; the oldest fades out to make room.
+const TOPE: Partial<Record<Muestra, number>> = { misil: 3, 'explosion-chica': 3, 'explosion-grande': 3, bomba: 3, impacto: 2 };
+const ultima = new Map<Muestra, number>();
+
+function apaga(v: Voz, ctx: BaseAudioContext, tc = 0.03) {
+  const t = ctx.currentTime;
+  v.g.gain.cancelScheduledValues(t);
+  v.g.gain.setValueAtTime(v.g.gain.value, t);
+  v.g.gain.linearRampToValueAtTime(0, t + tc);
+  try {
+    v.src.stop(t + tc + 0.01);
+  } catch {
+    /* already stopped */
+  }
+  voces.delete(v);
+}
+
+/** Silences every one-shot still ringing (pause, game over). */
+export function callar() {
+  const out = sampleOut();
+  if (!out) return;
+  for (const v of [...voces]) apaga(v, out.ctx, 0.05);
+}
+
+/**
+ * Plays a one-shot. Returns false if it isn't loaded yet. `dur` cuts it short
+ * with a fade, for a snappy version of a long sample.
+ */
+export function suena(n: Muestra, o: { vol?: number; rate?: number; pan?: number; dur?: number } = {}) {
   const out = sampleOut();
   const buf = buffers.get(n);
   if (!out || !buf || out.ctx.state !== 'running') return !!buf;
   const { ctx } = out;
+  const now = ctx.currentTime;
+  // Copies closer than 40 ms blur into one: skip them.
+  if (now - (ultima.get(n) ?? -1) < 0.04) return true;
+  ultima.set(n, now);
+  const tope = TOPE[n];
+  if (tope) {
+    const mias = [...voces].filter((v) => v.n === n);
+    if (mias.length >= tope) apaga(mias.reduce((a, b) => (a.t < b.t ? a : b)), ctx);
+  }
   const src = ctx.createBufferSource();
   src.buffer = buf;
   src.playbackRate.value = o.rate ?? 1;
   const g = ctx.createGain();
   g.gain.value = o.vol ?? 1;
+  if (o.dur) {
+    g.gain.setValueAtTime(o.vol ?? 1, now + Math.max(0, o.dur - 0.08));
+    g.gain.linearRampToValueAtTime(0, now + o.dur);
+    src.stop(now + o.dur + 0.02);
+  }
+  const v: Voz = { n, src, g, t: now };
+  voces.add(v);
+  src.onended = () => voces.delete(v);
   let node: AudioNode = src.connect(g);
   if (o.pan && ctx.createStereoPanner) {
     const p = ctx.createStereoPanner();

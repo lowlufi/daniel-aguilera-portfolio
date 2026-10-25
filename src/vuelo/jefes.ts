@@ -1942,8 +1942,14 @@ export function dibujarBarra(g: Ctx, j: Jefe, x: number, y: number, w: number, t
   g.save();
   g.font = 'bold 8px "Fredoka", "Nunito", sans-serif';
   g.textBaseline = 'top';
+  g.textAlign = 'left';
   const tinta = TINTA[j.tipo];
   const nombre = NOMBRE[j.tipo] + (j.fase === 3 && j.muriendo < 0 ? ' · ¡FURIA!' : '');
+  // Placa crema propia, para que se lea sobre cualquier cielo (y sobre el queso).
+  g.globalAlpha = 0.88;
+  R(g, x - 5, y - 3, w + 10, 37, tinta);
+  R(g, x - 4, y - 2, w + 8, 35, '#fff8e7');
+  g.globalAlpha = 1;
   g.fillStyle = tinta;
   for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) g.fillText(nombre, x + dx, y + dy);
   g.fillStyle = j.fase === 3 && parpadeo(t, 3) ? P.r3 : P.white;
@@ -1952,7 +1958,7 @@ export function dibujarBarra(g: Ctx, j: Jefe, x: number, y: number, w: number, t
   R(g, x - 1, by - 1, w + 2, 8, tinta);
   R(g, x, by, w, 6, '#4a3a5a');
   const lw = Math.round(w * f);
-  const col = j.tipo === 'dirigible' ? (f > 0.6 ? P.gold : f > 0.3 ? '#ff9a3c' : P.red) : f > 0.66 ? '#b49af4' : f > 0.33 ? P.p1 : P.red;
+  const col = j.tipo === 'dirigible' ? (f > 0.6 ? '#e0486a' : f > 0.3 ? '#ff9a3c' : P.red) : f > 0.66 ? '#b49af4' : f > 0.33 ? P.p1 : P.red;
   R(g, x, by, lw, 6, col);
   R(g, x, by, lw, 2, P.white);
   // Phase ticks.
@@ -1973,5 +1979,11 @@ export function dibujarBarra(g: Ctx, j: Jefe, x: number, y: number, w: number, t
     }
     px += ancho + 2;
   }
+  // Qué romper, en palabras.
+  g.fillStyle = tinta;
+  g.font = 'bold 7px "Fredoka", "Nunito", sans-serif';
+  g.textAlign = 'right';
+  const abierto = nucleo(j).vulnerable;
+  g.fillText(j.tipo === 'dirigible' ? (abierto ? '¡Dale a la góndola!' : 'Rompe las torretas') : abierto ? '¡Dale a la cúpula!' : 'Rompe los generadores', x + w, py - 1);
   g.restore();
 }

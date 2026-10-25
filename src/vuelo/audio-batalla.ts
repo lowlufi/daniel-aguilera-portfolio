@@ -980,7 +980,8 @@ export function intensidad(nivel: number): void {
   if (!m) return;
   const t = m.ctx.currentTime;
   const n = clamp(num(nivel), 0, 1);
-  if (n < 0.05) {
+  // Solo late en peligro real: un daño leve no debe sonar para siempre.
+  if (n < 0.25) {
     pulsoProx = 0;
     return;
   }
@@ -990,7 +991,7 @@ export function intensidad(nivel: number): void {
     vivos++;
   }
   const periodo = 60 / (68 + 112 * n);
-  const vol = (0.14 + 0.32 * n) * (1 - 0.3 * duck);
+  const vol = (0.06 + 0.3 * n) * (1 - 0.3 * duck);
   if (pulsoProx < t) pulsoProx = t + 0.02;
   // «Pum-pum» como un corazón: el segundo golpe más suave y algo más agudo.
   while (pulsoProx < t + 0.15) {
@@ -1040,7 +1041,7 @@ export function explosion(energia: number, distancia: number, pan: number): void
   const d = Math.max(0, num(distancia));
   const size = Math.cbrt(e); // 0.6 … 2.3, como el radio de la explosión
   // Sin aire no hay onda expansiva: en el espacio solo llega lo que vibra el fuselaje.
-  const vol = clamp((0.45 + 0.28 * size) / (1 + d / 320), 0, 1.1) * (1 - 0.4 * pesos.espacio);
+  const vol = clamp((0.45 + 0.28 * size) / (1 + d / 320), 0, 1.1) * (1 - 0.75 * pesos.espacio);
   if (vol < 0.02) return;
   const nombre: Nombre = e >= 3 ? 'explo-grande' : 'explo-chica';
   // Más energía: más grave y más larga (playbackRate baja).
@@ -1061,7 +1062,7 @@ export function explosion(energia: number, distancia: number, pan: number): void
   const src = fuente(m, b, false, rate);
   const lp = m.ctx.createBiquadFilter();
   lp.type = 'lowpass';
-  lp.frequency.value = Math.max(200, (350 + 17000 * Math.exp(-d / 200)) * (1 - 0.8 * pesos.espacio - 0.3 * pesos.estratosfera));
+  lp.frequency.value = Math.max(200, (350 + 17000 * Math.exp(-d / 200)) * (1 - 0.9 * pesos.espacio - 0.3 * pesos.estratosfera));
   lp.Q.value = 0.5;
   const g = ganancia(m, vol);
   const p = panner(m.ctx);
@@ -1094,6 +1095,45 @@ export function derribo(): void {
   src.start(t + 0.01);
   // Y un último petardeo/rechinido entre los escombros.
   unaVez(m, 'rechinido', 0.25, 0.55, t + 1.2, -0.3);
+}
+
+/** Llega un jefe: golpe grave, barrido y campanas de alarma, por encima de todo. */
+export function jefeLlega(): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  unaVez(m, 'explo-grande', 0.5, 0.5, t, 0, LIMITE + 4);
+  unaVez(m, 'whoosh-baja', 0.4, 0.7, t + 0.05, 0, LIMITE + 4);
+  unaVez(m, 'campanas', 0.3, 0.75, t + 0.35, 0, LIMITE + 4);
+}
+
+/** Jefe vencido: estallido largo y luego campanas de fiesta. */
+export function jefeVencido(): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  unaVez(m, 'derribo', 0.55, 1.15, t, 0, LIMITE + 4);
+  unaVez(m, 'campanas', 0.4, 1.2, t + 1.1, 0, LIMITE + 4);
+}
+
+/** Puente terminado: tres martillazos y un rechinido de tablas. */
+export function puenteListo(pan: number): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  for (let i = 0; i < 3; i++) unaVez(m, 'pieza-metal', 0.3, 1.5 + i * 0.1, t + i * 0.14, pan);
+  unaVez(m, 'rechinido', 0.2, 1.1, t + 0.45, pan);
+}
+
+/** Láser o rayo de la nave nodriza mientras dispara (llamar cada tick; se limita solo). */
+let ultimoLaser = -1;
+export function laserJefe(pan: number): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  if (t - ultimoLaser < 0.18) return;
+  ultimoLaser = t;
+  unaVez(m, 'zap', 0.22, rand(0.6, 0.7), t, pan);
 }
 
 /* ────────────────────────── altitud y ambiente ────────────────────────── */
@@ -1135,7 +1175,7 @@ export function altitud(alt: number, velocidad: number): void {
   const t = m.ctx.currentTime;
   const amb = 1 - 0.6 * Math.max(duck, alarma * 0.7);
   const base: Record<Zona, number> = {
-    campo: 0.07 + 0.03 * v,
+    campo: 0.11 + 0.03 * v,
     nubes: 0.12 + 0.08 * v,
     estratosfera: 0.1 + 0.02 * v,
     espacio: 0.065,
@@ -1167,6 +1207,11 @@ export function altitud(alt: number, velocidad: number): void {
 }
 
 /** Factor 0..1 para el bucle del motor grabado: en el espacio se oye ahogado (~0.35). */
+/** Densidad del aire que oye el piloto (1 en el suelo, ~0 en el espacio). */
+export function aireActual(): number {
+  return aire;
+}
+
 export function atenuacionMotor(): number {
   return clamp(atenMotor, 0, 1);
 }
@@ -1439,6 +1484,8 @@ function reiniciar() {
   vivos = 0;
   hornos.clear();
   duck = 0;
+  ultimoStinger = -10;
+  ultimaPasada = ultimoRayo = ultimoLaser = -1;
 }
 
 /** Solo para pruebas (render offline): usa este contexto y destino en vez del del sitio. */

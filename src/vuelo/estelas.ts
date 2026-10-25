@@ -69,7 +69,7 @@ const VIDA_FUEGO = 0.16; // s que un punto sigue siendo parte de la cinta de fue
 const COLA = 5; // px detrás del centro del misil donde está la tobera
 const SUBE = 9; // px/s a los que tiende a subir el humo
 const GRAVEDAD = 110; // px/s² de las chispas
-const MAX_R = 13;
+const MAX_R = 8; // más grandes tapan al avión y a las amenazas
 const MARGEN = 20; // px fuera de pantalla antes de descartar una bolita
 
 // Campos de un punto de humo.
