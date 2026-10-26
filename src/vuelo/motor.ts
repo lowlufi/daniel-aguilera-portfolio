@@ -185,11 +185,12 @@ const CAP_MAX: Record<Arma, number> = { misil: 8, bomba: 6, bengala: 6 };
 const PRIZE_NAME: Record<Arma, string> = { misil: 'misil', bomba: 'bomba', bengala: 'bengala' };
 const BOMB_RELOAD = 2.2;
 /** Special upgrades from a downed fighter's golden balloon. */
-type Mejora = 'doble' | 'escudo' | 'cohetes';
+type Mejora = 'doble' | 'escudo' | 'cohetes' | 'chorrillana';
 const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
   doble: { nombre: 'Metralla doble sin calentarse', t: 20 },
   escudo: { nombre: 'Escudo de burbuja', t: 10 },
   cohetes: { nombre: 'Misiles sin fin', t: 15 },
+  chorrillana: { nombre: 'Chorrillana: misil triple', t: 10 },
 };
 /** Super nitro: how long it burns, its push, and the recharge time. */
 const NITRO_T = 2.5;
@@ -229,6 +230,41 @@ const HEIGHTS = new Float32Array(LEVEL + 2);
 /** The two maps: the valley (hills) and, after the first boss, the open sea. */
 type Mapa = 'valle' | 'oceano' | 'valparaiso' | 'tormenta';
 /** One map per wave, then round again (harder): San Antonio → sea → Valparaíso → storm. */
+/** «¿Sabías que…?» — verified facts about each place (sources in the research brief). */
+const DATOS: Record<Mapa, string[]> = {
+  valle: [
+    'Mucho antes de los gatos, aquí vivieron las culturas Bato y Llolleo, ¡hace más de 1.500 años!',
+    'Llolleo significaría «lugar de pesca» en mapudungun.',
+    'En 1865 San Antonio reemplazó a Valparaíso como puerto principal durante la guerra con España.',
+    'El 5 de mayo de 1912 se puso la primera piedra del puerto, y ese mismo día llegó el tren.',
+    'Las piedras para construir los molos bajaban en tren desde el cerro Panul.',
+    'Hoy San Antonio es el puerto n.º 1 de Chile en contenedores.',
+    'Cartagena es comuna desde el 10 de agosto de 1901.',
+    '¡Cartagena es el balneario más antiguo de Chile! Desde 1850 veraneaban aquí los santiaguinos.',
+    'Antes del tren a Cartagena había «carritos de sangre»: carros tirados por caballos.',
+    'El poeta Vicente Huidobro descansa en un cerro de Cartagena, mirando al mar.',
+  ],
+  oceano: [
+    'Hoy San Antonio es el puerto n.º 1 de Chile en contenedores.',
+    'Las piedras para construir los molos de San Antonio bajaban en tren desde el cerro Panul.',
+    'Desde 1999 el borde costero de Cartagena es Zona Típica.',
+    'Los fuegos de Año Nuevo en el Mar, en la bahía de Valparaíso, duran unos 20 minutos.',
+  ],
+  valparaiso: [
+    'Desde 2003 el casco histórico de Valparaíso es Patrimonio Mundial de la UNESCO.',
+    'El Ascensor Concepción funciona desde 1883: ¡el más antiguo de la ciudad!',
+    'El primer cuerpo de bomberos de Chile se formó en Valparaíso, en 1851.',
+    'El Mercurio de Valparaíso (1827) es el diario en castellano más antiguo que sigue circulando.',
+    'Santiago Wanderers (1892) es «el Decano», el club profesional más antiguo de Chile.',
+    'La primera bolsa de comercio de Chile abrió en Valparaíso.',
+    'Neruda inauguró La Sebastiana el 18 de septiembre de 1961… ¡con empanadas!',
+  ],
+  tormenta: [
+    'Los fuegos de Año Nuevo en el Mar, en la bahía de Valparaíso, duran unos 20 minutos.',
+    'Desde 2003 el casco histórico de Valparaíso es Patrimonio Mundial de la UNESCO.',
+  ],
+};
+const datoDe = (m: Mapa) => DATOS[m][Math.floor(Math.random() * DATOS[m].length)];
 const SIGUIENTE: Record<Mapa, Mapa> = { valle: 'oceano', oceano: 'valparaiso', valparaiso: 'tormenta', tormenta: 'valle' };
 const NOMBRE_MAPA: Record<Mapa, string> = { valle: 'San Antonio', oceano: 'el mar de San Antonio', valparaiso: 'los cerros de Valparaíso', tormenta: 'la tormenta: solo cazas' };
 /** Most planes the player can bank. */
@@ -293,6 +329,23 @@ const SAY = {
     '¡Les voy a cortar el cable del internet!',
     '¡Con mi escoba los bajo a todos! $#@!',
     '¡Paguen los gastos comunes, ricachones! &#$',
+    '¡Bajen el volumen, que se me vuela la permanente!',
+    '¡Esa micro pasa cuando quiere, igual que ustedes!',
+    '¡Gaviota ladrona, devuélveme el pan amasado!',
+    '¡Otra vez asado el domingo! ¡Mi ropa huele a choripán!',
+    '¡Ciento veinte escalones para esto! $&#%',
+    '¡Gatos voladores en MI cerro, nunca!',
+    '¡Esta camanchaca me pasmó la ropa tendida!',
+    '¡En Cartagena no cabe ni un quitasol más!',
+    '¡Las grúas del puerto hacen menos ruido que ustedes!',
+    '¡Les cobro el ascensor, gatitos!',
+    '¡Mi chorrillana se enfría por su culpa!',
+    '¡Feliz Año Nuevo… pero en silencio!',
+  ],
+  /** What the mice shout now and then. */
+  ratones: [
+    '¡Al abordaje, ratitas!', '¡Por el queso de Llolleo!', '¡Súbanse al ascensor!', '¡Cuidado, una gaviota!', '¡Se nos fue la micro!',
+    '¡Retirada al contenedor!', '¡Viene Almendrita!', '¡Más rápido que un lobo marino!', '¡Escóndanse en la camanchaca!', '¡Queso con palta, ya!',
   ],
   hurt: ['¡Ay, mi cadera! $%&', '¡Mis tomates! #&%$', '¡Esto se lo cuento a todo el pasaje!', '¡Mis lentes! ¡No veo nada! &%#'],
   defeat: '¡Esto no se queda así! ¡Voy a llamar a los carabineros! #$%&',
@@ -300,6 +353,15 @@ const SAY = {
   mar: '¡Ahoy, ricachones! ¡Este portaaviones es de la junta de vecinos! &%#',
   despegue: ['¡Despeguen, ratones! ¡Y sin hacer ruido!', '¡A ese gato naranjo, rápido! $#@', '¡Ni en el mar me dejan tranquila! &%#'],
   hundida: '¡Mi portaaviones! ¡Voy a llamar a la Armada! #&%$',
+  /** At sea she complains about sea things. */
+  tauntsMar: [
+    '¡Ricachones voladores! ¡Esto es aguas de la junta de vecinos! &%#',
+    '¡Mis misiles bumerán siempre vuelven! ¡Como el olor a pescado frito!',
+    '¡Las gaviotas se comieron mi sánguche! $#@',
+    '¡Bajen la velocidad, que me marean! %&#',
+    '¡Este barco tiene más reglas que el edificio! #$%',
+    '¡Gato naranjo! ¡Te vi en el techo de la caleta! &#',
+  ],
   win: '¡Me llevo todo el pescado! ¡Ja! #$%&',
 };
 
@@ -348,10 +410,14 @@ let shotIds = 0;
 // Trail style per missile type, shortened a little so phones keep 60 fps.
 const trailStyles = new Map<string, E.EstiloEstela>();
 const trailStyle = (sh: Shot) => {
-  const key = sh.enemy ? sh.m.tipo : 'jugador';
+  const bumeran = sh.enemy && sh.vueltas !== undefined;
+  const key = bumeran ? 'bumeran' : sh.enemy ? sh.m.tipo : 'jugador';
   let st = trailStyles.get(key);
   if (!st) {
-    const base = sh.enemy ? MS.MISILES[sh.m.tipo].estela : E.ESTELA_JUGADOR;
+    // Margarita's boomerangs leave a white-and-yellow trail of their own.
+    const base = bumeran
+      ? { ...MS.MISILES.buscador.estela, nucleo: '#ffffff', brillo: '#ffe048', humo: '#fff6c8' }
+      : sh.enemy ? MS.MISILES[sh.m.tipo].estela : E.ESTELA_JUGADOR;
     st = { ...base, largo: Math.min(base.largo + 8, sh.enemy ? 32 : 38) };
     trailStyles.set(key, st);
   }
@@ -367,6 +433,8 @@ export type Resumen = {
   destino: '' | Mapa;
   /** The wave's mini-mission and whether it was done; what comes next. */
   mision: string; cumplida: boolean; siguiente: string;
+  /** A verified local fact about the place, for the card. */
+  dato: string;
 };
 /** A small optional goal for the current wave. */
 type MisionId = 'despensa' | 'combo3' | 'misiles' | 'cazas' | 'piezas';
@@ -617,6 +685,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
     hielo: 0,
+    gritoT: 0,
     /** Storm: seconds to the next strike, the bolt in progress, the sky flash. */
     rayoT: 6,
     rayo: null as { x: number; t: number; tope: number } | null,
@@ -829,9 +898,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.say = null;
   }
 
-  function start(id: ModeloAvion, from?: SavedGame | null) {
+  function start(id: ModeloAvion, from?: SavedGame | null, autopiloto = false) {
     resetWorld();
-    s.attract = false;
+    // Set before the first wave so the title screen's game never saves over the player's.
+    s.attract = autopiloto;
     // A clean slate: nothing carries over from the title screen's autopilot.
     Object.assign(input, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false });
     s.nukes = 0;
@@ -918,8 +988,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    */
   function attract() {
     const ids: ModeloAvion[] = ['caza', 'avioneta', 'bombardero'];
-    start(ids[Math.floor(Math.random() * ids.length)]);
-    s.attract = true;
+    start(ids[Math.floor(Math.random() * ids.length)], null, true);
     const mapas: Mapa[] = ['valle', 'oceano', 'valparaiso', 'tormenta'];
     cambiarMapa(mapas[Math.floor(Math.random() * mapas.length)]);
     s.wave = 2 + Math.floor(Math.random() * 3);
@@ -1059,10 +1128,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (reason === 'avion') s.lives = 0;
     s.mode = 'over';
     S.callar();
-    // From wave 3 on, a lost game can carry on from the same wave (score back to 0).
+    // From wave 2 on, a lost game can carry on from the same wave (score back to 0).
     writeSave(
       s.wave >= 2
-        ? { v: 1, pilot: s.spec.id, wave: s.wave, score: 0, kills: 0, lives: 3, lost: [], cap: { ...s.cap }, bridges: s.bridges, meta: META_MAX, bossFor: s.bossFor, bossCount: s.bossCount, craters: s.craters, mapa: s.mapa, at: Date.now() }
+        ? { v: 1, pilot: s.spec.id, wave: s.wave, score: 0, kills: 0, lives: 3, lost: [], cap: { ...s.cap }, bridges: s.bridges, meta: META_MAX, bossFor: s.bossFor, bossCount: s.bossCount, craters: s.craters, mapa: s.mapa, enValpo: s.enValpo, jefeFor: s.jefeFor, at: Date.now() }
         : null,
     );
     const record = s.score > s.best;
@@ -1637,7 +1706,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       AB.mejora();
     } else if (kind === 'especial') {
       // A special upgrade at random (or a full nitro).
-      const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'nitro'];
+      const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'chorrillana', 'nitro'];
       const pick = opts[Math.floor(Math.random() * opts.length)];
       if (pick === 'nitro') {
         s.nitroCd = 0;
@@ -1654,11 +1723,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.banner.startsWith('⭐')) s.banner = '';
       }, 2200);
     } else if (kind === 'reparar') {
-      // Two parts back, and a moment to breathe.
+      // The empanada de mariscos: two parts back, and a moment to breathe.
       if (!repair()) {
         s.score += 300;
-        pop(x, y + 16, '+300', P.gold);
-      } else repair();
+        pop(x, y + 16, '🥟 ¡Empanada de mariscos! +300', P.gold);
+      } else {
+        repair();
+        pop(x, y + 28, '🥟 ¡Empanada de mariscos! Avión reparado', P.gold);
+      }
       s.inv = Math.max(s.inv, 1);
     } else if (s.cap[kind] < CAP_MAX[kind]) {
       s.cap[kind]++;
@@ -1850,6 +1922,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       // Held the nose on an enemy long enough: this missile homes on it.
       const locked = s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo() ? s.lockCand : undefined;
       s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked });
+      // Chorrillana: two more missiles fanned out either side of the nose.
+      if (s.boost === 'chorrillana') {
+        for (const da of [-0.14, 0.14]) {
+          const extra = FA.misilJugador(p, s.wave);
+          const sp = Math.hypot(extra.vx, extra.vy);
+          extra.rumbo += da;
+          extra.vx = Math.cos(extra.rumbo) * sp;
+          extra.vy = Math.sin(extra.rumbo) * sp;
+          s.shots.push({ m: extra, enemy: false, tgt: null, trail: 0 });
+        }
+      }
       usar('disparar');
       if (locked) usar('fijar');
       s.ammo--;
@@ -1969,6 +2052,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   function carFires(c: Car) {
     const p = s.plane;
+    // Now and then a mouse shouts something.
+    if (!s.attract && s.t > s.gritoT && Math.random() < 0.25 && !isBoss(c.kind)) {
+      s.gritoT = s.t + rand(7, 12);
+      pop(c.mid.x, c.y + A.VEH_LOOK[c.kind].h + 10, SAY.ratones[Math.floor(Math.random() * SAY.ratones.length)], '#c9b4ff');
+    }
     // The first wave is a warm-up: nothing fires for 20 s, then one missile at a time.
     if (s.wave === 1 && (s.t - s.waveStartT < 20 || s.shots.some((sh) => sh.enemy && sh.m.t >= 0))) return;
     // How many guided missiles may chase the plane at once grows with the waves
@@ -2222,7 +2310,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       } else {
         s.spawnT -= dt;
-        if (s.queue.length && s.spawnT <= 0) {
+        if (s.queue.length && s.spawnT <= 0 && !s.cars.some((c) => c.x > LEVEL - 30)) {
           const kind = s.queue.shift()!;
           const v = FA.nuevoVehiculo(LEVEL + 20, ground, VEH[kind].masa);
           s.cars.push({
@@ -2352,6 +2440,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             oleada: s.wave, enemigos: s.kills - s.ckKills, puntos: s.score - s.ckScore, tiempo: Math.round(s.t - s.waveStartT),
             pescado: s.meta, aviones: s.lives, destino,
             mision: ms ? ms.texto : '', cumplida: !!ms?.hecha, siguiente,
+            dato: datoDe(destino || s.mapa),
           };
           nextWave();
           s.banner = '';
@@ -2610,13 +2699,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           continue;
         }
         // Boomerang: a dodged one turns round (about a second), relights and chases again.
+        // A flare only fools it for a while: once the flare burns out, it hunts again.
+        if (sh.vueltas && sh.tgt !== p && flying && !s.flareBodies.includes(sh.tgt as Cuerpo)) {
+          sh.tgt = p;
+          sh.pasada = true;
+        }
         if (sh.vueltas && sh.tgt === p && flying) {
           const dd = Math.hypot(em.x - p.x, em.y - p.y);
-          const lejos = sh.pasada && dd > 70 && (em.vx * (p.x - em.x) + em.vy * (p.y - em.y)) < 0;
-          if (!sh.girando && (lejos || !em.guiado)) sh.girando = 1.1;
+          // Only a real miss counts: it went past and is now well away and leaving.
+          const lejos = sh.pasada && dd > 120 && (em.vx * (p.x - em.x) + em.vy * (p.y - em.y)) < 0;
+          if (!sh.girando && lejos) sh.girando = 1.5;
           if (sh.girando) {
             sh.girando -= dt;
-            const sp = Math.max(140, Math.hypot(em.vx, em.vy));
+            em.guiado = false;
+            // A slow, wide loop the player can see coming.
+            const sp = 140;
             const want = Math.atan2(p.y - em.y, p.x - em.x);
             const cur = Math.atan2(em.vy, em.vx);
             const turn = clamp(((want - cur + Math.PI * 3) % (Math.PI * 2)) - Math.PI, -3.2 * dt, 3.2 * dt);
@@ -2625,7 +2722,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             em.rumbo = cur + turn;
             em.combustible = Math.max(em.combustible, 1.5);
             em.t = Math.min(em.t, 2);
-            if (sh.girando <= 0 || Math.abs(((want - cur + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.3) {
+            if (sh.girando <= 0.4 && Math.abs(((want - cur + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.3) {
               sh.girando = 0;
               sh.vueltas--;
               sh.pasada = false;
@@ -2849,10 +2946,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (boss && s.mode === 'play') {
       s.sayT -= dt;
       if (s.sayT <= 0) {
-        let k = Math.floor(Math.random() * SAY.taunts.length);
-        if (k === s.lastTaunt) k = (k + 1) % SAY.taunts.length;
+        const lista = boss?.kind === 'portaaviones' ? SAY.tauntsMar : SAY.taunts;
+        let k = Math.floor(Math.random() * lista.length);
+        if (k === s.lastTaunt) k = (k + 1) % lista.length;
         s.lastTaunt = k;
-        talk(SAY.taunts[k]);
+        talk(lista[k]);
         s.sayT = rand(3.8, 5.5);
       }
     }
@@ -2964,7 +3062,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     })();
     const atardecer = s.mapa === 'oceano' && (s.enValpo || carrierK > 0.35);
     const nocheTormenta = s.mapa === 'tormenta';
-    const theme = s.themePick === 'auto' ? (nocheTormenta ? 'noche' : atardecer ? 'tarde' : THEMES[Math.max(0, s.wave - 1) % 3]) : s.themePick;
+    const autoTheme: Theme = nocheTormenta ? 'noche'
+      : s.mapa === 'oceano' ? (atardecer ? 'tarde' : 'dia')
+      : s.mapa === 'valparaiso' && s.wave % 4 === 3 ? 'tarde'
+      : THEMES[Math.max(0, s.wave - 1) % 3];
+    const theme = s.themePick === 'auto' ? autoTheme : s.themePick;
     L.intensidadNoche(theme === 'noche' || s.plane.y > 1900 ? 1 : theme === 'tarde' ? 0.5 : 0);
     const shake = still || s.calma ? 0 : Math.min(s.jefe || s.cars.some((c) => isBoss(c.kind)) ? 9 : 6, Math.max(s.shake, VFX.sacudida(s.fx)));
     const shx = shake > 0.3 ? Math.round(rand(-shake, shake)) : 0;
@@ -2993,6 +3095,34 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
     // Ground strip (painted once for the whole level) and the pantry's flag.
     g.drawImage(strip.canvas, cam, 0, vw, strip.canvas.height, 0, sy(strip.top), vw, strip.canvas.height);
+    // The ground takes the light of the hour too (night, dusk), and the busy
+    // Valparaíso hillside is toned down so the mice on it stay readable.
+    {
+      const veil = theme === 'noche' ? 0.38 : theme === 'tarde' ? 0.14 : 0;
+      const desat = s.mapa === 'valparaiso' && !s.sinFiltro ? 0.3 : 0;
+      if (veil > 0 || desat > 0) {
+        g.save();
+        g.beginPath();
+        g.moveTo(0, vh);
+        for (let x = 0; x <= vw; x += 4) g.lineTo(x, sy(Math.max(ground(x + cam), s.mapa === 'oceano' || s.mapa === 'tormenta' ? OC.NIVEL_MAR : 0)) - 2);
+        g.lineTo(vw, vh);
+        g.closePath();
+        g.clip();
+        if (desat > 0) {
+          g.globalCompositeOperation = 'saturation';
+          g.globalAlpha = desat;
+          g.fillStyle = '#808080';
+          g.fillRect(0, 0, vw, vh);
+          g.globalCompositeOperation = 'source-over';
+        }
+        if (veil > 0) {
+          g.globalAlpha = veil;
+          g.fillStyle = theme === 'noche' ? '#2a2048' : '#5a3048';
+          g.fillRect(0, 0, vw, vh);
+        }
+        g.restore();
+      }
+    }
     if (s.mapa === 'valparaiso') VP.dibujarDetallesValpo(g, cam, (alt: number) => sy(alt), vw, s.t, still);
     // The storm: the sea is lost under a heaving floor of dark cloud.
     if (s.mapa === 'tormenta') {
@@ -3525,7 +3655,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
   const onKey = (e: KeyboardEvent) => {
     const k = CODES[e.code];
-    if (!k || s.mode !== 'play') return;
+    // Menus (the title's self-playing game) and the pause keep their keys for the buttons.
+    if (!k || s.mode !== 'play' || ((s.attract || s.paused) && e.type === 'keydown')) return;
     const el = e.target as HTMLElement | null;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
     e.preventDefault();

@@ -220,11 +220,14 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
   // «Menos movimiento», remembered on this device.
   const [calma, setCalma] = useState(() => {
+    // The system's «reduce motion» turns it on unless the player chose otherwise.
     try {
-      return localStorage.getItem('vuelo-calma') === '1';
+      const v = localStorage.getItem('vuelo-calma');
+      if (v !== null) return v === '1';
     } catch {
-      return false;
+      /* private mode */
     }
+    return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   });
   const toggleCalma = (on: boolean) => {
     setCalma(on);
@@ -246,6 +249,16 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       return !p;
     });
   }, [phase]);
+
+  /** Back to the hangar to pick another plane (the self-playing game keeps flying behind). */
+  const toHangar = useCallback(() => {
+    game.current?.attract();
+    game.current?.setPaused(false);
+    setPaused(false);
+    setSaved(readSave());
+    tituloMusica();
+    setPhase('menu');
+  }, [tituloMusica]);
 
   const toMenu = useCallback(() => {
     game.current?.attract();
@@ -273,8 +286,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
-      // Enter flies from the hangar or the game-over card (the title menu uses its focused button).
-      if ((phase === 'menu' || phase === 'over') && e.code === 'Enter') play();
+      // Esc goes back from the credits and the hangar (Enter uses the focused button everywhere).
+      if (e.code === 'Escape' && (phase === 'creditos' || phase === 'menu')) setPhase('titulo');
     };
     const onHide = () => {
       if (document.hidden && phase === 'play' && !paused) togglePause();
@@ -581,6 +594,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             ) : (
               <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {hud.resumen.siguiente}</p>
             )}
+            {hud.resumen.dato && (
+              <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a]">💡 ¿Sabías que…? {hud.resumen.dato}</p>
+            )}
             <p className="mt-1 text-[10px] font-bold text-[#a08060]">Partida guardada ✓ · puedes seguir otro día</p>
           </div>
         </div>
@@ -588,7 +604,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {phase === 'play' && hud && hud.hielo > 0.25 && !paused && (
         <div className="pointer-events-none absolute inset-x-0 top-[30%] z-20 flex justify-center px-4">
           <span
-            role="alert"
+            role={hud.congelado ? 'alert' : 'status'}
             className={`rounded-full px-4 py-1.5 text-center text-sm font-black shadow-[0_3px_0_rgba(26,58,106,0.35)] ${
               hud.congelado ? 'animate-pulse bg-[#e6f6ff] text-[#1a3a6a] ring-4 ring-[#9ad8ff]' : 'bg-[#bfe8ff] text-[#1a3a6a]'
             }`}
@@ -659,7 +675,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           role="button"
           tabIndex={0}
           aria-label={introStep < 3 ? 'Saltar la intro' : 'Empezar'}
-          onPointerDown={advanceIntro}
+          onClick={advanceIntro}
           className={`absolute inset-0 z-50 grid cursor-pointer place-items-center overflow-hidden transition-colors duration-700 ${introStep === 0 ? 'bg-[#120c24]' : 'bg-[#120c24]/55'}`}
         >
           {introStep === 0 ? (
@@ -821,11 +837,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             </dl>
             <div className="sticky bottom-0 -mx-2 mt-5 flex flex-col items-center gap-3 rounded-2xl bg-[#fff8e7]/95 px-2 pt-2 [@media(max-height:500px)]:mt-2">
               {saved && (
-                <button type="button" onClick={() => play(true)} className={GO}>
+                <button type="button" autoFocus onClick={() => play(true)} className={GO}>
                   Continuar partida · {PLANES.find((p) => p.id === saved.pilot)?.pilot}, oleada {saved.wave}, ⭐ {saved.score}
                 </button>
               )}
-              <button type="button" onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>
+              <button type="button" autoFocus={!saved} onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>
                 {saved ? 'Nueva partida' : '¡A volar!'}
               </button>
               {touchUi ? (
@@ -842,8 +858,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
 
       {phase === 'over' && result && (
-        <div role="dialog" aria-modal="true" aria-label="Fin del vuelo" className="absolute inset-0 z-30 grid place-items-center p-4">
-          <div className="w-full max-w-md rounded-[2rem] bg-[#fff8e7]/95 p-6 text-center shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
+        <div role="dialog" aria-modal="true" aria-label="Fin del vuelo" className="absolute inset-0 z-50 grid place-items-center overflow-y-auto p-4 [@media(max-height:500px)]:p-2">
+          <div className="w-full max-w-md rounded-[2rem] bg-[#fff8e7]/95 p-6 [@media(max-height:500px)]:p-3 text-center shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
             <h2 className="text-3xl font-black text-[#e8742a]">{result.reason === 'avion' ? '¡Derribaron tus tres aviones!' : '¡Vaciaron la despensa!'}</h2>
             <p className="mt-1 font-bold text-[#8a6e55]">
               {result.reason === 'avion' ? `${result.pilot} saltó en paracaídas y está bien.` : 'Los ratones se llevaron todo el pescado.'}
@@ -866,7 +882,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 </button>
               )}
               <button type="button" autoFocus={!saved} onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>Otra vez</button>
-              <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Cambiar avión</button>
+              <button type="button" onClick={toHangar} className={`${BTN} h-12`}>Cambiar avión</button>
             </div>
           </div>
         </div>
@@ -878,7 +894,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <h2 className="text-3xl font-black">Pausa</h2>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               <button type="button" autoFocus onClick={togglePause} className={GO}>Seguir</button>
-              <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Salir al hangar</button>
+              <button type="button" onClick={toHangar} className={`${BTN} h-12`}>Salir al hangar</button>
+              <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Menú principal</button>
             </div>
             <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 text-sm font-black text-[#6b4f3a]">
               <input type="checkbox" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="h-5 w-5 accent-[#f0a45d]" />
@@ -906,7 +923,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           </div>
           <div className="absolute bottom-5 right-3 z-10 flex items-end gap-2 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
             <div className="flex flex-col gap-2">
-              <TouchButton label={hud?.nitro === 'listo' ? '×2 nitro' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2🔥' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
                 {hud?.nitro === 'activo' ? '🔥' : '⏩'}
               </TouchButton>
               <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>🛑</TouchButton>

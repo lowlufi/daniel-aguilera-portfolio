@@ -1314,7 +1314,13 @@ export function dibujarProyectil(g: Ctx, p: Proyectil, sx: number, sy: number, t
   if (p.tipo === 'balin' && p.trazador) {
     // Machine-gun tracer: a hot streak along its flight.
     const v = Math.hypot(p.vx, p.vy) || 1;
-    for (let i = 1; i <= 4; i++) R(g, Math.round(x - (p.vx / v) * i * 2), Math.round(y + (p.vy / v) * i * 2), 1, 1, i < 2 ? '#ffd0d0' : '#ff4a5a');
+    // Thicker, with a dark outline so it reads on sunset pinks and lilacs.
+    for (let i = 1; i <= 5; i++) {
+      const tx = Math.round(x - (p.vx / v) * i * 2), ty = Math.round(y + (p.vy / v) * i * 2);
+      R(g, tx - 1, ty - 1, 3, 3, '#3a1a2a');
+      R(g, tx, ty, 2, 1, i < 2 ? '#fff2a8' : i < 4 ? '#ff9a3c' : '#ff4a5a');
+    }
+    R(g, x - 1, y - 1, 4, 3, '#3a1a2a');
     R(g, x, y, 2, 1, P.white);
   } else if (p.tipo === 'balin') {
     R(g, x - 1, y - 1, 3, 3, '#a0402a');
