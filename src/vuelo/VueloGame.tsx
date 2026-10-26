@@ -337,6 +337,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
                 </span>
                 <span className={CHIP}>⭐ {hud.score}</span>
+                {hud.boost && (
+                  <span className={`${CHIP} animate-pulse bg-[#ffe0f0] text-[#c8507a]`} title="Mejora especial de un avión derribado">
+                    ⭐ {hud.boost} · {hud.boostT} s
+                  </span>
+                )}
                 <span className={CHIP}>🌊 {hud.wave} · 🐭 {hud.left}</span>
                 <span className={CHIP} title="Altura">⛰️ {hud.altitude.toLocaleString('es-CL')} m</span>
                 <span className={`${CHIP} max-[899px]:hidden`} title="Viento: empuja las bombas y el humo" aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}>

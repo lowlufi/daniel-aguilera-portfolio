@@ -104,7 +104,7 @@ export type EstadoOvni = {
   rng: number;
 };
 
-export type Disparo = { x: number; y: number; vx: number; vy: number; tipo: 'balin' | 'cohete' | 'mina' };
+export type Disparo = { x: number; y: number; vx: number; vy: number; tipo: 'balin' | 'cohete' | 'mina'; trazador?: boolean };
 export type Proyectil = Disparo & { t: number };
 
 const fin = (v: number, d = 0) => (Number.isFinite(v) ? v : d);
@@ -1311,7 +1311,12 @@ function linea(g: Ctx, x0: number, y0: number, x1: number, y1: number) {
 /** Draws a projectile from this module at screen (sx, sy). */
 export function dibujarProyectil(g: Ctx, p: Proyectil, sx: number, sy: number, t: number): void {
   const x = Math.round(sx), y = Math.round(sy);
-  if (p.tipo === 'balin') {
+  if (p.tipo === 'balin' && p.trazador) {
+    // Machine-gun tracer: a hot streak along its flight.
+    const v = Math.hypot(p.vx, p.vy) || 1;
+    for (let i = 1; i <= 4; i++) R(g, Math.round(x - (p.vx / v) * i * 2), Math.round(y + (p.vy / v) * i * 2), 1, 1, i < 2 ? '#ffd0d0' : '#ff4a5a');
+    R(g, x, y, 2, 1, P.white);
+  } else if (p.tipo === 'balin') {
     R(g, x - 1, y - 1, 3, 3, '#a0402a');
     R(g, x - 1, y - 1, 2, 2, P.gold);
     R(g, x - 1, y - 1, 1, 1, P.gold1);

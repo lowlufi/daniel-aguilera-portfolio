@@ -796,9 +796,10 @@ export function scorchMarks(g: Ctx, k: VehiculoTipo, x: number, y: number, seed:
 }
 
 /** What a reward balloon gives: one more slot of missiles, bombs or flares. */
-export type Premio = 'misil' | 'bomba' | 'bengala' | 'reparar';
+export type Premio = 'misil' | 'bomba' | 'bengala' | 'reparar' | 'especial';
 const PRIZE_COL: Record<Premio, [string, string, string]> = {
   reparar: [P.g0, P.g2, P.g3],
+  especial: ['#c8507a', '#ff8ac8', '#ffe0f0'],
   misil: [P.r0, P.r1, P.r3],
   bomba: ['#2a5a9a', '#74b4f0', '#d8f0ff'],
   bengala: [P.gold0, P.gold, P.gold1],
@@ -817,7 +818,7 @@ export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number,
   const by = Y - (big ? 14 : 10) - r;
   // String.
   for (let i = 0; i < (big ? 14 : 10); i++) R(g, X + Math.round((sway * i) / 12), Y - i, 1, 1, '#8a7a9a');
-  if (big && Math.floor(t * 3) % 2) {
+  if ((big || kind === 'especial') && Math.floor(t * 3) % 2) {
     g.globalAlpha = 0.5;
     D.disc(g, X + sway, by, r + 3, c2);
     g.globalAlpha = 1;
@@ -835,6 +836,13 @@ export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number,
   } else if (kind === 'bomba') {
     D.disc(g, ix, by + 1, 2, '#2a2438');
     R(g, ix + 1, by - 2, 1, 2, P.gold);
+  } else if (kind === 'especial') {
+    // A golden star: a special upgrade from a downed fighter.
+    R(g, ix, by - 3, 1, 7, P.gold1);
+    R(g, ix - 3, by - 1, 7, 1, P.gold1);
+    R(g, ix - 1, by - 1, 3, 3, P.gold);
+    R(g, ix - 2, by + 2, 1, 1, P.gold);
+    R(g, ix + 2, by + 2, 1, 1, P.gold);
   } else if (kind === 'reparar') {
     // A little wrench.
     for (let i = 0; i < 4; i++) R(g, ix - 2 + i, by + 2 - i, 1, 1, P.white);

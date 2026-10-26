@@ -100,6 +100,9 @@ export type Hud = {
   /** Super nitro: 'listo' (double-tap accelerate), 'activo', or recharging with `nitroK` 0…1. */
   nitro: 'listo' | 'activo' | 'carga';
   nitroK: number;
+  /** Special upgrade running, with seconds left. */
+  boost: string;
+  boostT: number;
   rack: number;
   flares: number;
   flareMax: number;
@@ -162,10 +165,17 @@ const PANTRY = { x0: 22, x1: 86 };
 const META_X = 98;
 const META_MAX = 5;
 /** Most slots a reward balloon can raise each weapon to. */
-type Arma = Exclude<Premio, 'reparar'>;
+type Arma = Exclude<Premio, 'reparar' | 'especial'>;
 const CAP_MAX: Record<Arma, number> = { misil: 8, bomba: 6, bengala: 4 };
 const PRIZE_NAME: Record<Arma, string> = { misil: 'misil', bomba: 'bomba', bengala: 'bengala' };
 const BOMB_RELOAD = 2.2;
+/** Special upgrades from a downed fighter's golden balloon. */
+type Mejora = 'doble' | 'escudo' | 'cohetes';
+const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
+  doble: { nombre: 'Metralla doble sin calentarse', t: 20 },
+  escudo: { nombre: 'Escudo de burbuja', t: 10 },
+  cohetes: { nombre: 'Misiles sin fin', t: 15 },
+};
 /** Super nitro: how long it burns, its push, and the recharge time. */
 const NITRO_T = 2.5;
 const NITRO_ACC = 2.6 * FA.GRAVEDAD;
@@ -460,6 +470,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     heat: 0,
     hot: false,
     gunT: 0,
+    boost: '' as '' | Mejora,
+    boostT: 0,
     nitroT: 0,
     nitroCd: 0,
     lockCand: null as Fijable | null,
@@ -907,8 +919,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const { x, y, vx, vy } = f.a;
     if (byPlayer) {
       award(CZ.PUNTOS, x, y);
-      const prize = maybePrize();
-      if (prize) releasePrize(prize, x, y + 10);
+      // A downed fighter always leaves a golden balloon with a special upgrade.
+      releasePrize('especial', x, y + 10);
     }
     for (let i = 0; i < 3; i++) VFX.pieza(s.fx, x, y, vx * 0.4 + rand(-60, 60), vy * 0.4 + rand(20, 90), null, '#7a5ad0');
     window.setTimeout(() => blast(x, y, FA.ENERGIA.vehiculo, 'jugador', 0.8), 30);
@@ -1200,7 +1212,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sfx.star();
     sfx.reveal();
     S.suena('recoger', { vol: 1 });
-    if (kind === 'reparar') {
+    if (kind === 'especial') {
+      // A special upgrade at random (or a full nitro).
+      const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'nitro'];
+      const pick = opts[Math.floor(Math.random() * opts.length)];
+      if (pick === 'nitro') {
+        s.nitroCd = 0;
+        startNitro();
+        s.banner = '⭐ ¡Super nitro gratis!';
+      } else {
+        s.boost = pick;
+        s.boostT = MEJORA[pick].t;
+        if (pick === 'escudo') s.inv = Math.max(s.inv, MEJORA.escudo.t);
+        s.banner = `⭐ ¡${MEJORA[pick].nombre}! (${MEJORA[pick].t} s)`;
+      }
+      sfx.achievement();
+      window.setTimeout(() => {
+        if (s.banner.startsWith('⭐')) s.banner = '';
+      }, 2200);
+    } else if (kind === 'reparar') {
       // Two parts back, and a moment to breathe.
       if (!repair()) {
         s.score += 300;
@@ -1296,15 +1326,20 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.heat = Math.max(0, s.heat - dt * (s.hot ? 0.45 : 0.3));
     if (s.hot && s.heat < 0.35) s.hot = false;
     if (!input.gun || s.hot || s.gunT > 0) return;
-    s.gunT = 0.075;
-    s.heat += 0.045;
+    const doble = s.boost === 'doble';
+    s.gunT = doble ? 0.06 : 0.075;
+    if (!doble) s.heat += 0.045;
     if (s.heat >= 1) {
       s.hot = true;
       pop(p.x, p.y + 16, '¡Metralla caliente!', P.r3);
     }
     const a = p.rumbo + rand(-0.035, 0.035);
     const nose = s.spec.hit + 3;
-    s.bullets.push({ x: p.x + Math.cos(p.rumbo) * nose, y: p.y + Math.sin(p.rumbo) * nose, vx: p.vx + Math.cos(a) * 480, vy: p.vy + Math.sin(a) * 480, t: 0, life: 0.85 });
+    // Two guns side by side with the upgrade, one otherwise.
+    for (const off of doble ? [-3, 3] : [0]) {
+      const ox = -Math.sin(p.rumbo) * off, oy = Math.cos(p.rumbo) * off;
+      s.bullets.push({ x: p.x + Math.cos(p.rumbo) * nose + ox, y: p.y + Math.sin(p.rumbo) * nose + oy, vx: p.vx + Math.cos(a) * 480, vy: p.vy + Math.sin(a) * 480, t: 0, life: 0.85 });
+    }
     fx('antiaereo', sfx.step, { vol: 0.16, rate: rand(1.7, 1.95), dur: 0.07 });
   }
 
@@ -1563,6 +1598,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.bombT -= dt;
       s.flareCd -= dt;
       s.nitroCd = Math.max(0, s.nitroCd - dt);
+      if (s.boostT > 0) {
+        s.boostT -= dt;
+        if (s.boost === 'cohetes') s.ammo = s.cap.misil;
+        if (s.boostT <= 0) s.boost = '';
+      }
       if (s.ammo < s.cap.misil) {
         s.reloadT += dt;
         if (s.reloadT >= s.spec.reload) {
@@ -1847,7 +1887,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Enemy fighters: fly, shoot, and crash if they hit the ground.
     for (const f of s.fighters) {
       const r = CZ.paso(f, p, flyingNow(), dt, ground, CEIL, s.wave);
-      for (const d of r.disparos) s.proy.push(AE.nuevoProyectil({ ...d, tipo: 'balin' }));
+      for (const d of r.disparos) s.proy.push(AE.nuevoProyectil({ ...d, tipo: 'balin', trazador: true }));
+      if (r.disparos.length) fx('antiaereo', sfx.step, { vol: 0.22, rate: rand(1.4, 1.6), dur: 0.08 }, f.a.x);
       if (r.misil) {
         for (const mm of MS.lanzar('buscador', f.a.x, f.a.y, p, s.wave, Math.random)) s.shots.push({ m: mm, enemy: true, tgt: p, trail: 0 });
         fx('misil', sfx.enemyLaunch, { vol: 0.4, rate: 1.1 }, f.a.x);
@@ -2303,6 +2344,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     VFX.dibujar(g, s.fx, (x, y) => [sx(x), sy(y)], s.t);
     const blink = s.inv > 0 && Math.floor(s.t * 14) % 2 === 0;
     if (!s.dead) A.drawPlane(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, p.alabeo, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
+    // Bubble shield from the special upgrade: a shimmering ring around the plane.
+    if (s.boost === 'escudo' && !s.dead) {
+      const cx = sx(p.x), cy = sy(p.y);
+      const r = s.spec.hit + 6;
+      g.globalAlpha = s.boostT < 2 && Math.floor(s.t * 8) % 2 ? 0.25 : 0.6;
+      for (let a = 0; a < 28; a++) {
+        const t = (a / 28) * Math.PI * 2 + s.t * 2;
+        A.R(g, cx + Math.round(Math.cos(t) * r), cy + Math.round(Math.sin(t) * r), 1, 1, a % 3 ? '#9ad8ff' : P.white);
+      }
+      g.globalAlpha = 1;
+    }
     // The nitro flame: a long flickering jet out of the tail.
     if (s.nitroT > 0 && !s.dead) {
       const ux = Math.cos(p.rumbo), uy = -Math.sin(p.rumbo);
@@ -2520,6 +2572,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       heat: Math.round(s.heat * 20) / 20,
       hot: s.hot,
       nitro: s.nitroT > 0 ? 'activo' : s.nitroCd > 0 ? 'carga' : 'listo',
+      boost: s.boost ? MEJORA[s.boost].nombre : '',
+      boostT: Math.ceil(s.boostT),
       nitroK: s.nitroCd > 0 ? Math.round((1 - s.nitroCd / NITRO_CD) * 20) / 20 : 1,
       rack: s.cap.misil,
       flares: s.flares,

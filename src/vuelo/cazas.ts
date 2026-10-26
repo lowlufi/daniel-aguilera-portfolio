@@ -7,6 +7,7 @@
  */
 import * as FV from './fisica-vuelo';
 import * as A from './dibujo';
+import { P } from '../game/dulce';
 import type { Avion, Movil } from './fisica-tipos';
 
 type Ctx = CanvasRenderingContext2D;
@@ -26,6 +27,8 @@ export type Caza = {
   /** Breaking away after a pass: until this runs out it flies off, then turns back. */
   escape: number;
   escDir: number;
+  /** Muzzle flash left, s. */
+  fogonazo: number;
 };
 
 export type Disparo = { x: number; y: number; vx: number; vy: number };
@@ -48,7 +51,7 @@ export function cuantos(oleada: number): number {
 export function crear(x: number, y: number, haciaDerecha: boolean, oleada: number): Caza {
   const a = FV.nuevoAvion('caza', x, y, haciaDerecha);
   const hp = 2 + Math.min(1.5, (oleada - 3) * 0.15);
-  return { id: ++ids, a, hp, hpMax: hp, gunCd: 2, rafaga: 0, rafT: 0, misilCd: 6 + Math.random() * 4, flash: 0, escape: 0, escDir: 1 };
+  return { id: ++ids, a, hp, hpMax: hp, gunCd: 2, rafaga: 0, rafT: 0, misilCd: 6 + Math.random() * 4, flash: 0, escape: 0, escDir: 1, fogonazo: 0 };
 }
 
 /** One step of a fighter's brain and flight. */
@@ -56,6 +59,7 @@ export function paso(c: Caza, jugador: Movil, vivo: boolean, dt: number, suelo: 
   const out: Orden = { disparos: [], misil: false };
   const a = c.a;
   c.flash = Math.max(0, c.flash - dt);
+  c.fogonazo = Math.max(0, c.fogonazo - dt);
   const dx = jugador.x - a.x, dy = jugador.y - a.y;
   const d = Math.hypot(dx, dy);
 
@@ -92,12 +96,13 @@ export function paso(c: Caza, jugador: Movil, vivo: boolean, dt: number, suelo: 
     c.rafT -= dt;
     if (c.rafT <= 0) {
       c.rafaga--;
-      c.rafT = 0.09;
+      c.rafT = 0.07;
+      c.fogonazo = 0.05;
       const ang = a.rumbo + (Math.random() - 0.5) * 0.08;
       out.disparos.push({ x: a.x + Math.cos(a.rumbo) * 9, y: a.y + Math.sin(a.rumbo) * 9, vx: a.vx + Math.cos(ang) * VEL_BALA, vy: a.vy + Math.sin(ang) * VEL_BALA });
     }
   } else if (c.gunCd <= 0 && d < 280 && mira < 0.14) {
-    c.rafaga = 4;
+    c.rafaga = 6;
     c.rafT = 0;
     c.gunCd = clamp(2.6 - oleada * 0.08, 1.3, 2.6) + Math.random() * 0.8;
   }
@@ -150,6 +155,13 @@ export function dibujar(g: Ctx, c: Caza, x: number, y: number, t: number): void 
   A.R(g, 4, -6, 2, 2, '#c9b4ff');
   const len = 2 + (Math.floor(t * 30) % 2) * 2;
   A.R(g, -Math.round(img.width / 2) - len + 2, 0, len, 1, '#ff9a3c');
+  // Machine-gun muzzle flash at the nose.
+  if (c.fogonazo > 0) {
+    const nx = Math.round(img.width / 2) + 1;
+    A.R(g, nx, -1, 4, 3, P.gold);
+    A.R(g, nx + 1, -2, 2, 5, '#fff2a8');
+    A.R(g, nx + 4, 0, 2, 1, P.white);
+  }
   g.restore();
   // Health pips once damaged.
   if (c.hp < c.hpMax) {
