@@ -646,7 +646,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     /** Reward balloons: tied to enemies (by id) and floating free. */
     carPrize: new Map<number, Premio>(),
     airPrize: new Map<number, Premio>(),
-    prizes: [] as (Cuerpo & { kind: Premio })[],
+    prizes: [] as (Cuerpo & { kind: Premio; hielo?: number })[],
     flareT: 0,
     flareCd: 0,
     flareWasDown: false,
@@ -3057,15 +3057,34 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
     for (const q of s.prizes) {
       q.t += dt;
-      q.vy += (22 - q.vy) * Math.min(1, dt * 2);
-      q.x += (q.vx + wind * 0.4 + Math.sin(q.t * 2) * 6) * dt;
+      // Loose balloons never vanish: they rise (faster in thin air) until the cold
+      // up high frosts them over, freezes them in place and they burst.
+      const frio = q.y > FRIO_DESDE;
+      if (frio) q.hielo = (q.hielo ?? 0) + dt;
+      const sube = q.hielo ? 0 : 22 + Math.max(0, q.y) * 0.02;
+      q.vy += (sube - q.vy) * Math.min(1, dt * 2);
+      if (!q.hielo) q.x += (q.vx + wind * 0.4 + Math.sin(q.t * 2) * 6) * dt;
       q.y += q.vy * dt;
-      if (s.mode === 'play' && !s.dead && Math.hypot(q.x - p.x, q.y + 12 - p.y) < s.spec.hit + 10) {
+      if ((q.hielo ?? 0) > 1.5 && q.t < 99) {
+        q.t = 99;
+        for (let i = 0; i < 8; i++) s.shards.push({ x: q.x, y: q.y + 14, vx: rand(-60, 60), vy: rand(-20, 70), t: 0, c: i % 2 ? '#e6f6ff' : '#9ad8ff' });
+        puff(q.x, q.y + 14, 2, false, 0.6);
+        pop(q.x, q.y + 26, '❄️ ¡Pop!', '#bfe8ff');
+        if (!s.attract) sfx.pop();
+      }
+      // Easy to catch: a wide grab radius and, close by, they drift toward the plane.
+      const dq = Math.hypot(q.x - p.x, q.y + 12 - p.y);
+      if (s.mode === 'play' && !s.dead && q.t < 99 && dq < 80) {
+        const k = Math.min(1, dt * 3);
+        q.x += (p.x - q.x) * k * 0.6;
+        q.y += (p.y - 12 - q.y) * k * 0.6;
+      }
+      if (s.mode === 'play' && !s.dead && q.t < 99 && dq < s.spec.hit + 24) {
         q.t = 99;
         catchPrize(q.kind, q.x, q.y);
       }
     }
-    s.prizes = s.prizes.filter((q) => q.t < 25 && q.y < CEIL + 100);
+    s.prizes = s.prizes.filter((q) => q.t < 99);
     for (const c of s.crates) {
       c.t += dt;
       if (c.landed) c.landed += dt;
@@ -3304,7 +3323,18 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const prize = s.carPrize.get(c.id);
       if (prize) A.drawPrize(g, sx(c.x) + 4, sy(c.y + A.VEH_LOOK[c.kind].h - 2), prize, s.t, false);
     }
-    for (const q of s.prizes) A.drawPrize(g, sx(q.x), sy(q.y), q.kind, s.t, true);
+    for (const q of s.prizes) {
+      A.drawPrize(g, sx(q.x), sy(q.y), q.kind, s.t, true);
+      // Frost creeping over a balloon that reached the cold.
+      if (q.hielo) {
+        const k = Math.min(1, q.hielo / 1.5);
+        const bx = sx(q.x), by = sy(q.y) - 21;
+        g.globalAlpha = 0.35 + 0.45 * k;
+        A.R(g, bx - 6, by - 6, 13, 12, '#bfe8ff');
+        g.globalAlpha = 1;
+        for (let i = 0; i < Math.round(10 * k); i++) A.R(g, bx - 6 + ((i * 7) % 13), by - 6 + ((i * 5) % 12), 1, 1, '#ffffff');
+      }
+    }
     for (const a of s.aereos) {
       const prize = s.airPrize.get(a.id);
       if (prize) A.drawPrize(g, sx(a.x), sy(a.y + 6), prize, s.t, false);
