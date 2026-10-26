@@ -1381,19 +1381,27 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   for (let x = pantry.x1 + 34; x < 400; x += 16 + (hash(x, 1) % 22)) if (libre(x) && Math.abs(x - 210) > 16 && Math.abs(x - 330) > 16) eucaliptoCerca(g, x, surfY(x), 28 + (hash(x, 2) % 16));
   // Llolleo: totora reeds, little lagoons and white herons.
   for (let x = 410; x < 1100; x += 8 + (hash(x, 3) % 18)) {
-    if (!libre(x)) continue;
+    if (!libre(x) || (x > 615 && x < 760)) continue;
     const k = hash(x, 4) % 10;
     if (k < 6) totoraCerca(g, x, surfY(x), x);
     else if (k < 8) charco(g, x, surfY(x));
     else garzaCerca(g, x, surfY(x));
   }
+  // Llolleo: the «Ojos de Mar» lagoon by the path, with its sign.
+  if (libre(660)) {
+    laguna(g, 660, surfY(660));
+    cartel(g, 690, surfY(700), 'OJOS DE MAR', '#3d85c6');
+  }
+
   // Barrancas: concrete stairs with railings, a corner store and lamp posts.
   for (const x of [1160, 1290, 1560, 1630]) if (libre(x)) {
     escalinata(g, x, surfY(x));
     casasPareadas(g, x + 16, surfY(x) - 15, surfY, hash(x, 11));
   }
   if (libre(1420)) almacen(g, 1420, surfY(1440));
-  for (let x = 1120; x < 1700; x += 70) if (libre(x) && Math.abs(x - 1440) > 40) faro(g, x, surfY(x));
+  if (libre(1200)) cartel(g, 1196, surfY(1196), 'JUANASPE', '#c0605a');
+  if (libre(1490)) casaNelo(g, 1486, surfY(1510));
+  for (let x = 1120; x < 1700; x += 70) if (libre(x) && Math.abs(x - 1440) > 40 && Math.abs(x - 1510) > 34 && Math.abs(x - 1220) > 26) faro(g, x, surfY(x));
   // The port: containers, bollards, a fried-fish stall, sea lions and pelicans on posts.
   for (let x = 1730; x < 2700; x += 50 + (hash(x, 5) % 50)) {
     if (!libre(x) || Math.abs(x - 2200) < 60 || Math.abs(x - 2400) < 50) continue;
@@ -1720,6 +1728,60 @@ function estacion(g: Ctx, x: number, y: number) {
   R(g, x + 44, y - 9, 12, 2, P.k1);
   R(g, x + 45, y - 7, 1, 3, P.k0);
   R(g, x + 54, y - 7, 1, 3, P.k0);
+}
+
+/** A wider lagoon set into the grass, rimmed with reeds. */
+function laguna(g: Ctx, x: number, y: number) {
+  D.oval(g, x, y + 2, 28, 4, '#5a8a6a');
+  D.oval(g, x, y + 2, 27, 3, P.w1);
+  R(g, x - 18, y + 1, 22, 1, P.w2);
+  R(g, x + 8, y + 2, 8, 1, P.w3);
+  for (const dx of [-30, -27, -24, 24, 27, 30]) {
+    const h = 6 + ((dx * 7) & 3);
+    R(g, x + dx, y - h + 2, 1, h, '#8a9a50');
+    R(g, x + dx, y - h, 1, 2, '#8a6a40');
+  }
+}
+
+/** A friendly little house with a garden fence and its name plate: «CASA DEL ÑELO». */
+function casaNelo(g: Ctx, x: number, y: number) {
+  const W = 46;
+  // Walls, gable roof and a chimney.
+  R(g, x - 1, y - 23, W + 2, 23, '#3e4a6b');
+  R(g, x, y - 22, W, 22, '#b5d99c');
+  R(g, x, y - 22, W, 1, '#d8f0c4');
+  for (let i = 0; i < 12; i++) R(g, x - 3 + i * 2, y - 24 - i, W + 6 - i * 4, 1, i % 3 === 1 ? '#ff8a7a' : '#e86a5c');
+  R(g, x + 34, y - 36, 5, 8, '#c0605a');
+  R(g, x + 33, y - 37, 7, 2, '#8a3a3a');
+  // A round window, a door with a heart, flower boxes.
+  D.disc(g, x + 10, y - 13, 4, '#3e4a6b');
+  D.disc(g, x + 10, y - 13, 3, P.gl1);
+  R(g, x + 9, y - 15, 1, 1, P.white);
+  R(g, x + 20, y - 15, 9, 15, '#3e4a6b');
+  R(g, x + 21, y - 14, 7, 14, P.k1);
+  R(g, x + 23, y - 11, 1, 1, P.r2);
+  R(g, x + 25, y - 11, 1, 1, P.r2);
+  R(g, x + 23, y - 10, 3, 1, P.r2);
+  R(g, x + 24, y - 9, 1, 1, P.r2);
+  R(g, x + 26, y - 6, 1, 1, P.gold);
+  R(g, x + 33, y - 17, 9, 7, P.white);
+  R(g, x + 34, y - 16, 7, 5, P.gl1);
+  R(g, x + 33, y - 9, 9, 2, P.k0);
+  for (const fx of [34, 37, 40]) R(g, x + fx, y - 11, 2, 2, fx === 37 ? P.gold : P.r2);
+  // Name plate over the door.
+  const txt = 'CASA DEL ÑELO';
+  const w = anchoLetrero(txt) + 4;
+  const px = x + Math.round(W / 2) - Math.round(w / 2);
+  R(g, px - 1, y - 36, w + 2, 12, '#5a3a2a');
+  R(g, px, y - 35, w, 10, P.cream);
+  escribir(g, txt, px + 2, y - 31, '#3a5ab0');
+  // A little white fence.
+  for (let i = -6; i < W + 6; i++) {
+    if (i >= 20 && i < 29) continue;
+    if ((i + 6) % 3 === 0) R(g, x + i, y - 5, 1, 5, P.white);
+  }
+  R(g, x - 6, y - 4, 26, 1, P.white);
+  R(g, x + 29, y - 4, 23, 1, P.white);
 }
 
 /** The pantry's flag, flapping. (x, y) is the foot of the pole on screen. */

@@ -596,8 +596,8 @@ const TIERRA: Record<Ambiente, PalTierra> = {
 /** La Tierra vista desde arriba: un arco con atmósfera brillante, nubes y continentes. */
 function capaTierra(a: Ambiente, y0: number, y1: number, b: Buf) {
   const W = b.w;
-  const R = 2600;
-  const ap = 22;
+  const R = TIERRA_R;
+  const ap = TIERRA_AP;
   const cx = W / 2;
   const pt = TIERRA[a];
   const g0 = P(pt.glow[0]);
@@ -1020,7 +1020,7 @@ type Alto = {
   cielo: { cv: Cv; top: string };
   mar: ReturnType<typeof capaMar> & { fondo: string };
   cirros: Cv[];
-  tierraBuf: Buf;
+  tierraBuf?: Buf;
   tierra: { cv: Cv; fondo: string };
 };
 
@@ -1068,24 +1068,28 @@ const tareas = (a: Ambiente): Tarea<Capas>[] => [
   },
 ];
 
-const TIERRA_W = 1600;
-const TIERRA_H = 200;
+/* The Earth is wide and tall enough that, on screens up to ~2800 px, its
+ * bottom row is solid planet edge to edge: the flat fill under it never shows
+ * a corner of space (that was the "cut" high up). */
+const TIERRA_W = 2880;
+const TIERRA_H = 380;
 const TIERRA_AP = 22;
+const TIERRA_R = 3600;
+const TIERRA_PASO = 38;
 
 const tareasAlto = (a: Ambiente): Tarea<Alto>[] => [
   (c) => (c.cielo = capaCieloAlto(a)),
   (c) => (c.mar = { ...capaMar(a), fondo: css(palNube(a, 0.1).cuerpo) }),
   (c) => (c.cirros = capaCirrosAltos(a)),
-  (c) => {
-    c.tierraBuf = new Buf(TIERRA_W, TIERRA_H);
-    capaTierra(a, 0, 50, c.tierraBuf);
-  },
-  (c) => capaTierra(a, 50, 100, c.tierraBuf!),
-  (c) => capaTierra(a, 100, 150, c.tierraBuf!),
-  (c) => {
-    capaTierra(a, 150, TIERRA_H, c.tierraBuf!);
-    c.tierra = { cv: c.tierraBuf!.canvas(), fondo: TIERRA[a].mar[3] };
-  },
+  // Painted in bands of rows, a few ms each.
+  ...Array.from({ length: Math.ceil(TIERRA_H / TIERRA_PASO) }, (_, i): Tarea<Alto> => (c) => {
+    if (i === 0) c.tierraBuf = new Buf(TIERRA_W, TIERRA_H);
+    capaTierra(a, i * TIERRA_PASO, Math.min(TIERRA_H, (i + 1) * TIERRA_PASO), c.tierraBuf!);
+    if ((i + 1) * TIERRA_PASO >= TIERRA_H) {
+      c.tierra = { cv: c.tierraBuf!.canvas(), fondo: TIERRA[a].mar[3] };
+      c.tierraBuf = undefined;
+    }
+  }),
 ];
 
 const tareasEspacio = (): Tarea<Espacio>[] => [
@@ -1161,6 +1165,7 @@ const LETRAS: Record<string, string[]> = {
   U: ['#.#', '#.#', '#.#', '#.#', '###'],
   V: ['#.#', '#.#', '#.#', '.#.', '.#.'],
   Ó: ['.#.', '#.#', '#.#', '#.#', '.#.'],
+  Ñ: ['#..#', '##.#', '#.##', '#..#', '#..#'],
   É: ['###', '#..', '##.', '#..', '###'],
   Á: ['.#.', '#.#', '###', '#.#', '#.#'],
   '0': ['###', '#.#', '#.#', '#.#', '###'],
@@ -1193,6 +1198,7 @@ function letrero(b: Buf, s: string, x: number, y: number, col: number, sombra: n
       b.px(ax, y - 2, col);
       b.px(ax + 1, y - 3, col);
     }
+    if (ch === 'Ñ') for (let i = 0; i < 4; i++) b.px(x + i, y - 2 - (i % 2), col);
     x += gl[0].length + 1;
   }
 }
@@ -1212,6 +1218,7 @@ export function escribir(g: Ctx, s: string, x: number, y: number, col: string, s
         g.fillRect(ax + dx, y - 2 + dx, 1, 1);
         g.fillRect(ax + 1 + dx, y - 3 + dx, 1, 1);
       }
+      if (ch === 'Ñ') for (let i = 0; i < 4; i++) g.fillRect(x + i + dx, y - 2 - (i % 2) + dx, 1, 1);
     }
     x += gl[0].length + 1;
   }
@@ -1923,9 +1930,12 @@ function capaSAMedio(a: Ambiente) {
     const w = anchoTexto(txt);
     const x = at(X) - Math.round(w / 2);
     const y = surf(X) + 10;
+    for (let X2 = 1700; X2 < 1880; X2 += 9) {
+      const xx = at(X2);
+      if (xx + 8 < x - 3 || xx > x + w + 3) casa(b, m, xx, surf(X2) + 5, 7, 6, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], '#e86a5c', ventana);
+    }
     b.rect(x - 3, y - 3, w + 6, 10, m('#9cc888'));
     letrero(b, txt, x, y - 1, m('#ffffff', 0.1), m('#5a8a5a'));
-    for (let X2 = 1700; X2 < 1880; X2 += 9) if (Math.abs(X2 - X) > 34) casa(b, m, at(X2), surf(X2) + 5, 7, 6, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], '#e86a5c', ventana);
   }
   // The port: giant cranes, containers, warehouses and a ship at the berth (raised to be seen).
   {
@@ -2032,6 +2042,24 @@ function capaSACerca(a: Ambiente) {
     if (r() < 0.75) totora(b, m, at(X), surf(X) + 1, r);
     else if (r() < 0.3) garza(b, m, at(X), surf(X) + 1);
   }
+  // Llolleo's lagoons, the «Ojos de Mar», with their name on a little board.
+  for (const [X, rx] of [[560, 26], [640, 18]] as const) {
+    const x = at(X);
+    const y = surf(X) + 3;
+    b.oval(x, y, rx + 1, 3, m('#5a8a6a'));
+    b.oval(x, y, rx, 2, m('#6fa8c9'));
+    b.rect(x - Math.round(rx / 2), y - 1, rx, 1, m('#cfe3ea'));
+  }
+  {
+    const txt = 'OJOS DE MAR';
+    const w = anchoTexto(txt);
+    const x = at(600) - Math.round(w / 2);
+    const y = surf(600) - 16;
+    b.rect(x + Math.round(w / 2), y + 8, 1, 8, m('#6a5a4a'));
+    b.rect(x - 3, y - 2, w + 6, 10, m('#24427a'));
+    letrero(b, txt, x, y, m('#ffffff', 0.05), m('#24427a'));
+  }
+
   // The Maipo's mouth: water cutting through the reeds, and its sandbar.
   for (let x = at(725); x < at(805); x++) {
     const y = Math.round(H - prof(x)) + 1;
@@ -2044,6 +2072,18 @@ function capaSACerca(a: Ambiente) {
     casa(b, m, at(X), surf(X) + 2, 9, 9, c, '#e86a5c', ventana);
     casa(b, m, at(X) + 10, surf(X) + 2, 9, 9, c, '#e86a5c', ventana);
   }
+  // Barrancas: the Juanaspe neighbourhood's name over its rooftops.
+  {
+    const txt = 'JUANASPE';
+    const w = anchoTexto(txt);
+    const x = at(1380) - Math.round(w / 2);
+    const y = surf(1380) - 22;
+    b.rect(x + 2, y + 8, 1, 14, m('#6a5a4a'));
+    b.rect(x + w - 3, y + 8, 1, 14, m('#6a5a4a'));
+    b.rect(x - 3, y - 2, w + 6, 10, m('#c0605a'));
+    letrero(b, txt, x, y, m('#fff6e5', 0.05), m('#7a3a3a'));
+  }
+
   // The sea from the port to Cartagena, with the pile pier and colourful boats.
   const marY = H - 26;
   for (let x = at(1760); x < W; x++) {
