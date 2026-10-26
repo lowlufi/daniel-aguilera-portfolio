@@ -862,12 +862,34 @@ export function callarJuegoSi(pred: (() => boolean) | null) {
 export const juegoCallado = () => callado();
 
 /** The same effects as `sfx`, at the plane game's levels and silent behind the title. */
+/*
+ * Margarita's voice in the plane game: the island's blip (a 45 ms nasal 12.5 %
+ * pulse at 700–1200 Hz, four in a row 70 ms apart) read as a sheep bleating
+ * once it was loud enough to hear. Here each syllable is a short, dry triangle
+ * «tik» with a little drop and gaps between them: chatter, not a vowel.
+ */
+const PROPIOS_VUELO: Partial<Sfx> = {
+  talk() {
+    const notes = [523, 659, 784, 880, 1047];
+    const f = notes[Math.floor(Math.random() * notes.length)];
+    blip(f, 0.028, 'triangle', 0.06, 0, { slideTo: f * 0.85 });
+  },
+  // A vehicle reached the pantry: the same falling riff, but on a hollow
+  // square with a triangle under it instead of the nasal 25 % pulse.
+  lose() {
+    [784, 659, 523].forEach((f, i) => {
+      blip(f, 0.1, 0.5, 0.045, i * 0.1);
+      blip(f / 2, 0.1, 'triangle', 0.08, i * 0.1);
+    });
+  },
+};
+
 export const sfxVuelo = Object.fromEntries(
   (Object.keys(sfx) as (keyof Sfx)[]).map((k) => [
     k,
     (...a: unknown[]) => {
       if (callado()) return;
-      conNivel(NIVEL_VUELO[k] ?? 1, () => (sfx[k] as (...x: unknown[]) => void)(...a));
+      conNivel(NIVEL_VUELO[k] ?? 1, () => ((PROPIOS_VUELO[k] ?? sfx[k]) as (...x: unknown[]) => void)(...a));
     },
   ]),
 ) as Sfx;

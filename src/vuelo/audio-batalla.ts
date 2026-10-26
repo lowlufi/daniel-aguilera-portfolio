@@ -293,13 +293,19 @@ function friccion(sr: number, a: Float32Array, t0: number, dur: number, f0: numb
   const i0 = Math.floor(t0 * sr);
   const n = Math.min(a.length - i0, Math.floor(dur * sr));
   let fase = 0;
+  // Deriva irregular del tono (no un vibrato periódico) y golpes con ±12 % de
+  // desfase: con un vibrato regular de 7 Hz y estas resonancias de 1–2 kHz,
+  // el rechinido a 250–420 Hz sonaba a balido de oveja.
+  let deriva = 0, meta = 0;
   for (let k = 0; k < n; k++) {
     const u = k / n;
-    const f = (f0 + (f1 - f0) * u) * (1 + 0.04 * Math.sin(k / sr * 2 * Math.PI * 7) + 0.03 * ruido());
+    if ((k & 511) === 0) meta = ruido();
+    deriva += (meta - deriva) * 0.0015;
+    const f = (f0 + (f1 - f0) * u) * (1 + 0.05 * deriva + 0.03 * ruido());
     fase += f / sr;
     let imp = 0;
     if (fase >= 1) {
-      fase -= 1;
+      fase -= 1 + rand(-0.12, 0.12);
       imp = rand(0.4, 1);
     }
     const env = Math.min(1, u / 0.12) * Math.min(1, (1 - u) / 0.3);
@@ -946,9 +952,11 @@ function hornoFanfarria(sr: number) {
 /** Gaviota: dos «kia» cortos y uno largo que cae, nasal y áspero. */
 function hornoGaviota(sr: number) {
   const a = new Float32Array(Math.floor(sr * 1.15));
-  const b1 = new Bq(sr, 'bp', 2100, 2.2);
-  const b2 = new Bq(sr, 'bp', 3300, 3);
-  const llamadas: [number, number, number, number][] = [[0.02, 0.15, 1650, 1250], [0.23, 0.15, 1720, 1300], [0.5, 0.48, 1550, 880]];
+  // Agudas, cortas y sin trémolo: la versión anterior (llamada larga que caía
+  // a 880 Hz con trémolo de 45 Hz y formante nasal en 2.1 kHz) sonaba a oveja.
+  const b1 = new Bq(sr, 'bp', 3000, 1.4);
+  const b2 = new Bq(sr, 'bp', 4200, 2);
+  const llamadas: [number, number, number, number][] = [[0.02, 0.11, 2300, 1900], [0.2, 0.11, 2400, 1950], [0.42, 0.26, 2250, 1650]];
   for (const [t0, dur, fa, fb] of llamadas) {
     const i0 = Math.floor(t0 * sr);
     let ph = 0;
@@ -957,8 +965,9 @@ function hornoGaviota(sr: number) {
       const t = j / sr;
       ph += ((fa + (fb - fa) * Math.pow(u, 0.7)) * (1 + 0.02 * ruido())) / sr;
       let s = 0;
-      for (let k = 1; k <= 5; k++) s += Math.sin(TAU * k * ph) / Math.pow(k, 0.8);
-      const env = Math.pow(Math.sin(Math.PI * Math.min(1, u * 1.15)), 0.6) * (0.7 + 0.3 * Math.sin(TAU * 45 * t));
+      for (let k = 1; k <= 3; k++) s += Math.sin(TAU * k * ph) / (k * k);
+      void t;
+      const env = Math.pow(Math.sin(Math.PI * Math.min(1, u * 1.15)), 0.6);
       a[i0 + j] += s * env;
     }
   }
@@ -1238,14 +1247,18 @@ function hornoCongelado(sr: number) {
   for (let k = 0; k < 16; k++) ping(sr, a, rand(0, 0.35), rand(2400, 6000), rand(0.01, 0.05), rand(0.05, 0.15));
   golpe(sr, a, 0, 120, 45, 0.09, 0.9, 900);
   // Motor que se ahoga: diente de sierra que cae y se apaga entre toses.
-  const lp = new Bq(sr, 'lp', 900, 0.8);
-  let ph = 0;
+  const lp = new Bq(sr, 'lp', 650, 0.8);
+  let ph = 0, corte = 1, tosG = 1;
   for (let i = 0; i < n; i++) {
     const t = i / sr;
     const u = Math.max(0, t - 0.08);
-    ph += (55 + 260 * Math.exp(-u / 0.35)) / sr;
+    ph += (45 + 120 * Math.exp(-u / 0.3)) / sr;
     const saw = (ph % 1) * 2 - 1;
-    const tos = 0.55 + 0.45 * Math.sign(Math.sin(TAU * 7 * t));
+    // Fallos de encendido irregulares (un corte periódico de 7 Hz a ~300 Hz balaba).
+    if ((i & 1023) === 0) corte = Math.random() < 0.35 ? 0.15 : 1;
+    tosG += (corte - tosG) * 0.01;
+    const tos = tosG;
+    void t;
     a[i] += lp.run(saw) * Math.min(1, u / 0.03) * Math.exp(-u / 0.45) * tos * 0.55;
   }
   friccion(sr, a, 0.2, 0.9, 140, 60, [700, 1500], 0.2);

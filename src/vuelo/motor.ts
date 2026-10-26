@@ -125,6 +125,8 @@ export type Hud = {
   stall: boolean;
   /** Nuclear bombs in the hold. */
   nukes: number;
+  /** ⭐ upgrade points, levels, and whether the shop is open. */
+  mejoras: { puntos: number; niv: Record<Mejorable, number>; tienda: boolean; coraza: number };
   /** Boarding or rolling on the home runway (the bottom-left must stay clear). */
   enTierra: boolean;
   /** Ice 0…1 near the ceiling, and whether the controls are frozen. */
@@ -160,6 +162,9 @@ const PART_EFFECT: Record<Parte, Partial<FV.Dano>> = {
 };
 const PART_NAME: Record<Parte, string> = { cola: 'la cola', ala: 'un ala', motor: 'el motor', cabina: 'la cabina', bodega: 'la bodega' };
 const LIVES = 3;
+/** Upgrades bought with ⭐ points between waves: each stat goes 0…5, a level costs level+1. */
+export type Mejorable = 'dano' | 'salud' | 'defensa' | 'municion';
+const NIVEL_MAX = 5;
 /** The home runway on the San Antonio map (world x). */
 const PISTA0 = 110;
 const PISTA1 = 420;
@@ -488,6 +493,8 @@ export type SavedGame = {
   cap?: Record<Arma, number>;
   bridges?: [number, number][];
   mapa?: Mapa;
+  puntosMejora?: number;
+  niv?: Record<Mejorable, number>;
   enValpo?: boolean;
   at: number;
 };
@@ -697,6 +704,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
     hielo: 0,
+    /** ⭐ upgrade points and the levels bought; the shop holds the break open while it's up. */
+    puntosMejora: 0,
+    niv: { dano: 0, salud: 0, defensa: 0, municion: 0 } as Record<Mejorable, number>,
+    coraza: 0,
+    tienda: false,
     /** The mothership came because the plane lingered in space (not the level's boss). */
     jefeEspacio: false,
     /** Seconds the plane has been far below the UFOs: after a while they leave. */
@@ -956,6 +968,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.lockCand = null;
     s.lockKey = null;
     s.resumen = null;
+    s.puntosMejora = 0;
+    s.niv = { dano: 0, salud: 0, defensa: 0, municion: 0 };
+    s.coraza = 0;
+    s.tienda = false;
     s.spec = PLANES.find((p) => p.id === id)!;
     s.plane = FV.nuevoAvion(id, 220, Math.min(130, ceiling() - 30), true);
     s.mode = 'play';
@@ -1002,11 +1018,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         s.plane.y = s.mapa === 'tormenta' ? 700 : Math.max(240, ground(s.plane.x) + 120);
       }
       s.enValpo = !!from.enValpo;
+      s.puntosMejora = from.puntosMejora ?? 0;
+      if (from.niv) for (const k of Object.keys(s.niv) as Mejorable[]) s.niv[k] = clamp(Math.round(from.niv[k] || 0), 0, NIVEL_MAX);
+      aplicarMunicion();
+      s.coraza = s.niv.salud;
       s.costa = s.enValpo ? 1 : 0;
       for (const [x, y, r] of from.craters) crater(x, y, r);
       for (const [x0, x1] of from.bridges ?? []) bridge(x0, x1);
       if (from.cap) {
-        for (const k of ['misil', 'bomba', 'bengala'] as Arma[]) s.cap[k] = clamp(Math.round(from.cap[k] || 0), s.cap[k], CAP_MAX[k]);
+        for (const k of ['misil', 'bomba', 'bengala'] as Arma[]) s.cap[k] = clamp(Math.round(from.cap[k] || 0), s.cap[k], capMax(k));
         s.ammo = s.cap.misil;
         s.bombAmmo = s.cap.bomba;
         s.flares = s.cap.bengala;
@@ -1062,7 +1082,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (s.mode !== 'play' || s.dead || s.attract) return;
     writeSave({
       v: 1, pilot: s.spec.id, wave: s.wave, score: s.ckScore, kills: s.ckKills, lives: s.lives, lost: [...s.lost], cap: { ...s.cap }, bridges: s.bridges,
-      meta: s.meta, bossFor: s.bossFor, bossCount: s.bossCount, jefeFor: s.jefeFor, craters: s.craters, mapa: s.toMapa || s.mapa, enValpo: s.toMapa === 'oceano' ? false : s.enValpo, at: Date.now(),
+      meta: s.meta, bossFor: s.bossFor, bossCount: s.bossCount, jefeFor: s.jefeFor, craters: s.craters, puntosMejora: s.puntosMejora, niv: { ...s.niv }, mapa: s.toMapa || s.mapa, enValpo: s.toMapa === 'oceano' ? false : s.enValpo, at: Date.now(),
     });
   }
 
@@ -1270,6 +1290,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * from the mice hurt the plane, and every blast pushes everything nearby.
    */
   function blast(x: number, y: number, energy: number, from: 'jugador' | 'raton' | 'nadie', damage: number) {
+    if (from === 'jugador') damage *= danoMul();
     const ex = FA.explosion(energy);
     // Blasts that touch the ground leave a crater.
     if (y - ground(x) < ex.radio * 0.6 && from !== 'raton') crater(x, Math.min(y, ground(x) + 2), ex.radio * (energy >= 5 ? 1.1 : 0.8));
@@ -1344,6 +1365,32 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
 
   const flyingNow = () => s.mode === 'play' && !s.dead;
+  /** Damage multiplier from the «daño» upgrade. */
+  const danoMul = () => 1 + 0.15 * s.niv.dano;
+  /** Most slots a weapon can have: the base cap plus the «munición» upgrade. */
+  const capMax = (k: Arma) => CAP_MAX[k] + s.niv.municion;
+  /** The «munición» upgrade adds one slot of each weapon per level (and fills them). */
+  function aplicarMunicion() {
+    s.cap = {
+      misil: Math.max(s.cap.misil, s.spec.rack + s.niv.municion),
+      bomba: Math.max(s.cap.bomba, s.spec.bombRack + s.niv.municion),
+      bengala: Math.max(s.cap.bengala, s.spec.flareRack + s.niv.municion),
+    };
+    s.ammo = s.cap.misil;
+    s.bombAmmo = s.cap.bomba;
+    s.flares = s.cap.bengala;
+  }
+  /** Buys one level of an upgrade if there are enough ⭐. */
+  function mejorar(k: Mejorable) {
+    const costo = s.niv[k] + 1;
+    if (s.niv[k] >= NIVEL_MAX || s.puntosMejora < costo) return false;
+    s.puntosMejora -= costo;
+    s.niv[k]++;
+    if (k === 'municion') aplicarMunicion();
+    if (k === 'salud') s.coraza = s.niv.salud;
+    save();
+    return true;
+  }
   /** A delayed effect that only happens if the same game is still on. */
   function later(fn: () => void, ms: number) {
     const gen = s.gen;
@@ -1482,6 +1529,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (isBoss(c.kind)) {
       talk(c.kind === 'portaaviones' ? SAY.hundida : SAY.defeat, c.mid.x, c.mid.y);
       if (c.kind === 'portaaviones') s.enValpo = true;
+      s.puntosMejora++;
       releasePrize('especial', c.mid.x, c.mid.y + 30);
       // Beating her on land opens the way to the sea.
       s.shake = 8;
@@ -1512,6 +1560,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    */
   function hurtPlane(n = 1, hx = s.plane.x, hy = s.plane.y) {
     if (s.inv > 0 || s.dead || s.attract) return;
+    // Defence: a chance to glance off; armour from «salud» soaks whole hits first.
+    if (Math.random() < Math.min(0.5, 0.1 * s.niv.defensa)) {
+      s.inv = 0.4;
+      pop(s.plane.x, s.plane.y + 20, '🛡️ ¡Desviado!', '#9ad8ff');
+      return;
+    }
+    if (s.coraza > 0) {
+      s.coraza--;
+      s.inv = 0.7;
+      s.hurtFlash = 0.15;
+      pop(s.plane.x, s.plane.y + 20, `❤️ Coraza (${s.coraza})`, '#ff9ad0');
+      return;
+    }
     if (s.mision?.id === 'piezas') s.mision.fallida = true;
     const p = s.plane;
     s.inv = 0.9;
@@ -1723,6 +1784,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.jefeEspacio = false;
       s.shake = 10;
       AB.jefeVencido();
+      s.puntosMejora++;
       releasePrize('especial', j.x, j.y);
       // A beaten mothership gives the sky a long break before the next one.
       if (j.tipo === 'nodriza') s.motherCd = Math.max(s.motherCd, 90);
@@ -1773,9 +1835,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // A battered plane gets a way out of the spiral: a repair balloon.
     if (s.lost.length >= 2 && !s.prizes.some((q) => q.kind === 'reparar') && Math.random() < 0.5) return 'reparar';
     if (Math.random() > 0.32) return null;
-    const room = (['misil', 'bomba', 'bengala'] as Arma[]).filter((k) => s.cap[k] < CAP_MAX[k]);
+    const room = (['misil', 'bomba', 'bengala'] as Arma[]).filter((k) => s.cap[k] < capMax(k));
     if (!room.length) return null;
-    room.sort((a, b) => s.cap[a] / CAP_MAX[a] - s.cap[b] / CAP_MAX[b]);
+    room.sort((a, b) => s.cap[a] / capMax(a) - s.cap[b] / capMax(b));
     return Math.random() < 0.6 ? room[0] : room[Math.floor(Math.random() * room.length)];
   }
 
@@ -1828,7 +1890,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         pop(x, y + 28, '🥟 ¡Empanada de mariscos! Avión reparado', P.gold);
       }
       s.inv = Math.max(s.inv, 1);
-    } else if (s.cap[kind] < CAP_MAX[kind]) {
+    } else if (s.cap[kind] < capMax(kind)) {
       s.cap[kind]++;
       if (kind === 'misil') s.ammo = s.cap.misil;
       else if (kind === 'bomba') s.bombAmmo = s.cap.bomba;
@@ -1954,14 +2016,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const look = A.VEH_LOOK[c.kind];
         if (Math.abs(b.x - c.x) < look.w / 2 + 1 && b.y > c.y - 1 && b.y < c.y + look.h) {
           hit = true;
-          hurtCar(c, 0.11);
+          hurtCar(c, 0.11 * danoMul());
         }
       }
       for (const a of s.aereos) {
         if (hit || a.hp <= 0) continue;
         if (Math.hypot(a.x - b.x, a.y - b.y) < AE.radio(a) + 2) {
           hit = true;
-          a.hp -= 0.18;
+          a.hp -= 0.18 * danoMul();
           s.airFlash.set(a.id, 0.08);
           if (a.hp <= 0) abatirAereo(a);
         }
@@ -1971,14 +2033,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const bx = G.caja(u);
         if (b.x > bx.x0 && b.x < bx.x1 && b.y > bx.y0 && b.y < bx.y1) {
           hit = true;
-          giantHit(u, G.golpear(u, b.x, b.y, 0.25));
+          giantHit(u, G.golpear(u, b.x, b.y, 0.25 * danoMul()));
         }
       }
       for (const f of s.fighters) {
         if (hit || f.hp <= 0) continue;
         if (CZ.tocado(f, b.x, b.y, 1)) {
           hit = true;
-          hurtFighter(f, 0.2);
+          hurtFighter(f, 0.2 * danoMul());
         }
       }
       for (const o of s.shots) {
@@ -1996,7 +2058,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       if (!hit && s.jefe && JF.tocado(s.jefe, b.x, b.y, 1)) {
         hit = true;
-        const h = JF.golpear(s.jefe, b.x, b.y, 0.22 * BOSS_MUL[s.spec.id]);
+        const h = JF.golpear(s.jefe, b.x, b.y, 0.22 * BOSS_MUL[s.spec.id] * danoMul());
         s.jefeFlash = 0.06;
         if (h.derrotado) award(h.puntos ?? 0, b.x, b.y);
       }
@@ -2099,12 +2161,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     m.hecha = true;
     m.prog = m.meta;
     s.score += 300;
-    pop(s.plane.x, s.plane.y + 26, '🏅 ¡Misión cumplida! +300', P.gold);
+    pop(s.plane.x, s.plane.y + 26, '🏅 ¡Misión cumplida! +300 · +1 ⭐', P.gold);
+    s.puntosMejora++;
     AB.misionCumplida();
   }
   /** Any balloon, even when every slot is full (the guaranteed one per wave). */
   function maybePrizeAny(): Premio {
-    const room = (['misil', 'bomba', 'bengala'] as Arma[]).filter((k) => s.cap[k] < CAP_MAX[k]);
+    const room = (['misil', 'bomba', 'bengala'] as Arma[]).filter((k) => s.cap[k] < capMax(k));
     return room.length ? room[Math.floor(Math.random() * room.length)] : s.lost.length ? 'reparar' : 'bengala';
   }
   function usar(k: PistaId) {
@@ -2255,7 +2318,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       // Trip to the new map: autopilot level to the right, nitro, then the sea.
       if (s.transT > 0 && s.mode === 'play') {
         const before = s.transT;
-        s.transT -= dt;
+        if (!s.tienda) s.transT -= dt;
         s.inv = Math.max(s.inv, 1);
         mando.x = 1;
         mando.y = clamp((260 - p.y) / 200, -0.6, 0.6);
@@ -2426,7 +2489,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Waves (they wait until the plane is off the ground).
     if (s.mode === 'play' && !s.despegue) {
       if (s.phase === 'break') {
-        s.breakT -= dt;
+        if (!s.tienda) s.breakT -= dt;
         if (s.breakT <= 0) {
           s.phase = 'wave';
           s.banner = '';
@@ -2547,6 +2610,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           // The voyage: every wave ends by flying on to the next map, whether
           // its boss was beaten or got away.
           s.toMapa = SIGUIENTE[s.mapa];
+          // ⭐ A point for the wave; the shop opens on the card if there are points to spend.
+          s.puntosMejora++;
+          s.coraza = s.niv.salud;
+          if (!s.attract) s.tienda = true;
           // A plane for every wave survived.
           if (s.lives < MAX_VIDAS) {
             s.lives++;
@@ -3825,6 +3892,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       stall: s.mode === 'play' && !s.dead && s.stallT > 0 && s.inv <= 0 && !s.congelado,
       hielo: Math.round(s.hielo * 20) / 20,
       nukes: s.nukes,
+      mejoras: { puntos: s.puntosMejora, niv: { ...s.niv }, tienda: s.tienda, coraza: s.coraza },
       enTierra: !!s.despegue,
       congelado: s.congelado,
       zoom: [view.levels.length, view.zi],
@@ -3982,6 +4050,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     demo,
     attract,
     /** Touch controls write here; the keyboard is merged in. */
+    /** The upgrade shop on the end-of-wave card. */
+    mejorar(k: Mejorable) {
+      const ok = mejorar(k);
+      s.hudKey = '';
+      return ok;
+    },
+    cerrarTienda() {
+      s.tienda = false;
+      s.hudKey = '';
+    },
     /** Super nitro from a double tap on the sky (phones). */
     nitro() {
       return startNitro();

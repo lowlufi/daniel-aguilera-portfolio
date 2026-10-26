@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, menu } from '../game/audio';
 import { cargarSonidos } from './sonido';
-import { PLANES, createVuelo, dibujo, readSave, type Hud, type Result, type SavedGame, type Vuelo } from './motor';
+import { PLANES, createVuelo, dibujo, readSave, type Hud, type Mejorable, type Result, type SavedGame, type Vuelo } from './motor';
 import type { ModeloAvion } from './fisica-tipos';
 import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
 
@@ -15,6 +15,13 @@ import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
 type Phase = 'intro' | 'titulo' | 'creditos' | 'menu' | 'play' | 'over';
 
 const AUTOR = 'Daniel Aguilera Campusano';
+/** The four upgrades bought with ⭐ between waves. */
+const MEJORAS: { k: Mejorable; icono: string; nombre: string; efecto: string }[] = [
+  { k: 'dano', icono: '💥', nombre: 'Daño', efecto: '+15 % por nivel' },
+  { k: 'salud', icono: '❤️', nombre: 'Salud', efecto: '+1 coraza por oleada' },
+  { k: 'defensa', icono: '🛡️', nombre: 'Defensa', efecto: '+10 % de desviar' },
+  { k: 'municion', icono: '🚀', nombre: 'Munición', efecto: '+1 puesto de cada arma' },
+];
 /** Every role in the credits, all of them by the author. */
 const ROLES = [
   'Dirección del juego', 'Idea original', 'Diseño de juego', 'Guion y personajes', 'Programación', 'Motor del juego',
@@ -520,6 +527,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
                 </span>
                 <span className={CHIP}>⭐ {hud.score}</span>
+                {hud.mejoras.coraza > 0 && (
+                  <span className={`${CHIP} text-[#c8507a]`} title="Coraza de la mejora «Salud»: cada una absorbe un golpe" aria-label={`Coraza: ${hud.mejoras.coraza}`}>
+                    ❤️ ×{hud.mejoras.coraza}
+                  </span>
+                )}
                 {hud.mision && !hud.resumen && (
                   <span
                     className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow ${
@@ -678,6 +690,41 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             )}
             {hud.resumen.dato && (
               <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a] [@media(max-height:500px)]:text-[10px]">💡 ¿Sabías que…? {hud.resumen.dato}</p>
+            )}
+            {hud.mejoras.tienda && (
+              // The upgrade shop: the break waits until «Seguir».
+              <div className="pointer-events-auto mt-3 rounded-2xl bg-[#3a2a6a]/90 p-2 text-white">
+                <p className="text-sm font-black">⭐ Mejoras · tienes {hud.mejoras.puntos} {hud.mejoras.puntos === 1 ? 'punto' : 'puntos'}</p>
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                  {MEJORAS.map((m) => {
+                    const nivel = hud.mejoras.niv[m.k];
+                    const costo = nivel + 1;
+                    const max = nivel >= 5;
+                    const puede = !max && hud.mejoras.puntos >= costo;
+                    return (
+                      <button
+                        key={m.k}
+                        type="button"
+                        disabled={!puede}
+                        onClick={() => {
+                          if (game.current?.mejorar(m.k)) menu.aceptar();
+                        }}
+                        aria-label={`${m.nombre}: nivel ${nivel} de 5. ${max ? 'Al máximo' : `Cuesta ${costo} ⭐`}`}
+                        className={`rounded-xl px-1 py-1.5 text-center transition-transform ${puede ? 'bg-[#fff8e7] text-[#6b4f3a] hover:-translate-y-0.5' : 'bg-white/20 text-white/60'}`}
+                      >
+                        <div className="text-lg leading-none">{m.icono}</div>
+                        <div className="text-xs font-black">{m.nombre}</div>
+                        <div className="text-[10px] tracking-tight text-[#f0a45d]">{'●'.repeat(nivel)}<span className="opacity-40">{'●'.repeat(5 - nivel)}</span></div>
+                        <div className="text-[9px] font-bold opacity-80 [@media(max-height:500px)]:hidden">{m.efecto}</div>
+                        <div className="text-[10px] font-black">{max ? 'MÁX' : `${costo} ⭐`}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button type="button" autoFocus onClick={() => game.current?.cerrarTienda()} className={`${GO} mt-2 py-2 text-sm`}>
+                  Seguir ▶
+                </button>
+              </div>
             )}
             <p className="mt-1 text-[10px] font-bold text-[#a08060]">Partida guardada ✓ · puedes seguir otro día</p>
           </div>
