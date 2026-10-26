@@ -670,8 +670,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             )}
             {hud.resumen.destino ? (
               <p className="mt-3 animate-pulse rounded-full bg-[#7ad8ff] px-3 py-1 text-sm font-black text-[#1a3a6a]">
-                🔥 ¡Super nitro! Rumbo a{' '}
-                {({ oceano: 'el mar de San Antonio 🌊', valparaiso: 'Valparaíso 🏘️', tormenta: 'la tormenta ⛈️', valle: 'San Antonio 🏠' } as Record<string, string>)[hud.resumen.destino]}
+                🔥 ¡Super nitro! Rumbo{' '}
+                {({ oceano: 'al mar de San Antonio 🌊', valparaiso: 'a Valparaíso 🏘️', tormenta: 'a la tormenta ⛈️', valle: 'a San Antonio 🏠' } as Record<string, string>)[hud.resumen.destino]}
               </p>
             ) : (
               <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {hud.resumen.siguiente}</p>
@@ -934,7 +934,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {phase === 'over' && result && (
         <div role="dialog" aria-modal="true" aria-label="Fin del vuelo" className="absolute inset-0 z-50 grid place-items-center overflow-y-auto p-4 [@media(max-height:500px)]:p-2">
           <div className="w-full max-w-md rounded-[2rem] bg-[#fff8e7]/95 p-6 [@media(max-height:500px)]:p-3 text-center shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
-            <h2 className="text-3xl font-black text-[#e8742a]">{result.reason === 'avion' ? '¡Derribaron tus tres aviones!' : '¡Vaciaron la despensa!'}</h2>
+            <h2 className="text-3xl font-black text-[#e8742a]">{result.reason === 'avion' ? '¡Derribaron todos tus aviones!' : '¡Vaciaron la despensa!'}</h2>
             <p className="mt-1 font-bold text-[#8a6e55]">
               {result.reason === 'avion' ? `${result.pilot} saltó en paracaídas y está bien.` : 'Los ratones se llevaron todo el pescado.'}
             </p>

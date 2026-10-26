@@ -702,6 +702,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     /** A new game starts at home: the pilot walks out and climbs in, then the player takes off from the runway. */
     despegue: '' as '' | 'subiendo' | 'pista',
     despT: 0,
+    /** Seconds after lift-off with the nose held up and no ground crash. */
+    gracia: 0,
     vrAvisado: false,
     gritoT: 0,
     /** Storm: seconds to the next strike, the bolt in progress, the sky flash. */
@@ -990,7 +992,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.lost = from.lost.filter((q) => s.spec.parts.includes(q)).slice(0, s.spec.parts.length);
       FV.fijarDano(s.plane, danoDe(s.lost));
       s.hp = s.spec.parts.length + 1 - s.lost.length;
-      if (from.mapa && from.mapa !== 'valle') cambiarMapa(from.mapa);
+      if (from.mapa && from.mapa !== 'valle') {
+        cambiarMapa(from.mapa);
+        // Above the hills / the storm's cloud floor, not inside them.
+        s.plane.y = s.mapa === 'tormenta' ? 700 : Math.max(240, ground(s.plane.x) + 120);
+      }
       s.enValpo = !!from.enValpo;
       s.costa = s.enValpo ? 1 : 0;
       for (const [x, y, r] of from.craters) crater(x, y, r);
@@ -1036,6 +1042,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Rotate: fast enough and the nose pulled up (or the runway runs out).
     if ((p.vx >= vRot && mando.y > 0.3) || p.x > PISTA1 + 240) {
       s.despegue = '';
+      s.gracia = 1.2;
       p.vy = 45;
       p.rumbo = 0.28;
       s.inv = Math.max(s.inv, 1.5);
@@ -1592,7 +1599,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** A fresh plane after losing one: same pilot, all parts back, a moment of grace. */
   function respawn() {
     const right = Math.cos(s.plane.rumbo) >= 0;
-    s.plane = FV.nuevoAvion(s.spec.id, clamp(s.camX + view.vw * (right ? 0.3 : 0.7), 40, LEVEL - 40), Math.min(CEIL - 60, 220), right);
+    const rx = clamp(s.camX + view.vw * (right ? 0.3 : 0.7), 40, LEVEL - 40);
+    const ry = s.mapa === 'tormenta' ? 700 : Math.min(CEIL - 60, Math.max(220, ground(rx) + 120));
+    s.plane = FV.nuevoAvion(s.spec.id, rx, ry, right);
     s.lost = [];
     FV.fijarDano(s.plane, FV.SANO);
     s.hp = s.spec.hp;
@@ -1793,6 +1802,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         startNitro();
         s.banner = '⭐ ¡Super nitro gratis!';
       } else {
+        // A new upgrade replaces the old one; a replaced shield stops protecting too.
+        if (s.boost === 'escudo' && pick !== 'escudo') s.inv = Math.min(s.inv, 0.5);
         s.boost = pick;
         s.boostT = MEJORA[pick].t;
         if (pick === 'escudo') s.inv = Math.max(s.inv, MEJORA.escudo.t);
@@ -2059,12 +2070,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       ['misiles', 'Derriba 2 misiles enemigos', 2],
       ['piezas', 'Termina sin perder piezas', 1],
     ];
-    if (s.fighterQueue >= 2 || (s.mapa === 'oceano' && s.wave >= 3)) opts.push(['cazas', 'Derriba 2 cazas', 2]);
+    if (s.fighterQueue >= 2) opts.push(['cazas', 'Derriba 2 cazas', 2]);
     // Only goals that can be met in this wave; the first wave keeps it easy.
     const pool = s.mapa === 'tormenta'
       ? ([['cazas', 'Derriba 4 cazas', 4], ['piezas', 'Termina sin perder piezas', 1], ['combo3', 'Haz un combo ×3', 1]] as [MisionId, string, number][])
       : s.wave === 1 ? opts.filter(([id]) => id === 'despensa') : opts;
     const [id, texto, meta] = pool[Math.floor(Math.random() * pool.length)];
+    if (id === 'cazas' && meta > s.fighterQueue) {
+      const m = Math.max(1, s.fighterQueue);
+      return { id, texto: `Derriba ${m} caza${m > 1 ? 's' : ''}`, meta: m, prog: 0, hecha: false, fallida: false };
+    }
     return { id, texto, meta, prog: 0, hecha: false, fallida: false };
   }
   function avanzaMision(id: MisionId) {
@@ -2254,6 +2269,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.bigQueue = destino === 'oceano' ? [] : G.elegirGrandes(s.wave, Math.random);
           s.fighterQueue = Math.max(1, CZ.cuantos(s.wave));
           if (destino === 'tormenta') prepararTormenta();
+          // Nothing follows the plane to the new map; the wave's goal suits the new map.
+          s.jefe = null;
+          s.aereos = [];
+          s.fighters = [];
+          s.mision = elegirMision();
           s.shots = [];
           s.proy = [];
           p.x = 260;
@@ -2282,11 +2302,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.vrAvisado = false;
         }
       } else if (s.despegue === 'pista') rodarPista(mando, dt);
+      if (s.gracia > 0) {
+        s.gracia -= dt;
+        mando.y = Math.max(mando.y, 0.4);
+      }
       const vuela = !s.despegue;
       for (const ev of vuela ? FV.pasoAvion(p, s.spec.id, mando, dt, ground, top) : []) {
         if (ev.tipo === 'toqueSuelo' && ev.velocidad > 35 && s.mode === 'play') {
           // A hard crash into the ground blows the plane up at once; a scrape costs a part.
-          if (ev.velocidad > 60) {
+          if (s.gracia > 0) {
+            // Just off the runway: a bump, not a crash.
+          } else if (ev.velocidad > 60) {
             s.lastHit = 'suelo';
             s.inv = 0;
             destroyPlane();
@@ -2665,7 +2691,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Hang around in space too long and the mothership comes looking.
     s.motherCd = Math.max(0, s.motherCd - dt);
     s.spaceT = p.y > 1900 && s.mode === 'play' ? s.spaceT + dt : 0;
-    if (s.spaceT > 12 && !s.jefe && s.motherCd <= 0 && s.mode === 'play') {
+    if (s.spaceT > 12 && !s.jefe && s.motherCd <= 0 && s.mode === 'play' && s.transT === 0 && s.phase === 'wave') {
       spawnBoss('nodriza');
       s.motherCd = 60;
       s.spaceT = 0;

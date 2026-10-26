@@ -110,6 +110,11 @@ public/
 - **Sonido:** sin música de fondo; efectos grabados reales con licencia CC0 (motores en loop, misiles, explosiones, antiaéreo, alarma), en estéreo según la posición.
 - **Controles (siempre en pantalla):** flechas o WASD pilotear, E/Shift acelerar (dos veces: super nitro), Q/Ctrl frenar (aerofrenos), Espacio/J misil, K bomba, L bengalas, H/F metralla, Z o rueda zoom, Esc pausa. En celular, sin deslizar: mantener la mitad izquierda gira la nariz en sentido antihorario y la derecha en sentido horario (volando a la izquierda, izquierda baja y derecha sube); doble toque para el super nitro; botones con nombre a la derecha.
 
+- **Recorrido en 4 niveles (una oleada cada uno, luego otra vuelta más difícil):** San Antonio (San Juan → Llolleo → Barrancas → puerto → Cartagena; jefa: Margarita) → el mar de San Antonio a Valparaíso (portaaviones de Margarita con misiles bumerán) → los cerros de Valparaíso (jefe volador) → la tormenta (solo cazas ases, rayos y truenos). Letreros, historia («¿Sabías que…?») y humor local verificados.
+- **Intro estilo SNES, menú con partida jugada por piloto automático, créditos y selector de pilotos arcade** con retratos grandes animados (Dui gordo, Lulu, Almendrita yorkie viejita). Al empezar, el piloto sube al avión y se despega a mano desde la pista de la casa.
+- **Más armas y premios:** metralla, misil fijable, super nitro (E E / doble toque), bomba nuclear de los ovnis (N), +1 avión por oleada, mejoras especiales (metralla doble, escudo, misiles sin fin, chorrillana), empanada de mariscos que repara, globos que suben hasta congelarse y reventar.
+- **Experiencia:** pistas que se aprenden solas, misión por oleada, ayuda de dificultad silenciosa, «Menos movimiento», congelamiento en el techo del cielo, luces y sombras, vuelo libre sin autonivelado con cuadros de giro, música original solo en menús.
+
 ## Features del sitio clásico
 
 - **Command Palette** (⌘K / Ctrl+K) — buscador global de páginas, proyectos, temas y contacto.
