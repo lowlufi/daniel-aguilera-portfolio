@@ -344,6 +344,9 @@ const SAY = {
   ],
   hurt: ['¡Ay, mi cadera! $%&', '¡Mis tomates! #&%$', '¡Esto se lo cuento a todo el pasaje!', '¡Mis lentes! ¡No veo nada! &%#'],
   defeat: '¡Esto no se queda así! ¡Voy a llamar a los carabineros! #$%&',
+  duelo: '¡Ahora en caza, ricachón! ¡Uno contra uno, como en mis tiempos! &%$#',
+  dueloHurt: ['¡Mi caza nuevo! ¡Lo compré en cuotas! #&%', '¡No me rayes la pintura! $%&', '¡Te voy a acusar a la junta de vecinos!', '¡Con mi gorro no te metas! &%#'],
+  dueloFin: '¡Me eyecto! ¡Esto lo arreglo en el almacén de la esquina! #$%&',
   /** At the helm of the aircraft carrier. */
   mar: '¡Ahoy, ricachones! ¡Este portaaviones es de la junta de vecinos! &%#',
   despegue: ['¡Despeguen, ratones! ¡Y sin hacer ruido!', '¡A ese gato naranjo, rápido! $#@', '¡Ni en el mar me dejan tranquila! &%#'],
@@ -793,6 +796,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     gigantes: [] as G.Unidad[],
     fighters: [] as CZ.Caza[],
     fighterQueue: 0,
+    /** The one-on-one duel with Margarita's fighter is on: nothing else spawns. */
+    duelo: false,
     fighterT: 0,
     bigQueue: [] as G.TipoGrande[],
     /** The flying boss (cheese airship or UFO mothership), if one is here. */
@@ -955,6 +960,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.gigantes = [];
     s.fighters = [];
     s.fighterQueue = 0;
+    s.duelo = false;
     s.bigQueue = [];
     s.jefe = null;
     s.spaceT = 0;
@@ -1593,9 +1599,30 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** Damages a mouse fighter; at 0 it blows apart (scored only if the player did it). */
   function hurtFighter(f: CZ.Caza, dmg: number, byPlayer = true) {
     if (f.hp <= 0) return;
+    // She doesn't crash on her own: the ground only scrapes her.
+    if (f.jefa && !byPlayer) dmg = Math.min(dmg, 1);
     f.hp -= dmg;
     f.flash = 0.1;
+    if (f.jefa && f.hp > 0 && Math.random() < 0.25 && (!s.say || s.say.t > 1.5)) talk(SAY.dueloHurt[Math.floor(Math.random() * SAY.dueloHurt.length)], f.a.x, f.a.y);
     if (f.hp > 0) return;
+    if (f.jefa) {
+      s.duelo = false;
+      talk(SAY.dueloFin, f.a.x, f.a.y);
+      award(4000, f.a.x, f.a.y);
+      s.puntosMejora++;
+      s.shake = 10;
+      AB.jefeVencido();
+      releasePrize('especial', f.a.x, f.a.y);
+      for (const k of ['misil', 'bomba', 'bengala'] as Arma[]) releasePrize(k, f.a.x + rand(-30, 30), f.a.y);
+      if (s.meta < META_MAX) {
+        s.meta++;
+        pop(f.a.x, f.a.y + 30, '¡+1 pescado recuperado! 🐟', P.gold);
+      }
+      // A little parachute: she bails out, of course.
+      for (let i = 0; i < 6; i++) VFX.pieza(s.fx, f.a.x, f.a.y, f.a.vx * 0.4 + rand(-80, 80), rand(20, 110), null, i % 2 ? '#d02a3a' : '#e8e0d0');
+      later(() => blast(f.a.x, f.a.y, FA.ENERGIA.bomba, 'nadie', 0), 40);
+      return;
+    }
     const { x, y, vx, vy } = f.a;
     if (byPlayer) {
       award(CZ.PUNTOS, x, y);
@@ -1872,6 +1899,24 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** Before a boss: a repair balloon if the plane is hurt. */
   function prepJefe() {
     if (s.lost.length && !s.prizes.some((q) => q.kind === 'reparar')) releasePrize('reparar', s.plane.x + 70, s.plane.y - 30);
+  }
+
+  /** Margarita in her fighter: a one-on-one dogfight, nothing else in the sky. */
+  function iniciarDuelo() {
+    const p = s.plane;
+    prepJefe();
+    const fromRight = Math.cos(p.rumbo) >= 0;
+    const f = CZ.crear(clamp(s.camX + (fromRight ? view.vw + 120 : -120), 40, LEVEL - 40), clamp(p.y + 80, 200, CEIL - 120), !fromRight, s.wave, true, true);
+    s.fighters.push(f);
+    s.bossMax = f.hpMax;
+    s.duelo = true;
+    talk(SAY.duelo, f.a.x, f.a.y);
+    s.sayT = 5;
+    s.banner = '✈️ ¡Duelo: Margarita en su caza!';
+    window.setTimeout(() => {
+      if (s.banner.startsWith('✈️ ¡Duelo')) s.banner = '';
+    }, 2600);
+    AB.jefeLlega();
   }
 
   /** Brings in a flying boss just off screen, at a height in its own zone. */
@@ -2901,7 +2946,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           sfx.warn();
         }
         // Space is never empty: hang around up there and UFOs keep coming.
-        if (!s.airQueue.length && s.airT <= 0 && p.y > AE.ALTURA_OVNI && s.aereos.filter((a) => a.tipo === 'ovni').length < 2) {
+        if (!s.duelo && !s.airQueue.length && s.airT <= 0 && p.y > AE.ALTURA_OVNI && s.aereos.filter((a) => a.tipo === 'ovni').length < 2) {
           const visitas = AE.crear('ovni', clamp(s.camX + view.vw + 60, 40, LEVEL - 40), AE.alturaAparicion('ovni', p.y, Math.random), Math.random, s.wave);
           for (const a of visitas) a.extra = true;
           spawnAir(visitas);
@@ -2936,7 +2981,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (clear && s.jefeFor !== s.wave && s.mapa === 'valparaiso') {
           // Airship after wave 3 (9, 15…), mothership after wave 6 (12, 18…).
           s.jefeFor = s.wave;
-          spawnBoss(Math.floor((s.wave - 1) / 4) % 2 ? 'nodriza' : 'dirigible');
+          if (Math.floor((s.wave - 1) / 4) % 2) spawnBoss('nodriza');
+          else iniciarDuelo();
         } else
         if (clear && s.mapa === 'valle' && s.bossFor !== s.wave) {
           // The wave is clear… and here comes the neighbour.
@@ -4418,6 +4464,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       zoom: [view.levels.length, view.zi],
       throttle: Math.sign(input.gas),
       boss: (() => {
+        const jefa = s.fighters.find((f) => f.jefa);
+        if (jefa) return { name: 'Margarita en su caza', hp: clamp(Math.round((jefa.hp / jefa.hpMax) * 100) / 100, 0, 1) };
         const b = s.cars.find((c) => isBoss(c.kind));
         return b ? { name: b.kind === 'portaaviones' ? 'Portaaviones de Margarita' : 'Vecina Margarita', hp: clamp(Math.round((b.hp / s.bossMax) * 100) / 100, 0, 1) } : null;
       })(),
@@ -4582,7 +4630,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter };
 
   return {
     start,

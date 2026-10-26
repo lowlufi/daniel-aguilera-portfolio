@@ -32,6 +32,8 @@ export type Caza = {
   /** Storm aces: fragile but they dogfight hard (break turns, quicker bursts). */
   agresivo: boolean;
   quiebre: number;
+  /** Margarita herself at the stick: the boss duel over Valparaíso. */
+  jefa?: boolean;
 };
 
 export type Disparo = { x: number; y: number; vx: number; vy: number };
@@ -51,8 +53,12 @@ export function cuantos(oleada: number): number {
   return oleada < 3 ? 0 : Math.min(4, 1 + Math.floor((oleada - 3) / 2));
 }
 
-export function crear(x: number, y: number, haciaDerecha: boolean, oleada: number, agresivo = false): Caza {
-  const a = FV.nuevoAvion('caza', x, y, haciaDerecha);
+export function crear(x: number, y: number, haciaDerecha: boolean, oleada: number, agresivo = false, jefa = false): Caza {
+  const a = FV.nuevoAvion(jefa ? 'sukhoi' : 'caza', x, y, haciaDerecha);
+  if (jefa) {
+    const hp = 14 + Math.min(10, Math.max(0, oleada - 3) * 0.8);
+    return { id: ++ids, a, hp, hpMax: hp, gunCd: 1.2, rafaga: 0, rafT: 0, misilCd: 4, flash: 0, escape: 0, escDir: 1, fogonazo: 0, agresivo: true, quiebre: 0, jefa: true };
+  }
   const hp = agresivo ? 1.2 : 2 + Math.min(1.5, (oleada - 3) * 0.15);
   return { id: ++ids, a, hp, hpMax: hp, gunCd: agresivo ? 1 : 2, rafaga: 0, rafT: 0, misilCd: 6 + Math.random() * 4, flash: 0, escape: 0, escDir: 1, fogonazo: 0, agresivo, quiebre: 0 };
 }
@@ -100,7 +106,9 @@ export function paso(c: Caza, jugador: Movil, vivo: boolean, dt: number, suelo: 
   mx /= n;
   my /= n;
   const gas = d > 260 ? 1 : d < 120 ? -0.3 : 0.4;
-  FV.pasoAvion(a, 'caza', { x: mx, y: my, gas: gas * 0.85 }, dt, suelo, techo);
+  // Margarita flies a supermaneuverable jet at full stick; the mice fly slower.
+  if (c.jefa) FV.pasoAvion(a, 'sukhoi', { x: mx, y: my, gas: d > 160 ? 1 : 0.3 }, dt, suelo, techo);
+  else FV.pasoAvion(a, 'caza', { x: mx, y: my, gas: gas * 0.85 }, dt, suelo, techo);
 
   if (!vivo) return out;
   // Guns: a short burst when the nose is on the plane.
@@ -116,15 +124,15 @@ export function paso(c: Caza, jugador: Movil, vivo: boolean, dt: number, suelo: 
       out.disparos.push({ x: a.x + Math.cos(a.rumbo) * 9, y: a.y + Math.sin(a.rumbo) * 9, vx: a.vx + Math.cos(ang) * VEL_BALA, vy: a.vy + Math.sin(ang) * VEL_BALA });
     }
   } else if (c.gunCd <= 0 && d < 280 && mira < 0.14) {
-    c.rafaga = 6;
+    c.rafaga = c.jefa ? 9 : 6;
     c.rafT = 0;
-    c.gunCd = (c.agresivo ? 1.1 : clamp(2.6 - oleada * 0.08, 1.3, 2.6)) + Math.random() * 0.8;
+    c.gunCd = (c.jefa ? 0.8 : c.agresivo ? 1.1 : clamp(2.6 - oleada * 0.08, 1.3, 2.6)) + Math.random() * 0.8;
   }
   // Now and then a seeker missile from further out.
   c.misilCd -= dt;
   if (c.misilCd <= 0 && d > 180 && d < 480 && mira < 0.5) {
     out.misil = true;
-    c.misilCd = clamp(11 - oleada * 0.3, 6, 11) + Math.random() * 3;
+    c.misilCd = c.jefa ? 5 + Math.random() * 2 : clamp(11 - oleada * 0.3, 6, 11) + Math.random() * 3;
   }
   return out;
 }
@@ -135,12 +143,12 @@ export function tocado(c: Caza, x: number, y: number, m = 2): boolean {
 }
 
 const tintes = new Map<string, HTMLCanvasElement>();
-/** The caza sprite tinted mouse-lilac, cached. */
-function sprite(hit: boolean): HTMLCanvasElement {
-  const key = hit ? 'hit' : 'base';
+/** The caza sprite tinted mouse-lilac (Margarita's Sukhoi: red), cached. */
+function sprite(hit: boolean, jefa = false): HTMLCanvasElement {
+  const key = (hit ? 'hit' : 'base') + (jefa ? '|jefa' : '');
   let t = tintes.get(key);
   if (!t) {
-    const src = A.planeSprite('caza');
+    const src = A.planeSprite(jefa ? 'sukhoi' : 'caza');
     t = document.createElement('canvas');
     t.width = src.width;
     t.height = src.height;
@@ -148,7 +156,7 @@ function sprite(hit: boolean): HTMLCanvasElement {
     g.drawImage(src, 0, 0);
     g.globalCompositeOperation = 'source-atop';
     g.globalAlpha = hit ? 0.85 : 0.55;
-    g.fillStyle = hit ? '#ffffff' : '#7a5ad0';
+    g.fillStyle = hit ? '#ffffff' : jefa ? '#d02a3a' : '#7a5ad0';
     g.fillRect(0, 0, t.width, t.height);
     tintes.set(key, t);
   }
@@ -158,15 +166,27 @@ function sprite(hit: boolean): HTMLCanvasElement {
 /** Draws the fighter at screen (x, y); nose along -rumbo in screen space. */
 export function dibujar(g: Ctx, c: Caza, x: number, y: number, t: number): void {
   const a = c.a;
-  const img = sprite(c.flash > 0);
+  const img = sprite(c.flash > 0, c.jefa);
   g.save();
   g.translate(Math.round(x), Math.round(y));
   g.rotate(Math.round(-a.rumbo / 0.05) * 0.05);
   g.scale(1, a.alabeo >= 0 ? 1 : -1);
   g.drawImage(img, -Math.round(img.width / 2), -Math.round(img.height / 2));
-  // Mouse ears over the canopy and an afterburner flicker.
-  A.R(g, 1, -6, 2, 2, '#c9b4ff');
-  A.R(g, 4, -6, 2, 2, '#c9b4ff');
+  if (c.jefa) {
+    // Margarita in the cockpit: grey curls under her red beanie, and a scowl.
+    A.R(g, 1, -9, 6, 3, '#e03a3a');
+    A.R(g, 3, -10, 2, 1, '#ff6a5a');
+    A.R(g, 0, -6, 2, 2, '#d8d0ca');
+    A.R(g, 6, -6, 2, 2, '#d8d0ca');
+    A.R(g, 2, -6, 4, 3, '#f0c8a8');
+    A.R(g, 4, -6, 1, 1, '#2a2030');
+    A.R(g, 3, -4, 2, 1, '#8a3a3a');
+  } else {
+    // Mouse ears over the canopy.
+    A.R(g, 1, -6, 2, 2, '#c9b4ff');
+    A.R(g, 4, -6, 2, 2, '#c9b4ff');
+  }
+  // An afterburner flicker.
   const len = 2 + (Math.floor(t * 30) % 2) * 2;
   A.R(g, -Math.round(img.width / 2) - len + 2, 0, len, 1, '#ff9a3c');
   // Machine-gun muzzle flash at the nose.
@@ -177,8 +197,8 @@ export function dibujar(g: Ctx, c: Caza, x: number, y: number, t: number): void 
     A.R(g, nx + 4, 0, 2, 1, P.white);
   }
   g.restore();
-  // Health pips once damaged.
-  if (c.hp < c.hpMax) {
+  // Health pips once damaged (the boss has her bar on the HUD).
+  if (c.hp < c.hpMax && !c.jefa) {
     const w = 12;
     A.R(g, Math.round(x - w / 2), Math.round(y - 12), w, 2, '#3a2a6a');
     A.R(g, Math.round(x - w / 2), Math.round(y - 12), Math.max(1, Math.round((w * c.hp) / c.hpMax)), 2, '#ff4a5a');
