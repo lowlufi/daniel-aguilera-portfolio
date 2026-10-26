@@ -183,9 +183,10 @@ function ops(o: {
 export const MISILES: Record<TipoMisil, FichaMisil> = {
   buscador: {
     nombre: 'Buscador',
-    opciones: ops({ navegacion: 3.5, cargaMax: 10, empujeG: 4, quemado: 3.5, vMax: 380, conoGrados: 45, vida: 9 }),
+    // Long-range: a sustainer motor keeps it chasing for a long, long time (outrun it or flare it).
+    opciones: ops({ navegacion: 3.5, cargaMax: 10, empujeG: 4, quemado: 25, vMax: 380, conoGrados: 45, vida: 35 }),
     escala: { vMax: 20, cargaMax: 0.5, quemado: 0.3, vida: 2 },
-    vida: 9,
+    vida: 35,
     planeo: true,
     vMinGuia: 0.3,
     seguimiento: 0.7,
@@ -237,9 +238,9 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
   },
   pesado: {
     nombre: 'Pesado',
-    opciones: ops({ navegacion: 3, cargaMax: 3.5, empujeG: 2.4, quemado: 5, vMax: 240, conoGrados: 85, vida: 11 }),
+    opciones: ops({ navegacion: 3, cargaMax: 3.5, empujeG: 2.4, quemado: 20, vMax: 240, conoGrados: 85, vida: 30 }),
     escala: { vMax: 15, cargaMax: 0.5, quemado: 1.5 },
-    vida: 11,
+    vida: 30,
     planeo: false,
     vMinGuia: 1,
     seguimiento: 0.9,
@@ -291,13 +292,13 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
   },
   estratosferico: {
     nombre: 'Estratosférico',
-    opciones: ops({ navegacion: 4, cargaMax: 7, empujeG: 5, quemado: 1.6, vMax: 600, conoGrados: 40, vida: 14 }),
+    opciones: ops({ navegacion: 4, cargaMax: 7, empujeG: 5, quemado: 1.6, vMax: 600, conoGrados: 40, vida: 35 }),
     escala: { vMax: 40, cargaMax: 1 },
-    vida: 14,
+    vida: 35,
     planeo: true,
     vMinGuia: 0.15,
     seguimiento: 0.6,
-    etapa2: { espera: 1.2, quemado: 3 },
+    etapa2: { espera: 1.2, quemado: 22 },
     hp: 1,
     radioImpacto: 2,
     radioChoque: 10,
