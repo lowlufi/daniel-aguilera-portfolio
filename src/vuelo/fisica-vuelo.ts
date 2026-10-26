@@ -211,6 +211,31 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
     accRigidez: 13, accAmort: 2.6, accPerdida: 5, wCabeceo: 9, tiempoTonel: 0.55,
     helice: false, panza: 5,
   }),
+  // F-14 Tomcat: heavy twin-engine carrier fighter, fast, swing wings give a
+  // good slow-speed turn; big pitch inertia.
+  tomcat: derivar({
+    masa: 2.4, velCrucero: 160, velMax: 295, clCrucero: 0.16, cl0: 0.12, clAlfa: 5.6,
+    alfaPerdida: 0.36, cd0: 0.02, kInducido: 0.055, cargaMax: 10.5, cargaMin: -3,
+    tpwCrucero: 0.7, tpwMax: 1.3, inercia: 1.6, accMando: 34, mandoMinimo: 0.3,
+    accRigidez: 16, accAmort: 2.5, accPerdida: 6, wCabeceo: 14, tiempoTonel: 0.32,
+    helice: false, panza: 5,
+  }),
+  // A-10 Warthog: slow, straight wing, tanky, turns tight at low speed, no afterburner.
+  a10: derivar({
+    masa: 3, velCrucero: 110, velMax: 175, clCrucero: 0.3, cl0: 0.3, clAlfa: 7,
+    alfaPerdida: 0.3, cd0: 0.03, kInducido: 0.035, cargaMax: 7.5, cargaMin: -3,
+    tpwCrucero: 0.5, tpwMax: 0.8, inercia: 2.5, accMando: 26, mandoMinimo: 0.4,
+    accRigidez: 15, accAmort: 2.8, accPerdida: 7, wCabeceo: 12, tiempoTonel: 0.4,
+    helice: false, panza: 6,
+  }),
+  // Spitfire: WWII prop fighter, light, elliptical wing, a dream to turn, slow.
+  spitfire: derivar({
+    masa: 1.1, velCrucero: 115, velMax: 190, clCrucero: 0.22, cl0: 0.22, clAlfa: 7.2,
+    alfaPerdida: 0.28, cd0: 0.024, kInducido: 0.04, cargaMax: 10, cargaMin: -4,
+    tpwCrucero: 0.6, tpwMax: 1.1, inercia: 0.6, accMando: 46, mandoMinimo: 0.45,
+    accRigidez: 22, accAmort: 3, accPerdida: 8, wCabeceo: 18, tiempoTonel: 0.24,
+    helice: true, panza: 5,
+  }),
   // The saucer: whatever drives it, it out-climbs and out-turns everything
   // and barely stalls.
   ovni: derivar({

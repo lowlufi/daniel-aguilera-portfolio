@@ -310,6 +310,7 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
 const TIPO_AVION: Record<Avion, string> = {
   avioneta: 'De la casa', caza: 'De la casa', bombardero: 'De la casa',
   raptor: 'Caza furtivo', sukhoi: 'Caza supermaniobrable', b2: 'Bombardero furtivo', ovni: 'De otro mundo',
+  tomcat: 'Caza de portaaviones', a10: 'Ataque a tierra', spitfire: 'Caza clásico de hélice',
 };
 
 function Stars({ n }: { n: number }) {

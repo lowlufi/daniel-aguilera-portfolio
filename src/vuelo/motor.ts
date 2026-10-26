@@ -387,7 +387,7 @@ let carIds = 0;
 // Points for shooting down each kind of flying mouse.
 const AIR_SCORE: Record<AE.TipoAereo, number> = { helicoptero: 300, dron: 80, globo: 150, ovni: 150 };
 // How hard each plane's missiles hit a flying boss: the bomber has few, so they count more.
-const BOSS_MUL: Record<ModeloAvion, number> = { avioneta: 1.2, caza: 1, bombardero: 1.6, raptor: 1, sukhoi: 1, b2: 1.3, ovni: 1.1 };
+const BOSS_MUL: Record<ModeloAvion, number> = { avioneta: 1.2, caza: 1, bombardero: 1.6, raptor: 1, sukhoi: 1, b2: 1.3, ovni: 1.1, tomcat: 1.1, a10: 1.5, spitfire: 1.1 };
 // Enemy missiles carry their type (misiles.ts); the player's are plain rockets.
 type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.MisilEnemigo; enemy: true; tgt: Movil | null; trail: number }) & {
   estela?: E.Estela;
@@ -412,6 +412,9 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   sigilo?: boolean;
   /** A spent enemy missile falling under gravity. */
   cae?: boolean;
+  /** The player's missile: got its target over the datalink; seeker scan timer. */
+  enlace?: boolean;
+  busca?: number;
 };
 /** A falling bomb of the player's, with its load; bomblets are the cluster's children. */
 type BombaJ = Bomba & { tipo: BombaTipo; sub?: boolean; rebotes?: number };
@@ -889,8 +892,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const vol = (o.vol ?? 1) * (x === undefined ? 1 : near(x)) * (0.25 + 0.75 * AB.aireActual());
     if (!S.suena(n, { ...o, vol, pan: x === undefined ? 0 : panOf(x) })) synth();
   }
-  const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero', raptor: 'motor-jet', sukhoi: 'motor-jet', b2: 'motor-jet', ovni: 'motor-jet' };
-  const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85, raptor: 165, sukhoi: 160, b2: 120, ovni: 130 };
+  const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero', raptor: 'motor-jet', sukhoi: 'motor-jet', b2: 'motor-jet', ovni: 'motor-jet', tomcat: 'motor-jet', a10: 'motor-jet', spitfire: 'motor-avioneta' };
+  const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85, raptor: 165, sukhoi: 160, b2: 120, ovni: 130, tomcat: 160, a10: 110, spitfire: 115 };
   function engines() {
     const p = s.plane;
     const on = s.mode === 'play' && !s.paused && !s.dead && !s.attract;
@@ -2356,6 +2359,27 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     p.perdida = false;
   }
 
+  /** A missile's own seeker: the nearest enemy inside a cone ahead of its nose. */
+  function buscarBlanco(m: Misil): Fijable | null {
+    let best: Fijable | null = null, bd = 300;
+    const cx = Math.cos(m.rumbo), cy = Math.sin(m.rumbo);
+    const mira = (q: Movil, f: Fijable) => {
+      const dx = q.x - m.x, dy = q.y - m.y;
+      const d = Math.hypot(dx, dy);
+      if (d > bd || d < 8) return;
+      if ((dx * cx + dy * cy) / d < 0.85) return;
+      bd = d;
+      best = f;
+    };
+    for (const c of s.cars) if (c.hp > 0) mira(c.mid, { pos: () => c.mid, vivo: () => c.hp > 0 && s.cars.includes(c), r: 8 });
+    for (const a of s.aereos) if (a.hp > 0) mira(a, { pos: () => a, vivo: () => a.hp > 0 && s.aereos.includes(a), r: 8 });
+    for (const f of s.fighters) if (f.hp > 0) mira(f.a, { pos: () => f.a, vivo: () => f.hp > 0 && s.fighters.includes(f), r: 8 });
+    for (const u of s.gigantes) if (u.viva) { const q = { x: u.x, y: u.y + 8, vx: u.vx, vy: 0 }; mira(q, { pos: () => ({ x: u.x, y: u.y + 8, vx: u.vx, vy: 0 }), vivo: () => u.viva, r: 8 }); }
+    const j = s.jefe;
+    if (j) mira(j, { pos: () => j, vivo: () => s.jefe === j, r: 30 });
+    return best;
+  }
+
   /** A bomb reaching its target, by load. */
   function impactoBomba(b: BombaJ) {
     s.golpeBomba = true;
@@ -2373,12 +2397,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     else if (b.tipo === 'fosforo') {
       blast(x, y, 10, 'jugador', 2);
       // White phosphorus keeps burning on land; the sea puts it out in a hiss of steam.
-      if (enSuelo && !sobreMar(x)) s.zonas.push({ tipo: 'fuego', x, y: ground(x), r: 55, t: 0, vida: 6, tick: 0 });
+      if (enSuelo && !sobreMar(x)) s.zonas.push({ tipo: 'fuego', x, y: ground(x), r: 120, t: 0, vida: 7, tick: 0 });
       else for (let i = 0; i < 6; i++) puff(x + rand(-20, 20), y + rand(0, 10), 2, false, 0.9, rand(-20, 20), rand(20, 50));
       if (!s.attract) AB.fosforo(pan);
     } else if (b.tipo === 'gas') {
       blast(x, y, 3, 'jugador', 0.5);
-      s.zonas.push({ tipo: 'gas', x, y: Math.max(y, ground(x) + 22), r: 45, t: 0, vida: 7, tick: 0 });
+      s.zonas.push({ tipo: 'gas', x, y: Math.max(y, ground(x) + 22), r: 90, t: 0, vida: 8, tick: 0 });
       if (!s.attract) AB.gas(pan);
     } else if (b.tipo === 'plasma') {
       blast(x, y, 34, 'jugador', 6);
@@ -2455,7 +2479,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         // The cloud drifts with the wind, rises a little and spreads.
         z.x += wind * 0.6 * dt;
         z.y = Math.max(ground(z.x) + 18, z.y + 3 * dt);
-        z.r = Math.min(95, z.r + 14 * dt);
+        z.r = Math.min(180, z.r + 22 * dt);
       } else if (Math.random() < dt * 14) puff(z.x + rand(-z.r, z.r), z.y + rand(4, 14), 1, false, 0.9, rand(-8, 8), rand(20, 45));
       if (z.tipo === 'hielo' || z.tipo === 'emp') continue;
       z.tick -= dt;
@@ -3607,6 +3631,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       } else {
         // The player's rockets fly straight where the nose pointed.
+        // Modern guidance: a datalink hands in-flight missiles any lock the pilot gets after
+        // launch, and missiles with their own seeker look for a target ahead by themselves.
+        if (!(sh.lock && sh.lock.vivo())) {
+          if (s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo()) {
+            sh.lock = s.lockCand;
+            if (!sh.enlace) pop(m.x, m.y + 10, '📡 ¡Enlace!', '#9ad8ff');
+            sh.enlace = true;
+          } else if ((sh.k ?? s.spec.kit.misil).buscador && m.t > 0.25) {
+            sh.busca = (sh.busca ?? 0) - dt;
+            if (sh.busca <= 0) {
+              sh.busca = 0.15;
+              const f = buscarBlanco(m);
+              if (f) {
+                sh.lock = f;
+                pop(m.x, m.y + 10, '🎯', '#ffd84a');
+              }
+            }
+          }
+        }
         const lk = sh.lock && sh.lock.vivo() ? sh.lock.pos() : null;
         const kit = sh.k ?? s.spec.kit.misil;
         const res = FA.pasoMisil(m, lk, dt, kit.opts, ground, !lk);
