@@ -35,7 +35,7 @@ const ROLES = [
   'Pruebas y control de calidad', 'Producción', 'Sitio web danieleduardo.cl',
 ];
 const ELENCO = [
-  ['Dui', 'el gato naranjo, piloto del Caza Mandarina'],
+  ['Dui', 'el gato naranja, piloto del Caza Mandarina'],
   ['Lulu', 'la gatita negra de ojos amarillos, Avioneta Mostaza'],
   ['Almendrita', 'la yorkshire, Bombardero Nube'],
   ['Vecina Margarita', 'ella misma (y su portaaviones)'],
@@ -155,9 +155,12 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
   onAvion: (a: Avion) => void; onBomba: (b: BombaTipo) => void; onClose: () => void;
 }) {
   const sprites = useMemo(() => {
+    // The pilot is global to the sprite painter: borrow it for the thumbnails and give it back.
+    const antes = dibujo.pilotoActual();
     dibujo.fijarPiloto(piloto);
     const out = {} as Record<Avion, string>;
     for (const a of HG.HANGAR) out[a.id] = dibujo.planeSprite(a.id).toDataURL();
+    dibujo.fijarPiloto(antes);
     return out;
   }, [piloto]);
   const bombaSprites = useMemo(() => {
@@ -171,9 +174,29 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
     }
     return out;
   }, []);
+  const dialogo = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Give the focus back to whatever opened the hangar when it closes.
+    const antes = document.activeElement as HTMLElement | null;
+    return () => {
+      if (antes && document.contains(antes)) antes.focus({ preventScroll: true });
+    };
+  }, []);
   useEffect(() => {
     // The hangar owns the keyboard while open: Esc closes it, nothing reaches the game or the select.
     const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Tab' && e.type === 'keydown') {
+        // Keep Tab inside the hangar.
+        const bs = [...(dialogo.current?.querySelectorAll<HTMLElement>('button') ?? [])];
+        if (bs.length) {
+          const i = bs.indexOf(document.activeElement as HTMLElement);
+          const sig = e.shiftKey ? (i <= 0 ? bs.length - 1 : i - 1) : i < 0 || i >= bs.length - 1 ? 0 : i + 1;
+          e.preventDefault();
+          bs[sig].focus();
+        }
+        e.stopImmediatePropagation();
+        return;
+      }
       if (e.code === 'Tab' || e.code === 'Enter' || e.code === 'Space') return;
       e.stopImmediatePropagation();
       if (e.type === 'keydown' && (e.code === 'Escape' || e.code === 'KeyP')) {
@@ -186,13 +209,22 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
   }, [onClose]);
   const sel = HG.especDe(avion);
   return (
-    <div role="dialog" aria-modal="true" aria-label="Hangar" className="pointer-events-auto absolute inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-[#120c24]/80 p-3 pt-16 [@media(max-height:500px)]:p-1.5 [@media(max-height:500px)]:pt-12">
+    <div
+      ref={dialogo}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Hangar"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      className="pointer-events-auto absolute inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-[#120c24]/80 p-3 pt-16 [@media(max-height:500px)]:p-1.5 [@media(max-height:500px)]:pt-12"
+    >
       <div className="w-full max-w-4xl rounded-[1.6rem] bg-[#fff8e7] p-3 text-[#6b4f3a] ring-4 ring-[#ead6b3] [@media(max-height:500px)]:p-2">
-        <div className="flex items-center justify-between gap-2">
+        <div className="sticky -top-3 z-10 -mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-[1.6rem] bg-[#fff8e7] px-3 pb-1 pt-3 [@media(max-height:500px)]:-top-1.5 [@media(max-height:500px)]:-mx-2 [@media(max-height:500px)]:-mt-2 [@media(max-height:500px)]:px-2 [@media(max-height:500px)]:pt-2">
           <h2 className="logo-dui text-2xl font-black sm:text-3xl">🛩️ HANGAR</h2>
           <button type="button" autoFocus onClick={onClose} className={GO + ' py-2 text-sm'}>Listo ✓</button>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7 [@media(max-height:500px)]:grid-cols-7 [@media(max-height:500px)]:gap-1">
           {HG.HANGAR.map((a) => {
             const libre = libres.includes(a.id);
             const elegido = a.id === avion;
@@ -206,15 +238,16 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
                   onAvion(a.id);
                 }}
                 aria-pressed={elegido}
+                aria-disabled={!libre}
                 aria-label={`${a.real ?? a.name}${libre ? '' : `, bloqueado: ${a.desbloqueo?.texto}`}`}
-                className={`relative rounded-xl p-1.5 text-center transition-transform ${elegido ? 'bg-[#3a2a6a] text-white ring-4 ring-[#ffd84a]' : libre ? 'bg-white/80 hover:-translate-y-0.5' : 'bg-[#e6d6bd]/60 text-[#a08060]'}`}
+                className={`relative rounded-xl p-1.5 text-center transition-transform [@media(max-height:500px)]:p-1 ${elegido ? 'bg-[#3a2a6a] text-white ring-4 ring-[#ffd84a]' : libre ? 'bg-white/80 hover:-translate-y-0.5' : 'bg-[#e6d6bd]/60 text-[#7a5c40]'}`}
               >
-                <img src={sprites[a.id]} alt="" className={`mx-auto h-10 w-auto ${libre ? '' : 'opacity-40 grayscale'}`} style={{ imageRendering: 'pixelated' }} />
-                <div className="text-xs font-black leading-tight">{a.real ?? a.name}</div>
+                <img src={sprites[a.id]} alt="" className={`mx-auto h-10 w-auto [@media(max-height:500px)]:h-7 ${libre ? '' : 'opacity-40 grayscale'}`} style={{ imageRendering: 'pixelated' }} />
+                <div className="text-xs font-black leading-tight [@media(max-height:500px)]:text-[10px]">{a.real ?? a.name}</div>
                 {libre ? (
-                  <div className="text-[10px] font-bold opacity-80">{a.real ? a.name : 'De la casa'}</div>
+                  <div className="text-[10px] font-bold opacity-80 [@media(max-height:500px)]:hidden">{TIPO_AVION[a.id]}</div>
                 ) : (
-                  <div className="text-[10px] font-black">🔒 {a.desbloqueo?.texto}</div>
+                  <div className="text-[10px] font-black">🔒 {HG.corto(a.desbloqueo)}</div>
                 )}
               </button>
             );
@@ -255,13 +288,15 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
                   onBomba(b);
                 }}
                 aria-pressed={elegida}
-                className={`rounded-xl p-1.5 text-left transition-transform ${elegida ? 'bg-[#3a2a6a] text-white ring-4 ring-[#ffd84a]' : libre ? 'bg-white/80 hover:-translate-y-0.5' : 'bg-[#e6d6bd]/60 text-[#a08060]'}`}
+                aria-disabled={!libre}
+                aria-label={`${info.nombre}${libre ? '' : `, bloqueada: ${info.desbloqueo?.texto ?? ''}`}`}
+                className={`rounded-xl p-1.5 text-left transition-transform ${elegida ? 'bg-[#3a2a6a] text-white ring-4 ring-[#ffd84a]' : libre ? 'bg-white/80 hover:-translate-y-0.5' : 'bg-[#e6d6bd]/60 text-[#7a5c40]'}`}
               >
                 <div className="flex items-center gap-1">
                   <img src={bombaSprites[b]} alt="" className={`h-5 w-auto ${libre ? '' : 'opacity-40 grayscale'}`} style={{ imageRendering: 'pixelated' }} />
                   <span className="text-xs font-black">{info.nombre}</span>
                 </div>
-                <div className="text-[10px] font-bold opacity-80">{libre ? info.texto : `🔒 ${info.desbloqueo?.texto ?? ''}`}</div>
+                {libre ? <div className="text-[10px] font-bold opacity-80">{info.texto}</div> : <div className="text-[10px] font-black">🔒 {HG.corto(info.desbloqueo)}</div>}
               </button>
             );
           })}
@@ -271,9 +306,15 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
   );
 }
 
+/** A one-line kind for each plane, under its name in the hangar. */
+const TIPO_AVION: Record<Avion, string> = {
+  avioneta: 'De la casa', caza: 'De la casa', bombardero: 'De la casa',
+  raptor: 'Caza furtivo', sukhoi: 'Caza supermaniobrable', b2: 'Bombardero furtivo', ovni: 'De otro mundo',
+};
+
 function Stars({ n }: { n: number }) {
   return (
-    <span aria-label={`${n} de 5`} className="tracking-tight text-[#f0a45d]">
+    <span role="img" aria-label={`${n} de 5`} className="tracking-tight text-[#f0a45d]">
       {'★'.repeat(n)}
       <span className="text-[#e6d6bd]">{'★'.repeat(5 - n)}</span>
     </span>
@@ -290,6 +331,18 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const [saved, setSaved] = useState<SavedGame | null>(readSave);
   const [plane, setPlane] = useState<ModeloAvion>(() => readSave()?.pilot ?? 'caza');
   const [hud, setHud] = useState<Hud | null>(null);
+  // «Seguir» gets the focus without scrolling the wave card (autoFocus would jump it to the bottom).
+  const seguirRef = useRef<HTMLButtonElement>(null);
+  // The top bar's real height (its chips wrap on phones), so the boss bar and banners sit under it.
+  const barraRef = useRef<HTMLDivElement>(null);
+  const [barraH, setBarraH] = useState(64);
+  useEffect(() => {
+    const el = barraRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBarraH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // The hangar: open or not, and the plane/bomb picked before take-off (null = the pilot's own plane).
   const [hangar, setHangar] = useState(false);
   const [avion, setAvion] = useState<Avion | null>(null);
@@ -303,6 +356,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   }, [phase, hangar]);
   const [result, setResult] = useState<Result | null>(null);
   const [paused, setPaused] = useState(false);
+  useEffect(() => {
+    if (paused) setHangar(false);
+  }, [paused]);
+  const tiendaAbierta = phase === 'play' && !!hud?.mejoras.tienda && !!hud?.resumen;
+  useEffect(() => {
+    if (tiendaAbierta) seguirRef.current?.focus({ preventScroll: true });
+  }, [tiendaAbierta]);
   const [muted, setMuted] = useState(readMuted);
   const [touchUi, setTouchUi] = useState(false);
   const [portrait, setPortrait] = useState(false);
@@ -490,6 +550,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
   /** Back to the hangar to pick another plane (the self-playing game keeps flying behind). */
   const toHangar = useCallback(() => {
+    setHangar(false);
     game.current?.attract();
     game.current?.setPaused(false);
     setPaused(false);
@@ -499,6 +560,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   }, [tituloMusica]);
 
   const toMenu = useCallback(() => {
+    setHangar(false);
     game.current?.attract();
     game.current?.setPaused(false);
     setPaused(false);
@@ -664,7 +726,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       </div>
 
       {/* Top bar: score on the left, the way out on the right. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+      <div ref={barraRef} className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
           {phase === 'intro' || phase === 'titulo' || phase === 'creditos' ? null : phase === 'menu' ? (
             <span className={`${chip} px-4`}>✈️ Escuadrón Dui</span>
@@ -691,7 +753,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     ❤️ ×{hud.mejoras.coraza}
                   </span>
                 )}
-                {hud.mision && !hud.resumen && (
+                {hud.mision && !hud.resumen && !movil && (
                   <span
                     className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow ${
                       hud.mision.hecha ? 'bg-[#c8f0c8] text-[#2f6a3a]' : hud.mision.fallida ? 'bg-[#ead6b3]/80 text-[#a08060] line-through' : 'bg-[#fff8e7]/90 text-[#6b4f3a]'
@@ -791,7 +853,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {/* Wave banner and missile alarm. */}
       {phase === 'play' && hud?.banner && (
-        <div className={`pointer-events-none absolute inset-x-0 z-10 text-center ${movil ? 'top-[16%]' : 'top-[22%]'}`}>
+        <div className={`pointer-events-none absolute inset-x-0 z-10 text-center ${hud.boss ? '' : movil ? 'top-[16%]' : 'top-[22%]'}`} style={hud.boss ? { top: barraH + 52 } : undefined}>
           <span className={`inline-block font-black text-[#6b4f3a] shadow-[0_5px_0_rgba(91,70,54,0.2)] ${movil ? 'rounded-2xl bg-[#fff8e7]/85 px-3 py-1 text-sm' : 'rounded-3xl bg-[#fff8e7]/95 px-6 py-3 text-2xl md:text-3xl'}`}>
             {hud.banner}
           </span>
@@ -813,12 +875,12 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
       {phase === 'play' && hud?.pista && !hud.resumen && !paused && (
         <div className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 ${hud.enTierra && touchUi ? 'top-[38%]' : 'bottom-28 [@media(max-height:500px)]:bottom-24'}`}>
-          <span className="rounded-full bg-[#3a2a6a]/75 px-4 py-1.5 text-center text-sm font-black text-white shadow">💡 {hud.pista}</span>
+          <span className={`rounded-full bg-[#3a2a6a]/75 px-4 py-1.5 text-center text-sm font-black text-white shadow ${touchUi ? 'max-w-[55%] rounded-2xl text-xs' : ''}`}>💡 {hud.pista}</span>
         </div>
       )}
       {phase === 'play' && hud?.resumen && !paused && (
         <div className="pointer-events-none absolute inset-x-0 top-[14%] z-[45] flex justify-center px-4 [@media(max-height:500px)]:top-2">
-          <div className="w-full max-w-sm animate-[aparece_0.35s_ease-out] overflow-auto rounded-[1.6rem] bg-[#fff8e7]/95 p-4 text-center [@media(max-height:500px)]:max-h-[calc(100dvh-1rem)] [@media(max-height:500px)]:p-2 shadow-[0_6px_0_rgba(91,70,54,0.2)] ring-4 ring-[#ead6b3]">
+          <div className="w-full max-w-sm animate-[aparece_0.35s_ease-out] overflow-auto rounded-[1.6rem] bg-[#fff8e7]/95 p-4 text-center [@media(max-height:500px)]:pointer-events-auto [@media(max-height:500px)]:max-h-[calc(100dvh-1rem)] [@media(max-height:500px)]:p-2 shadow-[0_6px_0_rgba(91,70,54,0.2)] ring-4 ring-[#ead6b3]">
             <div className="flex items-center justify-center gap-3">
               <img src={thumbs[plane].pilot} alt="" className="h-12 w-12 animate-bounce rounded-full bg-white p-0.5 ring-2 ring-[#f0a45d]" style={{ imageRendering: 'pixelated' }} />
               <h2 className="text-xl font-black text-[#e8742a]">¡Oleada {hud.resumen.oleada} superada!</h2>
@@ -852,10 +914,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {hud.resumen.siguiente}</p>
             )}
             {hud.resumen.dato && (
-              <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a] [@media(max-height:500px)]:text-[10px]">💡 ¿Sabías que…? {hud.resumen.dato}</p>
+              <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a] [@media(max-height:500px)]:hidden">💡 ¿Sabías que…? {hud.resumen.dato}</p>
             )}
             {hud.resumen.nuevos && hud.resumen.nuevos.length > 0 && (
-              <p className="mt-2 animate-pulse rounded-full bg-[#3a2a6a] px-3 py-1 text-sm font-black text-[#ffd84a]">🔓 Nuevo en el hangar: {hud.resumen.nuevos.join(', ')}</p>
+              <p className="mt-2 animate-pulse rounded-full bg-[#3a2a6a] px-3 py-1 text-sm font-black text-[#ffd84a]">🔓 Nuevo en el hangar: {HG.resumirNuevos(hud.resumen.nuevos)}</p>
             )}
             {hud.mejoras.tienda && (
               // The upgrade shop: the break waits until «Seguir».
@@ -891,7 +953,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <button type="button" onClick={() => { menu.aceptar(); setHangar(true); }} className={`${BTN} h-9`}>
                     🛩️ Hangar · {HG.especDe(hud.hangar.avion).real ?? HG.especDe(hud.hangar.avion).name}
                   </button>
-                  <button type="button" autoFocus onClick={() => game.current?.cerrarTienda()} className={`${GO} py-2 text-sm`}>
+                  <button type="button" ref={seguirRef} onClick={() => game.current?.cerrarTienda()} className={`${GO} py-2 text-sm`}>
                     Seguir ▶
                   </button>
                 </div>
@@ -935,7 +997,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
       {phase === 'play' && hud?.boss && (
-        <div className="pointer-events-none absolute inset-x-0 top-[3.6rem] [@media(min-height:500px)]:top-[4.4rem] z-10 flex justify-center px-4">
+        <div className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4" style={{ top: barraH }}>
           <div className="w-full max-w-sm rounded-2xl bg-[#fff8e7]/95 px-3 py-1.5 shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-2 ring-[#f08a94]">
             <div className="flex items-center justify-between text-xs font-black text-[#a02a4a]">
               <span>👵 {hud.boss.name}</span>
@@ -1100,7 +1162,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {/* Character select, arcade style: three framed pilots, the chosen one big and animated; confirm and they strike a pose. */}
       {phase === 'menu' && (
-        <div role="dialog" aria-modal="true" aria-label="Elige tu piloto" className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 overflow-y-auto bg-[#120c24]/70 p-3 pt-16 [@media(max-height:500px)]:gap-1.5 [@media(max-height:500px)]:pt-12">
+        <div role="dialog" aria-modal="true" aria-label="Elige tu piloto" className={`absolute inset-0 ${hangar ? 'z-[45]' : 'z-30'} flex flex-col items-center justify-center gap-3 overflow-y-auto bg-[#120c24]/70 p-3 pt-16 [@media(max-height:500px)]:gap-1.5 [@media(max-height:500px)]:pt-12`}>
           <div className="flex w-full max-w-4xl items-center justify-between gap-2">
             <button type="button" onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${BTN} h-9`} disabled={!!confirmado}>← Volver</button>
             <h1 className="logo-dui text-3xl font-black sm:text-5xl [@media(max-height:500px)]:text-2xl">ELIGE TU PILOTO</h1>
@@ -1195,8 +1257,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <p className="mt-3 font-black">{result.record ? '🏆 ¡Nuevo récord!' : `Récord: ${result.best}`}</p>
             <p className="mt-2 text-sm font-bold text-[#8a6e55]">
               {result.reason === 'avion'
-                ? 'Tip: cuando un misil se acerque, gira fuerte en el último momento o suelta bengalas ✨'
-                : 'Tip: vuela bajo y vigila el pescado 🐟; las flechas del borde te llevan a los ratones'}
+                ? 'Consejo: cuando un misil se acerque, gira fuerte en el último momento o suelta bengalas ✨'
+                : 'Consejo: vuela bajo y vigila el pescado 🐟; las flechas del borde te llevan a los ratones'}
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               {saved && (

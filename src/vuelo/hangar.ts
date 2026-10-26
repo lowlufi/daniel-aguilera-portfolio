@@ -150,7 +150,7 @@ export const HANGAR: PlaneSpec[] = [
   {
     id: 'b2', pilot: '', name: 'Spirit', real: 'B-2 Spirit',
     blurb: 'Ala volante furtiva: bodega enorme y misiles crucero. Sin metralla.',
-    parts: ['ala', 'motor', 'cabina', 'bodega'], hp: 7, rack: 2, bombRack: 5, flareRack: 3, reload: 1.6, bombCd: 1, bombs: 4, hit: 10,
+    parts: ['ala', 'motor', 'cabina', 'bodega'], hp: 5, rack: 2, bombRack: 5, flareRack: 3, reload: 1.6, bombCd: 1, bombs: 4, hit: 10,
     stats: { velocidad: 2, blindaje: 5, misiles: 3, bombas: 5 },
     kit: {
       misil: {
@@ -166,7 +166,7 @@ export const HANGAR: PlaneSpec[] = [
   {
     id: 'ovni', pilot: '', name: 'Platillo', real: 'OVNI',
     blurb: 'Tecnología de otro mundo: rayo láser, orbes de plasma y hologramas.',
-    parts: ['cabina', 'motor', 'ala'], hp: 5, rack: 3, bombRack: 3, flareRack: 3, reload: 0.9, bombCd: 0.9, bombs: 1, hit: 7,
+    parts: ['cabina', 'motor', 'ala'], hp: 4, rack: 3, bombRack: 3, flareRack: 3, reload: 0.9, bombCd: 0.9, bombs: 1, hit: 7,
     stats: { velocidad: 4, blindaje: 4, misiles: 5, bombas: 4 },
     kit: {
       misil: {
@@ -199,7 +199,19 @@ export const BOMBAS: Record<BombaTipo, BombaInfo> = {
   emp: { nombre: 'Pulso EMP', texto: 'Apaga misiles enemigos y deja mudas las baterías un rato.', desbloqueo: { tipo: 'oleada', n: 5, texto: 'Llega a la oleada 5' } },
   termobarica: { nombre: 'Termobárica', texto: 'Una bola de fuego que chupa el aire y estalla dos veces.', desbloqueo: { tipo: 'oleada', n: 6, texto: 'Llega a la oleada 6' } },
 };
-export const TIPOS_BOMBA = Object.keys(BOMBAS) as BombaTipo[];
+/** Bomb types in the order they unlock (the saucer's own load last). */
+export const TIPOS_BOMBA = (Object.keys(BOMBAS) as BombaTipo[]).sort(
+  (a, b) => (BOMBAS[a].soloOvni ? 99 : BOMBAS[a].desbloqueo?.n ?? 0) - (BOMBAS[b].soloOvni ? 99 : BOMBAS[b].desbloqueo?.n ?? 0),
+);
+
+/** Short lock text for small cards: «Oleada 3», «3 ovnis». */
+export const corto = (d: Desbloqueo | undefined) => (!d ? '' : d.tipo === 'oleada' ? `Oleada ${d.n}` : `${d.n} ovnis`);
+
+/** A short list of what got unlocked: «F-22 Raptor, Su-57 y 3 más». */
+export function resumirNuevos(n: string[]) {
+  if (n.length <= 3) return n.join(', ');
+  return `${n.slice(0, 2).join(', ')} y ${n.length - 2} más`;
+}
 
 /* ── Progress kept across games ── */
 
@@ -245,7 +257,7 @@ export function registrar(cambio: Partial<Progreso>): string[] {
   for (const a of HANGAR) if (a.desbloqueo && !cumple(a.desbloqueo, antes) && cumple(a.desbloqueo, p)) nuevos.push(a.real ?? a.name);
   for (const t of TIPOS_BOMBA) {
     const d = BOMBAS[t].desbloqueo;
-    if (d && !cumple(d, antes) && cumple(d, p)) nuevos.push(`Bomba ${BOMBAS[t].nombre.toLowerCase()}`);
+    if (d && !cumple(d, antes) && cumple(d, p)) nuevos.push(`Bomba ${BOMBAS[t].nombre}`);
   }
   return nuevos;
 }
