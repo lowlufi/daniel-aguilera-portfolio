@@ -2205,11 +2205,123 @@ function capaCerrosCerca(a: Ambiente) {
   return { cv: b.canvas(), fondo: css(mat(a, '#b5d99c', k)) };
 }
 
+/** World x where the Valparaíso level's backdrop turns from the cerros into the coast north (Avenida España). */
+const COSTA_NORTE = 2870;
+
+/** `corte`: x in `cv` where the hill is at full height (the cerros layer is cut there). */
+type Norte = { cv: Cv; cola: Cv; fondo: string; corte: number };
+
+/**
+ * The coast north, seen past the end of the cerros: the Recreo hill dropping
+ * to the sea (tall at its left, so it hides where the cerros layer is cut),
+ * Viña's towers along the shore with its pier, Reñaca's white blocks stepping
+ * up their hill and the Concón dunes, which carry on in `cola` (a seamless tile).
+ * `e` = 1 for the mid layer, 2 for the near one.
+ */
+function capaNorte(a: Ambiente, e: 1 | 2): Norte {
+  const k = e === 1 ? 0.32 : 0.14;
+  const H = e === 1 ? 130 : 160;
+  const PER = 45 * e;
+  const W = e === 1 ? PER * 7 : PER * 4;
+  const COLA = PER * 2;
+  const m: Pinta = (h, kk = k) => pack(mat(a, h, kk));
+  const r = rng(1811 + e);
+  const ventana = ventanas(a, m, r, 0.2);
+  const alto = e === 1 ? 122 : 150;
+  const piso = 8 * e;
+  const duna = (x: number) => (e === 1 ? 32 : 50) + 6 * e * Math.sin((x * TAU) / PER);
+  // Landmarks along the layer, in its own x (the near layer packs them a little tighter).
+  const X = (x: number) => Math.round(x * (e === 1 ? 1 : 1.3));
+  const prof = (x: number) => {
+    const cerro = 60 * e * (1 - ss(X(0), X(20), x)) + alto * ss(X(0), X(20), x) - (alto - piso) * ss(X(28), X(72), x);
+    const ren = piso + 40 * e * ss(X(176), X(206), x);
+    const d = ss(X(214), X(238), x);
+    return x < X(100) ? Math.max(cerro, piso) : Math.max(piso, ren * (1 - d), duna(x) * d);
+  };
+  const ARENA = X(226);
+  const pinta = (b: Buf, W: number, prof: (x: number) => number, x0: number) => {
+    for (let x = 0; x < W; x++) {
+      const wx = x + x0;
+      const sand = wx >= ARENA;
+      const top = Math.round(H - prof(wx));
+      const nx = Math.round(H - prof(wx + 1));
+      b.rect(x, Math.max(0, top), 1, H - Math.max(0, top), m(sand ? '#f2d49a' : '#b5d99c'));
+      b.px(x, top + 1, m(sand ? '#fff0c8' : '#d4ecbc'));
+      const tinta = m(sand ? '#c8a060' : '#7aa070');
+      for (let y = Math.min(top, nx); y <= Math.max(top, nx) - (nx > top ? 1 : 0); y++) b.px(x, y, tinta);
+      b.px(x, top, tinta);
+      // Sparse scrub on the dunes.
+      if (sand && r() < 0.06) b.px(x, top + 2 + Math.floor(r() * 3 * e), m('#7aa070'));
+      // The sea in front of the shore (the mid layer stands on the bay).
+      if (e === 1 && wx >= X(64)) {
+        b.rect(x, H - 5, 1, 5, m('#6fa8c9'));
+        if ((wx * 7) % 13 === 0) b.px(x, H - 4, m('#a8d4ea'));
+        if (wx % 9 < 3) b.px(x, H - 5, m('#e4f2fa'));
+      }
+    }
+  };
+
+  const b = new Buf(W, H);
+  pinta(b, W, prof, 0);
+  const base = H - piso;
+  // Recreo: little houses packed on the hill.
+  for (let y = H - alto + 2; y < base - 2; y += 4 * e)
+    for (let x = Math.floor(r() * 4); x < X(76); ) {
+      const w = (4 + Math.floor(r() * 4)) * e;
+      const h = (4 + Math.floor(r() * 3)) * e;
+      if (y >= H - prof(x) + 2 && y >= H - prof(x + w) + 2 && y + h <= base && r() < 0.8)
+        casa(b, m, x, y + h, w, h, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], TECHOS_CASA[Math.floor(r() * TECHOS_CASA.length)], ventana);
+      x += w + (r() < 0.2 ? 1 : 0);
+    }
+  // Viña: towers along the shore, taller in the middle, and palms in front.
+  for (let x = X(74); x < X(150); ) {
+    const w = (5 + Math.floor(r() * 4)) * e;
+    const mid = 1 - Math.abs(x - X(112)) / X(46);
+    const h = Math.round((8 + r() * 10 + mid * 22) * e);
+    const muro = ['#fff6e5', '#e8ecf4', '#f4e0c8', '#d8e4f0', '#fdfaf2'][Math.floor(r() * 5)];
+    b.rect(x, base - h, w, h, m(muro));
+    b.rect(x + w - 1, base - h, 1, h, m(tone(muro)));
+    b.rect(x, base - h, w, 1, m(tone(muro)));
+    for (let wy = base - h + 2; wy < base - 1; wy += 2 * e) for (let wx = x + 1; wx < x + w - 1; wx += 2) b.px(wx, wy, ventana());
+    x += w + 1 + Math.floor(r() * 3);
+  }
+  for (let x = X(78); x < X(170); x += X(14) + Math.floor(r() * 8)) {
+    const hp = 5 * e + Math.floor(r() * 3);
+    b.rect(x, base - hp, 1, hp, m('#9a6a4a'));
+    for (let j = -2 * e; j <= 2 * e; j++) b.px(x + j, base - hp - 1 + (Math.abs(j) > e ? 1 : 0), m('#4ea870'));
+    b.px(x, base - hp - 2, m('#4ea870'));
+  }
+  // Muelle Vergara: a thin pier into the bay, with its tower at the end (mid layer only).
+  if (e === 1) {
+    const x0 = X(152);
+    b.rect(x0, H - 7, 18, 1, m('#8a6a4a'));
+    for (let x = x0 + 1; x < x0 + 18; x += 4) b.rect(x, H - 6, 1, 6, m('#5a6a7a'));
+    b.rect(x0 + 15, H - 13, 1, 6, m('#4a6070'));
+    b.rect(x0 + 18, H - 13, 1, 6, m('#4a6070'));
+    b.rect(x0 + 11, H - 14, 9, 1, m('#4a6070'));
+  }
+  // Reñaca: white blocks stepping up the hill, a glass row on each.
+  for (let x = X(172); x < X(222); x += 6 * e) {
+    const yTop = Math.round(H - prof(x + 3 * e)) - 6 * e;
+    const yBot = Math.min(base, Math.round(H - prof(x)) + 2);
+    b.rect(x, yTop, 6 * e, yBot - yTop, m('#fdfaf2'));
+    b.rect(x + 6 * e - 1, yTop, 1, yBot - yTop, m('#d8d4e4'));
+    for (let wy = yTop + 2; wy < yBot - 1; wy += 3 * e) for (let wx = x + 1; wx < x + 6 * e - 1; wx++) b.px(wx, wy, wx % 2 ? ventana() : m('#8ccaf8'));
+  }
+
+  // The tail: more dunes, the same profile so it joins seamlessly.
+  const c = new Buf(COLA, H);
+  pinta(c, COLA, duna, W);
+  return { cv: b.canvas(), cola: c.canvas(), fondo: css(mat(a, e === 1 ? '#6fa8c9' : '#f2d49a', k)), corte: X(24) };
+}
+
 type Valpo = {
   lejos: { cv: Cv; fondo: string };
   medio: { cv: Cv; fondo: string };
   cerca: { cv: Cv; fondo: string };
   bruma: Cv;
+  norteMedio: Norte;
+  norteCerca: Norte;
 };
 
 const tareasValpo = (a: Ambiente): Tarea<Valpo>[] => [
@@ -2217,6 +2329,10 @@ const tareasValpo = (a: Ambiente): Tarea<Valpo>[] => [
   (c) => (c.medio = capaCerrosMedio(a)),
   (c) => (c.cerca = capaCerrosCerca(a)),
   (c) => (c.bruma = capaNiebla(a, 0.7)),
+  (c) => {
+    c.norteMedio = capaNorte(a, 1);
+    c.norteCerca = capaNorte(a, 2);
+  },
 ];
 
 /* ── Sky life: small cozy things that fill each altitude band ──────────── */
@@ -3427,13 +3543,42 @@ function dibujarValpo(g: Ctx, o: OpcionesFondo, C: Capas, V: Valpo, t: number, y
       g.fillRect(0, y, vw, vh - y);
     }
   };
+  // Past Valparaíso the cerros give way to the coast north: the layer is cut
+  // where the Recreo hill of the coast layer (same parallax) stands at full height.
+  const centro = camX + vw / 2;
+  const capaCorte = (c: { cv: Cv; fondo: string }, n: Norte, k: number, y: number) => {
+    const xn = Math.round(vw / 2 + (COSTA_NORTE - centro) * k);
+    if (xn >= vw) {
+      capa(c, camX * k, y);
+      return;
+    }
+    const xc = Math.max(0, Math.min(vw, xn + n.corte));
+    if (xc > 0) {
+      g.save();
+      g.beginPath();
+      g.rect(0, 0, xc, vh);
+      g.clip();
+      capa(c, camX * k, y);
+      g.restore();
+    }
+    const top = Math.round(y - n.cv.height);
+    if (top < vh && y > 0) {
+      g.drawImage(n.cv, xn, top);
+      for (let x = xn + n.cv.width; x < vw; x += n.cola.width) if (x + n.cola.width > 0) g.drawImage(n.cola, x, top);
+    }
+    if (y < vh) {
+      g.fillStyle = n.fondo;
+      g.fillRect(xc, y, vw - xc, vh - y);
+    }
+  };
+
   capa(V.lejos, camX * 0.08, ys(0.3));
   nubes(g, NUBES_MEDIO, C.medio, 0.13, ys(0.4), o, drift);
   // Camanchaca: coastal fog lying in bands over the hills.
   g.globalAlpha = 0.55;
   tira(g, V.bruma, camX * 0.12 + t * 3, ys(0.36) + 4, vw);
   g.globalAlpha = 1;
-  capa(V.medio, camX * 0.22, ys(0.42) + 6);
+  capaCorte(V.medio, V.norteMedio, 0.22, ys(0.42) + 6);
   g.globalAlpha = 0.45;
   tira(g, V.bruma, camX * 0.3 + t * 5 + 21, ys(0.48) - 30, vw);
   g.globalAlpha = 1;
@@ -3451,7 +3596,7 @@ function dibujarValpo(g: Ctx, o: OpcionesFondo, C: Capas, V: Valpo, t: number, y
     }
   }
   nubes(g, NUBES_CERCA, C.cerca, 0.22, ys(0.62), o, drift);
-  capa(V.cerca, camX * 0.4, ys(0.62) + 26);
+  capaCorte(V.cerca, V.norteCerca, 0.4, ys(0.62) + 26);
 }
 
 /** San Antonio: the coastal range, then the sectors (eucalyptus → wetland → Barrancas → port → Cartagena). */
