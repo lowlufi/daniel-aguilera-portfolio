@@ -187,6 +187,11 @@ const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
 const NITRO_T = 3;
 const NITRO_ACC = 4.2 * FA.GRAVEDAD;
 const NITRO_CD = 9;
+/** A flare burst: how many flares, and the beat between them (s). */
+const SALVA_N = 8;
+const SALVA_DT = 0.075;
+/** Seconds of free fall before the nuke's parachute opens. */
+const NUKE_CAIDA = 0.55;
 /** How long the engine-cooling glow lasts after braking hard, s. */
 const ENFRIA_T = 1.4;
 /** Seconds holding the nose on an enemy before the missiles lock on. */
@@ -803,6 +808,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     fighterQueue: 0,
     /** The one-on-one duel with Margarita's fighter is on: nothing else spawns. */
     duelo: false,
+    /** A flare burst in progress: next flare, its timer, and seekers fooled so far. */
+    salva: null as { i: number; t: number; enganados: number } | null,
+    /** The nuclear bomb on its way down under a parachute. */
+    nuke: null as { x: number; y: number; vx: number; vy: number; t: number } | null,
     /** Inside a blast that pays no points (a stray falling missile). */
     sinPremio: false,
     /** Inside a bomb's own blast (the carrier is weak to bombs, not to every big bang). */
@@ -975,6 +984,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.fighterQueue = 0;
     s.hundido = null;
     s.duelo = false;
+    s.salva = null;
+    s.nuke = null;
     s.bigQueue = [];
     s.jefe = null;
     s.spaceT = 0;
@@ -1601,9 +1612,40 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * ☢️ The nuclear bomb: everything on screen goes, missiles included; bosses
    * take a heavy blow. A white-out, a long shake and a deep boom.
    */
-  function detonarNuclear() {
+  /** The nuke leaves the bay; a moment later its parachute opens and it drifts down. */
+  function soltarNuke() {
+    const p = s.plane;
     s.nukes--;
-    const x0 = s.camX - 20, x1 = s.camX + view.vw + 20;
+    s.nuke = { x: p.x, y: p.y - 6, vx: p.vx * 0.6, vy: p.vy * 0.5 - 20, t: 0 };
+    s.banner = '☢️ ¡Bomba nuclear lanzada! ¡Aléjate!';
+    window.setTimeout(() => {
+      if (s.banner.startsWith('☢️ ¡Bomba')) s.banner = '';
+    }, 2400);
+    if (!s.attract) sfx.warn();
+    fx('bomba', sfx.bomb, { vol: 0.6, rate: 0.7 });
+  }
+  function stepNuke(dt: number) {
+    const n = s.nuke;
+    if (!n) return;
+    n.t += dt;
+    const abierto = n.t > NUKE_CAIDA;
+    if (abierto) {
+      // Under the canopy: a slow, swaying descent.
+      n.vx += (-n.vx) * Math.min(1, dt * 1.5) + FV.viento(s.t, n.x, n.y) * 0.4 * dt;
+      n.vy += (-38 - n.vy) * Math.min(1, dt * 2.5);
+    } else n.vy -= FA.GRAVEDAD * dt;
+    n.x = clamp(n.x + n.vx * dt, 20, LEVEL - 20);
+    n.y += n.vy * dt;
+    if (Math.floor(n.t * 4) % 2 === 0) L.luz(s.luces, n.x, n.y, 10, '#ff4a3c', 0.05);
+    if (n.y <= ground(n.x) + 45 || n.t > 9) {
+      s.nuke = null;
+      detonarNuclear(n.x, Math.max(n.y, ground(n.x)));
+    }
+  }
+
+  function detonarNuclear(nx = s.plane.x, ny = s.plane.y) {
+    // The camera's view around the burst: everything in sight goes.
+    const x0 = nx - view.vw * 0.6, x1 = nx + view.vw * 0.6;
     const seen = (x: number) => x > x0 && x < x1;
     for (const c of s.cars) if (seen(c.x)) hurtCar(c, isBoss(c.kind) ? s.bossMax * 0.35 : 99);
     for (const a of s.aereos) if (a.hp > 0 && seen(a.x)) {
@@ -1618,8 +1660,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const h = JF.golpear(s.jefe, s.jefe.x + rand(-40, 40), s.jefe.y + rand(-20, 20), 6);
       if (h.derrotado) award(h.puntos ?? 0, s.jefe.x, s.jefe.y);
     }
-    const cx = s.camX + view.vw / 2, cy = s.camY + view.vh / 2;
-    for (let i = 0; i < 6; i++) VFX.explosion(s.fx, cx + rand(-view.vw / 3, view.vw / 3), cy + rand(-60, 60), 8, { quieto: still || s.calma });
+    // The mushroom: a column of fireballs climbing from the ground zero, and a ring along the ground.
+    for (let i = 0; i < 7; i++) VFX.explosion(s.fx, nx + rand(-12, 12), ny + i * 22, 9 - i * 0.6, { quieto: still || s.calma });
+    for (const dx of [-90, -50, 50, 90]) VFX.explosion(s.fx, nx + dx, ground(nx + dx) + 4, 5, { quieto: still || s.calma, suelo: true });
+    L.luz(s.luces, nx, ny + 60, 120, '#fff2c0', 0.8);
     s.flashMap = 1;
     s.shake = 12;
     pop(s.plane.x, s.plane.y + 30, '☢️ ¡BOMBA NUCLEAR!', P.gold);
@@ -2262,6 +2306,56 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     o.y += (dy / d) * v;
   }
 
+  /** The nuke: a fat dark-green bomb with the trefoil, under a red-and-white parachute once it opens. */
+  function dibujarNuke(x: number, y: number, t: number) {
+    const X = Math.round(x), Y = Math.round(y);
+    const k = Math.min(1, Math.max(0, (t - NUKE_CAIDA) / 0.35));
+    if (k > 0) {
+      const sw = Math.round(Math.sin(t * 2.2) * 2);
+      const w = Math.round(8 + 10 * k), h = Math.round(3 + 6 * k);
+      const cy = Y - 14 - Math.round(12 * k);
+      // Lines from the canopy edge to the bomb's tail.
+      for (const dx of [-w + 1, -Math.round(w / 3), Math.round(w / 3), w - 1]) {
+        const n = 10;
+        for (let i = 0; i <= n; i++) A.R(g, Math.round(X + sw + dx + (-dx * i) / n), Math.round(cy + ((Y - 6 - cy) * i) / n), 1, 1, '#e8e0d0');
+      }
+      D.oval(g, X + sw, cy, w + 1, h + 1, '#5a2a2a');
+      D.oval(g, X + sw, cy, w, h, P.white);
+      for (let i = -w; i < w; i += 6) A.R(g, X + sw + i, cy - h + 1, 3, h, '#e03a3a');
+      A.R(g, X + sw - w, cy, w * 2, 2, '#5a2a2a');
+    }
+    // The bomb, nose down.
+    A.R(g, X - 4, Y - 6, 9, 13, '#1e3a24');
+    A.R(g, X - 3, Y - 5, 7, 11, '#3a6a3a');
+    D.disc(g, X, Y + 6, 4, '#3a6a3a');
+    A.R(g, X - 2, Y - 4, 2, 9, '#5a8a4a');
+    A.R(g, X - 5, Y - 9, 11, 3, '#2a4a2a');
+    // The trefoil in a yellow disc, blinking red when close to the ground.
+    D.disc(g, X, Y + 1, 3, Math.floor(t * 6) % 2 ? P.gold : '#ff4a3c');
+    A.R(g, X, Y + 1, 1, 1, '#1a1a1a');
+    A.R(g, X - 2, Y - 1, 1, 2, '#1a1a1a');
+    A.R(g, X + 2, Y - 1, 1, 2, '#1a1a1a');
+    A.R(g, X, Y + 3, 1, 1, '#1a1a1a');
+  }
+
+  /** The autopilot of the map trip: turns smoothly to fly right, holds a safe height, rolls upright. */
+  function vueloGuiado(p: Avion, dt: number) {
+    const ahead = ground(clamp(p.x + 120, 0, LEVEL));
+    const alto = Math.max(260, ahead + 140, ground(p.x) + 140);
+    const want = clamp(Math.atan2(alto - p.y, 260), -0.5, 0.5);
+    const d = Math.atan2(Math.sin(want - p.rumbo), Math.cos(want - p.rumbo));
+    p.rumbo += clamp(d, -2.6 * dt, 2.6 * dt);
+    p.alabeo += (1 - p.alabeo) * Math.min(1, dt * 4);
+    p.omega = 0;
+    const sp = Math.max(170, Math.min(Math.hypot(p.vx, p.vy) + (s.nitroT > 0 ? 260 : 60) * dt, s.nitroT > 0 ? 420 : 260));
+    p.vx = Math.cos(p.rumbo) * sp;
+    p.vy = Math.sin(p.rumbo) * sp;
+    p.x = clamp(p.x + p.vx * dt, 20, LEVEL - 20);
+    p.y = Math.max(p.y + p.vy * dt, ground(p.x) + 60);
+    p.carga = 1;
+    p.perdida = false;
+  }
+
   /** A bomb reaching its target, by load. */
   function impactoBomba(b: BombaJ) {
     s.golpeBomba = true;
@@ -2513,40 +2607,58 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       usar('bengala');
       s.flares--;
       s.flareCd = 0.6;
-      let fooled = 0;
-      const kb = s.spec.kit.bengala;
-      for (let i = 0; i < kb.n; i++) {
-        // Holograms keep pace beside the plane for a moment; the rest drop away.
-        const holo = kb.tipo === 'holograma';
-        const f = {
-          x: p.x, y: p.y - 3, tipo: kb.tipo, t: 0,
-          vx: holo ? p.vx * 0.9 + (i - (kb.n - 1) / 2) * 40 : p.vx * 0.5 + rand(-30, 30),
-          vy: holo ? p.vy * 0.9 + (i - (kb.n - 1) / 2) * 25 : p.vy * 0.5 + rand(-10, 30),
-        };
-        s.flareBodies.push(f);
-        // Each seeker gets a few looks at each new decoy (more for better decoys).
-        for (const sh of s.shots) {
-          if (!(sh.enemy && sh.tgt === p && sh.m.guiado)) continue;
-          for (let k = 0; k < kb.intentos; k++) {
-            if (MS.engana(sh.m, f, p)) {
-              sh.tgt = f;
-              fooled++;
-              break;
-            }
-          }
-        }
-      }
-      if (s.attract) { /* silent */ }
-      else if (kb.tipo === 'holograma') AB.holograma(panOf(p.x));
-      else if (kb.tipo === 'chaff') AB.chaff(panOf(p.x));
-      else if (kb.tipo === 'trampa') AB.trampa(panOf(p.x));
-      else fx('bengalas', sfx.flare, { vol: 0.6 });
-      if (fooled) {
-        pop(p.x, p.y + 18, fooled > 1 ? `¡${fooled} misiles engañados!` : '¡Misil engañado!', P.gold);
-        sfx.star();
-      }
+      // Movie style: a burst of flares punched out one after another, alternating sides.
+      s.salva = { i: 0, t: 0, enganados: 0 };
     }
     s.flareWasDown = input.flare;
+  }
+
+  /** Pops the next flare of a burst: out to the side, arcing down on a smoke trail, and a «tun». */
+  function stepSalva(dt: number) {
+    const sv = s.salva;
+    if (!sv) return;
+    const p = s.plane;
+    if (s.dead) {
+      s.salva = null;
+      return;
+    }
+    sv.t -= dt;
+    if (sv.t > 0) return;
+    sv.t = SALVA_DT;
+    const lado = sv.i % 2 ? 1 : -1;
+    // Out of the belly, sideways and down, like a wing of fireworks.
+    const ux = Math.cos(p.rumbo), uy = Math.sin(p.rumbo);
+    const al = p.alabeo >= 0 ? 1 : -1;
+    const nx = -uy * al, ny = ux * al;
+    // Each pair flies out wider than the last: the burst opens like a firework fan.
+    const fuerza = 110 + (sv.i >> 1) * 26;
+    const f = {
+      x: p.x - ux * 6, y: p.y - uy * 6 - 2, tipo: 'magnesio' as HG.BengalaTipo, t: 0,
+      vx: p.vx * 0.35 - ux * 40 + nx * lado * fuerza,
+      vy: p.vy * 0.35 - uy * 40 + ny * lado * fuerza + 30,
+    };
+    s.flareBodies.push(f);
+    const kb = s.spec.kit.bengala;
+    for (const sh of s.shots) {
+      if (!(sh.enemy && sh.tgt === p && sh.m.guiado)) continue;
+      for (let k = 0; k < kb.intentos; k++) {
+        if (MS.engana(sh.m, f, p)) {
+          sh.tgt = f;
+          sv.enganados++;
+          break;
+        }
+      }
+    }
+    L.luz(s.luces, f.x, f.y, 18, '#fff2c0', 0.12);
+    fx('bengalas', sfx.flare, { vol: 0.32, rate: 1.05 + sv.i * 0.025, dur: 0.16 }, p.x);
+    sv.i++;
+    if (sv.i >= SALVA_N) {
+      if (sv.enganados) {
+        pop(p.x, p.y + 18, sv.enganados > 1 ? `¡${sv.enganados} misiles engañados!` : '¡Misil engañado!', P.gold);
+        sfx.star();
+      }
+      s.salva = null;
+    }
   }
 
   /* ── Mini-missions, hints and the silent help ── */
@@ -2742,7 +2854,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (!s.tienda) s.transT -= dt;
         s.inv = Math.max(s.inv, 1);
         mando.x = 1;
-        mando.y = clamp((260 - p.y) / 200, -0.6, 0.6);
+        mando.y = 0;
         mando.gas = 1;
         if (before > TRANS_T - 1 && s.transT <= TRANS_T - 1) {
           s.nitroCd = 0;
@@ -2775,6 +2887,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           p.rumbo = 0;
           p.alabeo = 1;
           s.flashMap = 1;
+          // A moment of grace on arrival, so nothing there catches the plane off guard.
+          s.inv = Math.max(s.inv, 2.5);
+          s.gracia = Math.max(s.gracia, 1.2);
           s.banner = { oceano: '🌊 ¡Frente a San Antonio, mar adentro!', valparaiso: '🏘️ ¡Bienvenido a Valparaíso!', tormenta: '⛈️ ¡Tormenta! Solo cazas', valle: '🏠 ¡De vuelta en San Antonio!' }[destino];
           if (destino === 'tormenta') p.y = 700;
           window.setTimeout(() => {
@@ -2782,10 +2897,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }, 2200);
         }
       }
-      // The edges of the map turn the plane back (no flying off screen).
-      if (p.x < 90 && Math.cos(p.rumbo) < 0.3) mando.x = 1;
-      if (p.x > LEVEL - 90 && Math.cos(p.rumbo) > -0.3) mando.x = -1;
-      if (p.x < 90 || p.x > LEVEL - 90) mando.y = Math.max(mando.y, 0);
+      // The edges of the map turn the plane back (no flying off screen) — not during the trip.
+      if (s.transT <= 0) {
+        if (p.x < 90 && Math.cos(p.rumbo) < 0.3) mando.x = 1;
+        if (p.x > LEVEL - 90 && Math.cos(p.rumbo) > -0.3) mando.x = -1;
+        if (p.x < 90 || p.x > LEVEL - 90) mando.y = Math.max(mando.y, 0);
+      }
       if (s.despegue === 'subiendo') {
         s.despT += dt;
         s.inv = Math.max(s.inv, 0.5);
@@ -2798,7 +2915,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         s.gracia -= dt;
         mando.y = Math.max(mando.y, 0.4);
       }
-      const vuela = !s.despegue;
+      // The trip to a new map is a guided, unbreakable flight: level, clear of the ground, to the right.
+      const viaje = s.transT > 0 && s.mode === 'play' && !s.dead;
+      if (viaje) vueloGuiado(p, dt);
+      const vuela = !s.despegue && !viaje;
       for (const ev of vuela ? FV.pasoAvion(p, s.spec.id, mando, dt, ground, top, true) : []) {
         if (ev.tipo === 'toqueSuelo' && ev.velocidad > 35 && s.mode === 'play') {
           // A hard crash into the ground blows the plane up at once; a scrape costs a part.
@@ -2933,7 +3053,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (!s.congelado) {
         firePlayer();
         fireGun(dt);
-        if (input.nuke && !s.nukeWasDown && s.nukes > 0) detonarNuclear();
+        if (input.nuke && !s.nukeWasDown && s.nukes > 0 && !s.nuke) soltarNuke();
         if (input.tonel && !s.tonelWasDown) tonel();
         acrobacias(dt);
       }
@@ -3655,13 +3775,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.shells = s.shells.filter((sh) => sh.fuse >= 0);
 
     // Flares, smoke, shards, crates.
+    stepSalva(dt);
+    stepNuke(dt);
     for (const f of s.flareBodies) {
       FV.pasoBengala(f, dt, wind);
       f.t += dt;
       if (f.tipo === 'holograma') L.luz(s.luces, f.x, f.y, 14, '#7af0ff', 0.05);
       else if (f.tipo !== 'chaff') {
-        L.luz(s.luces, f.x, f.y, f.tipo === 'trampa' ? 20 : 16, f.tipo === 'trampa' ? '#ffc070' : '#ffe9a0', 0.06);
-        if (Math.random() < dt * (f.tipo === 'trampa' ? 32 : 20)) puff(f.x, f.y, 1, false, 0.5);
+        L.luz(s.luces, f.x, f.y, f.tipo === 'trampa' ? 20 : 18, f.tipo === 'trampa' ? '#ffc070' : '#fff2c0', 0.07);
+        // A thick white smoke trail: the arcs of the burst stay drawn in the sky for a moment.
+        if (Math.random() < dt * 50) puff(f.x, f.y, rand(0.6, 1), false, 0.7, 0, 3);
       }
     }
     s.flareBodies = s.flareBodies.filter((f) => f.t < 2.6 && f.y > ground(f.x));
@@ -4045,6 +4168,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     for (const f of s.flareBodies) AD.drawBengalaTipo(g, f.tipo, sx(f.x), sy(f.y), s.t + f.t);
+    if (s.nuke) dibujarNuke(sx(s.nuke.x), sy(s.nuke.y), s.nuke.t);
     for (const b of s.bombs) {
       if (b.sub) AD.drawSubmunicion(g, sx(b.x), sy(b.y), -b.rumbo, s.t);
       else AD.drawBombaTipo(g, b.tipo, sx(b.x), sy(b.y), -b.rumbo);
