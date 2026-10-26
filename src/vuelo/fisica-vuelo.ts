@@ -454,7 +454,8 @@ function subpaso(
 
   // --- half-roll (rate slowed until the wing is unloaded) ---------------
   const descargado = clamp(1 - Math.abs(alfaG) / (0.6 * as), 0.25, 1);
-  const vr = (PI / p.tiempoTonel) * h * descargado;
+  // Arcade-quick half roll (×2 the plane's rate) so reversals flow.
+  const vr = (PI / (p.tiempoTonel * 0.5)) * h * descargado;
   phi += clamp(e.tonelObjetivo - phi, -vr, vr);
   a.alabeo = Math.cos(phi);
 

@@ -336,9 +336,9 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
   g.translate(Math.round(x), Math.round(y));
   // Quantized so the nearest-neighbour rotation doesn't shimmer every frame.
   // Without a wing it flies a little crooked.
-  g.rotate(Math.round(angle / 0.05) * 0.05 + (lost.includes('ala') ? 0.05 : 0));
-  const sy = Math.abs(roll) < 0.25 ? 0.25 * Math.sign(roll || 1) : Math.round(roll * 4) / 4;
-  g.scale(1, sy);
+  // Fine steps keep the turn smooth; the half roll is a clean flip, no squash.
+  g.rotate(Math.round(angle / 0.02) * 0.02 + (lost.includes('ala') ? 0.05 : 0));
+  g.scale(1, roll >= 0 ? 1 : -1);
   // The pilot's scarf flaps behind the cockpit.
   const [sx0, sy0] = L.scarf;
   for (let i = 0; i < 4; i++) {
