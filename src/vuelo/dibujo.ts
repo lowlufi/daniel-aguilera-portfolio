@@ -1675,13 +1675,16 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   }
 
   // Barrancas: concrete stairs with railings, a corner store and lamp posts.
-  for (const x of [1160, 1290, 1560, 1630]) if (libre(x)) {
+  for (const x of [1160, 1290, 1630]) if (libre(x)) {
     escalinata(g, x, surfY(x));
     casasPareadas(g, x + 16, surfY(x) - 15, surfY, hash(x, 11));
   }
   if (libre(1420)) almacen(g, 1420, surfY(1440));
   if (libre(1200)) cartel(g, 1196, surfY(1196), 'JUANASPE', '#c0605a');
   if (libre(1490)) casaNelo(g, 1486, surfY(1510));
+  // Beside Ñelo's house: three tall poplars and the neighbourhood's luchador, flexing.
+  for (const [i, x] of [1546, 1558, 1570].entries()) if (libre(x)) alamo(g, x, surfY(x), i);
+  if (libre(1590)) luchador(g, 1590, surfY(1590));
   for (let x = 1120; x < 1700; x += 70) if (libre(x) && Math.abs(x - 1440) > 40 && Math.abs(x - 1510) > 34 && Math.abs(x - 1220) > 26) faro(g, x, surfY(x));
   // The port: containers, bollards, a fried-fish stall, sea lions and pelicans on posts.
   for (let x = 1730; x < 2700; x += 50 + (hash(x, 5) % 50)) {
@@ -2022,6 +2025,70 @@ function laguna(g: Ctx, x: number, y: number) {
     R(g, x + dx, y - h + 2, 1, h, '#8a9a50');
     R(g, x + dx, y - h, 1, 2, '#8a6a40');
   }
+}
+
+/** A Lombardy poplar: a tall, narrow column of leaves on a short trunk. */
+function alamo(g: Ctx, x: number, y: number, seed: number) {
+  const H = 40 + ((seed * 5) % 3) * 4;
+  R(g, x - 1, y - 7, 2, 7, '#6a4a32');
+  R(g, x - 1, y - 7, 1, 7, '#8a6a48');
+  // The crown, widest a third of the way up, tapering to a point.
+  for (let j = 0; j < H; j++) {
+    const k = j / H;
+    const w = Math.max(1, Math.round(4 * Math.sin(Math.PI * Math.min(1, k * 1.25 + 0.05))));
+    const yy = y - 6 - j;
+    R(g, x - w - 1, yy, w * 2 + 2, 1, '#2e5a32');
+    R(g, x - w, yy, w * 2, 1, '#4a8a3e');
+    // Light from the left, darker leaf clumps on the right.
+    if ((j + seed) % 3 === 0) R(g, x - w, yy, Math.max(1, w - 1), 1, '#7ab84e');
+    if ((j * 7 + seed) % 5 === 0) R(g, x + w - 2, yy, 2, 1, '#3a6e34');
+  }
+}
+
+/** An original masked luchador with a big Mexican moustache, double-biceps pose. */
+function luchador(g: Ctx, x: number, y: number) {
+  const PIEL = '#d89a6a', PIEL0 = '#a86a42', MASK = '#d0306a', MASK1 = '#ffd84a', N = '#2a2030';
+  // Boots and tights.
+  R(g, x - 5, y - 4, 4, 4, MASK);
+  R(g, x + 1, y - 4, 4, 4, MASK);
+  R(g, x - 5, y - 1, 4, 1, MASK1);
+  R(g, x + 1, y - 1, 4, 1, MASK1);
+  R(g, x - 5, y - 10, 10, 6, '#3a5ab0');
+  R(g, x - 5, y - 10, 10, 1, MASK1);
+  R(g, x - 1, y - 9, 2, 5, '#2a3a80');
+  // Broad chest, abs and a belt buckle.
+  R(g, x - 7, y - 20, 14, 10, PIEL);
+  R(g, x - 6, y - 19, 5, 3, '#e8b088');
+  R(g, x + 1, y - 19, 5, 3, '#e8b088');
+  R(g, x, y - 19, 1, 9, PIEL0);
+  for (const yy of [-15, -13]) R(g, x - 3, y + yy, 6, 1, PIEL0);
+  R(g, x - 2, y - 11, 4, 2, MASK1);
+  // Arms up, flexing: shoulders, big biceps, fists by the head.
+  for (const s of [-1, 1]) {
+    const sx = x + s * 8;
+    R(g, s < 0 ? sx - 3 : sx, y - 21, 4, 4, PIEL);
+    D.disc(g, sx + s * 3, y - 24, 3, PIEL);
+    R(g, sx + s * 3 - 1, y - 26, 2, 1, '#e8b088');
+    R(g, sx + s * 2 - 1, y - 31, 3, 6, PIEL);
+    R(g, sx + s * 2 - 2, y - 33, 4, 3, PIEL0);
+  }
+  // The mask: pink with gold flames around the eyes, laces at the back.
+  D.disc(g, x, y - 26, 5, MASK);
+  R(g, x - 5, y - 27, 10, 2, MASK);
+  R(g, x - 4, y - 28, 3, 2, MASK1);
+  R(g, x + 1, y - 28, 3, 2, MASK1);
+  R(g, x - 3, y - 28, 2, 1, P.white);
+  R(g, x + 2, y - 28, 2, 1, P.white);
+  R(g, x - 2, y - 28, 1, 1, N);
+  R(g, x + 2, y - 28, 1, 1, N);
+  R(g, x - 1, y - 32, 2, 3, MASK1);
+  R(g, x, y - 31, 1, 2, '#ff8a3c');
+  // Open mouth area of the mask with a thick horseshoe moustache.
+  R(g, x - 3, y - 25, 6, 3, PIEL);
+  R(g, x - 4, y - 25, 8, 1, N);
+  R(g, x - 4, y - 24, 1, 3, N);
+  R(g, x + 3, y - 24, 1, 3, N);
+  R(g, x - 1, y - 23, 2, 1, '#8a3a3a');
 }
 
 /** A friendly little house with a garden fence and its name plate: «CASA DEL ÑELO». */

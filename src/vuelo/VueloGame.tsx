@@ -295,6 +295,12 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const [avion, setAvion] = useState<Avion | null>(null);
   const [bomba, setBomba] = useState<BombaTipo | null>(null);
   const cerrarHangar = useCallback(() => setHangar(false), []);
+  // Mid-game the hangar stops the world: no engine, wind or battle sound behind it.
+  useEffect(() => {
+    if (phase !== 'play' || !hangar) return;
+    game.current?.setPaused(true);
+    return () => game.current?.setPaused(false);
+  }, [phase, hangar]);
   const [result, setResult] = useState<Result | null>(null);
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(readMuted);
