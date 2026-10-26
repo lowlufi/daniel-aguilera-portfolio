@@ -231,7 +231,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   useEffect(() => {
     if (phase !== 'intro') return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat) return;
+      // Tab and shortcuts (reload, devtools…) are left alone.
+      if (e.repeat || e.code === 'Tab' || e.ctrlKey || e.metaKey || e.altKey || /^F\d+$/.test(e.code)) return;
       e.preventDefault();
       advanceIntro();
     };
@@ -261,11 +262,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setPlane(m);
     sfx.select();
   }, []);
+  const confirmTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(confirmTimer.current), []);
   const confirmar = useCallback(() => {
     if (confirmado) return;
     setConfirmado(plane);
     jingleStart();
-    window.setTimeout(() => {
+    confirmTimer.current = window.setTimeout(() => {
       setConfirmado(null);
       play();
     }, 1300);
@@ -351,7 +354,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
       // Esc goes back from the credits and the hangar (Enter uses the focused button everywhere).
-      if (e.code === 'Escape' && (phase === 'creditos' || phase === 'menu')) setPhase('titulo');
+      if (e.code === 'Escape' && (phase === 'creditos' || (phase === 'menu' && !confirmado))) setPhase('titulo');
     };
     const onHide = () => {
       if (document.hidden && phase === 'play' && !paused) togglePause();
@@ -362,7 +365,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('visibilitychange', onHide);
     };
-  }, [togglePause, play, phase, paused]);
+  }, [togglePause, play, phase, paused, confirmado]);
 
   /*
    * Touch: no sliding. Hold the left half of the screen to turn the nose
