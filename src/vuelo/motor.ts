@@ -161,7 +161,7 @@ const PART_EFFECT: Record<Parte, Partial<FV.Dano>> = {
   bodega: { arrastre: 1.2 },
 };
 const PART_NAME: Record<Parte, string> = { cola: 'la cola', ala: 'un ala', motor: 'el motor', cabina: 'la cabina', bodega: 'la bodega' };
-const LIVES = 3;
+const LIVES = 4;
 /** Upgrades bought with ⭐ points between waves: each stat goes 0…5, a level costs level+1. */
 export type Mejorable = 'dano' | 'salud' | 'defensa' | 'municion';
 const NIVEL_MAX = 5;
@@ -584,6 +584,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
   /** Splash columns where things hit the sea: screen-independent, world coords. */
   const splashes: { x: number; t: number }[] = [];
+  /** True over open sea (not the island). */
+  const sobreMar = (x: number) => (mapaActual === 'oceano' || mapaActual === 'tormenta') && x > ISLA;
+  let chapoteoT = 0;
+  let rozarT = 0;
+  /** A small spout where a bullet or a pellet hits the water, with a quiet plop now and then. */
+  function chapoteo(x: number, fuerza: number) {
+    VFX.salpicar(s.fx, x, OC.NIVEL_MAR, fuerza, still || s.calma);
+    if (splashes.length < 30 && Math.random() < 0.35) splashes.push({ x, t: 0.45 });
+    if (!s.attract && chapoteoT <= 0) {
+      chapoteoT = 0.12;
+      AB.salpicadura(panOf(x), 0.4);
+    }
+  }
 
   /** Digs a round crater into the terrain and the painted ground strip. */
   function crater(x: number, y: number, r: number, log = true) {
@@ -1242,7 +1255,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // From wave 2 on, a lost game can carry on from the same wave (score back to 0).
     writeSave(
       s.wave >= 2
-        ? { v: 1, pilot: s.spec.id, wave: s.wave, score: 0, kills: 0, lives: 3, lost: [], cap: { ...s.cap }, bridges: s.bridges, meta: META_MAX, bossFor: s.bossFor, bossCount: s.bossCount, craters: s.craters, mapa: s.mapa, enValpo: s.enValpo, jefeFor: s.jefeFor, at: Date.now() }
+        ? { v: 1, pilot: s.spec.id, wave: s.wave, score: 0, kills: 0, lives: LIVES, lost: [], cap: { ...s.cap }, bridges: s.bridges, meta: META_MAX, bossFor: s.bossFor, bossCount: s.bossCount, craters: s.craters, mapa: s.mapa, enValpo: s.enValpo, jefeFor: s.jefeFor, at: Date.now() }
         : null,
     );
     const record = s.score > s.best;
@@ -1303,7 +1316,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (y - ground(x) < ex.radio * 0.6 && from !== 'raton') crater(x, Math.min(y, ground(x) + 2), ex.radio * (energy >= 5 ? 1.1 : 0.8));
     // Energies span 0.6 (flak) to 10 (bomb); effects scale with the cube root, like the blast.
     const size = Math.cbrt(energy);
-    const enAgua = mapaActual === 'oceano' && x > ISLA && y - OC.NIVEL_MAR < ex.radio;
+    const enAgua = sobreMar(x) && y - OC.NIVEL_MAR < ex.radio;
     VFX.explosion(s.fx, x, y, energy, { suelo: y - ground(x) < ex.radio * 0.6, quieto: still || s.calma, color: enAgua ? 'agua' : undefined });
     const ce = Math.cbrt(Math.max(0.1, energy));
     L.luz(s.luces, x, y, Math.min(48, 14 + 10 * ce), '#ffd27a', 0.25 + 0.08 * ce);
@@ -1422,7 +1435,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
   }
   /** Damage multiplier from the «daño» upgrade. */
-  const danoMul = () => 1 + 0.15 * s.niv.dano;
+  const danoMul = () => 1.35 * (1 + 0.15 * s.niv.dano);
   /** Most slots a weapon can have: the base cap plus the «munición» upgrade. */
   const capMax = (k: Arma) => CAP_MAX[k] + s.niv.municion;
   /** The «munición» upgrade adds one slot of each weapon per level (and fills them). */
@@ -2049,7 +2062,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Two guns side by side with the upgrade, one otherwise.
     for (const off of doble ? [-3, 3] : [0]) {
       const ox = -Math.sin(p.rumbo) * off, oy = Math.cos(p.rumbo) * off;
-      s.bullets.push({ x: p.x + Math.cos(p.rumbo) * nose + ox, y: p.y + Math.sin(p.rumbo) * nose + oy, vx: p.vx + Math.cos(a) * 480, vy: p.vy + Math.sin(a) * 480, t: 0, life: 0.85 });
+      s.bullets.push({ x: p.x + Math.cos(p.rumbo) * nose + ox, y: p.y + Math.sin(p.rumbo) * nose + oy, vx: p.vx + Math.cos(a) * 680, vy: p.vy + Math.sin(a) * 680, t: 0, life: 2.2 });
     }
     if (!s.attract) AB.metralla(panOf(p.x));
     L.luz(s.luces, p.x + Math.cos(p.rumbo) * nose, p.y + Math.sin(p.rumbo) * nose, 6, '#ffe48a', 0.04);
@@ -2059,13 +2072,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function stepBullets(dt: number) {
     for (const b of s.bullets) {
       b.t += dt;
-      b.vy -= FA.GRAVEDAD * 0.25 * dt;
+      b.vy -= FA.GRAVEDAD * 0.06 * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       let hit = false;
       if (b.y <= ground(b.x)) {
         hit = true;
-        puff(b.x, ground(b.x) + 1, 1, false, 0.4);
+        if (sobreMar(b.x)) chapoteo(b.x, 0.35);
+        else puff(b.x, ground(b.x) + 1, 1, false, 0.4);
       }
       for (const c of s.cars) {
         if (hit) break;
@@ -2432,7 +2446,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         mando.y = Math.max(mando.y, 0.4);
       }
       const vuela = !s.despegue;
-      for (const ev of vuela ? FV.pasoAvion(p, s.spec.id, mando, dt, ground, top) : []) {
+      for (const ev of vuela ? FV.pasoAvion(p, s.spec.id, mando, dt, ground, top, true) : []) {
         if (ev.tipo === 'toqueSuelo' && ev.velocidad > 35 && s.mode === 'play') {
           // A hard crash into the ground blows the plane up at once; a scrape costs a part.
           if (s.gracia > 0) {
@@ -2475,6 +2489,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const nx = -Math.sin(p.rumbo) * 4, ny = Math.cos(p.rumbo) * 4;
         puff(p.x + bx + nx, p.y + by + ny, 1, false, 0.7, p.vx * 0.1, p.vy * 0.1);
         puff(p.x + bx - nx, p.y + by - ny, 1, false, 0.7, p.vx * 0.1, p.vy * 0.1);
+      }
+      // Skimming the sea: a spray wake behind the plane and a rooster tail when very low.
+      chapoteoT -= dt;
+      rozarT -= dt;
+      const rasante = p.y - OC.NIVEL_MAR;
+      if (sobreMar(p.x) && rasante < 34 && rasante > -2 && speed > 60 && rozarT <= 0) {
+        const k = 1 - rasante / 34;
+        rozarT = 0.05 - 0.025 * k;
+        const tras = p.x - Math.sign(p.vx || 1) * (6 + Math.random() * 6);
+        VFX.salpicar(s.fx, tras, OC.NIVEL_MAR, 0.25 + k * Math.min(1.2, speed / 260), still || s.calma);
+        puff(tras, OC.NIVEL_MAR + 2 + Math.random() * 4 * k, 1, false, 0.35 + 0.4 * k, -p.vx * 0.15, 12 + 30 * k);
+        if (k > 0.6 && splashes.length < 30 && Math.random() < 0.25) splashes.push({ x: tras, t: 0.3 });
+        if (!s.attract && k > 0.4 && Math.random() < 0.08) AB.salpicadura(panOf(p.x), 0.3 + 0.5 * k);
       }
       // Torn-off parts smoke: black and fiery from the engine, grey elsewhere.
       s.smokeT -= dt;
@@ -2912,7 +2939,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           // Small arms chip away: every third pellet tears off a part.
           s.chip++;
           s.hurtFlash = Math.max(s.hurtFlash, 0.12);
-          if (s.chip >= 3) {
+          if (s.chip >= 4) {
             s.chip = 0;
             hurtPlane(1, q.x, q.y);
           } else pop(q.x, q.y + 8, '¡Tic!', P.metal);
@@ -2920,6 +2947,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         else blast(q.x, q.y, FA.ENERGIA.obus, 'raton', 1);
       } else if (st !== 'vuela') {
         if (q.tipo === 'mina') blast(q.x, q.y, FA.ENERGIA.obus, 'nadie', 0);
+        else if (sobreMar(q.x) && q.y <= ground(q.x) + 3) chapoteo(q.x, q.tipo === 'balin' ? 0.3 : 0.8);
         q.t = -1;
       }
     }
@@ -3616,39 +3644,34 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
     if (s.mapa === 'tormenta') dibujarTormenta(vw, vh, sx, sy);
 
-    // Sense of speed: streaks rushing past with the nitro (and a few at top speed).
-    if (s.mode === 'play' && !s.dead && !(still || s.calma)) {
+    // Sense of speed with the nitro: a few soft air streaks at the edges of the frame, fading
+    // out at the tail and kept clear of the plane so they never clutter the action.
+    if (s.mode === 'play' && !s.dead && s.nitroT > 0 && !(still || s.calma)) {
       const v = Math.hypot(p.vx, p.vy);
-      const top = FV.PARAMS[s.spec.id].velMax;
-      const k = s.nitroT > 0 ? 1 : clamp((v - top * 0.85) / (top * 0.3), 0, 0.5);
-      if (k > 0) {
-        const ux = p.vx / (v || 1), uy = -p.vy / (v || 1);
-        const n = Math.round(46 * k);
-        g.globalAlpha = 0.55 * k + 0.15;
-        for (let i = 0; i < n; i++) {
-          const seed = i * 97.31;
-          const len = 14 + ((i * 37) % 40) * k;
-          const off = (s.t * 900 + seed * 13) % (vw + vh);
-          const cx = ((seed * 7.3) % vw) - ux * off * 0.6;
-          const cy = ((seed * 3.1) % vh) - uy * off * 0.6;
-          const x0 = ((cx % vw) + vw) % vw, y0 = ((cy % vh) + vh) % vh;
-          g.strokeStyle = i % 3 ? '#ffffff' : '#bfe8ff';
-          g.lineWidth = 1;
-          g.beginPath();
-          g.moveTo(Math.round(x0), Math.round(y0));
-          g.lineTo(Math.round(x0 - ux * len), Math.round(y0 - uy * len));
-          g.stroke();
-        }
-        g.globalAlpha = 1;
-        if (s.nitroT > 0) {
-          // A warm edge glow, like the air burning at the frame.
-          g.globalAlpha = 0.12;
-          g.fillStyle = '#ffb347';
-          g.fillRect(0, 0, vw, 3);
-          g.fillRect(0, vh - 3, vw, 3);
-          g.globalAlpha = 1;
+      const ux = p.vx / (v || 1), uy = -p.vy / (v || 1);
+      const px = sx(p.x), py = sy(p.y);
+      const libre = Math.min(vw, vh) * 0.32;
+      const fade = Math.min(1, s.nitroT / 0.4);
+      for (let i = 0; i < 22; i++) {
+        const seed = i * 97.31;
+        const len = 18 + ((i * 37) % 26);
+        const off = (s.t * 1100 + seed * 13) % (vw + vh);
+        const cx = ((seed * 7.3) % vw) - ux * off * 0.6;
+        const cy = ((seed * 3.1) % vh) - uy * off * 0.6;
+        const x0 = ((cx % vw) + vw) % vw, y0 = ((cy % vh) + vh) % vh;
+        if (Math.hypot(x0 - px, y0 - py) < libre) continue;
+        // Head bright, tail dissolving in 2-px steps: reads as pixel art, not as a vector line.
+        for (let j = 0; j < len; j += 2) {
+          g.globalAlpha = fade * 0.35 * (1 - j / len);
+          A.R(g, Math.round(x0 - ux * j), Math.round(y0 - uy * j), 1, 1, i % 3 ? '#ffffff' : '#cfeeff');
         }
       }
+      // A warm edge glow, like the air burning at the frame.
+      g.globalAlpha = 0.1 * fade;
+      g.fillStyle = '#ffb347';
+      g.fillRect(0, 0, vw, 3);
+      g.fillRect(0, vh - 3, vw, 3);
+      g.globalAlpha = 1;
     }
 
     // Enemy markers: a small red chevron over every enemy in view, so none blends into the scenery.

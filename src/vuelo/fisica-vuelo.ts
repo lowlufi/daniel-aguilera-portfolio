@@ -294,8 +294,13 @@ export function nuevoAvion(m: ModeloAvion, x: number, y: number, haciaDerecha = 
 
 const H_MAX = 1 / 240;
 
+/** The player's planes: the same airframes, a little more agile (harder pulls, quicker pitch and roll). */
+const AGILES = Object.fromEntries(
+  Object.entries(PARAMS).map(([k, p]) => [k, { ...p, cargaMax: p.cargaMax * 1.2, wCabeceo: p.wCabeceo * 1.2, tiempoTonel: p.tiempoTonel * 0.8 }]),
+) as Record<ModeloAvion, ParamsAvion>;
+
 export function pasoAvion(
-  a: Avion, m: ModeloAvion, mando: Mando, dt: number, suelo: Suelo, techo: number,
+  a: Avion, m: ModeloAvion, mando: Mando, dt: number, suelo: Suelo, techo: number, agil = false,
 ): EventoVuelo[] {
   const ev: EventoVuelo[] = [];
   if (!(dt > 0)) return ev;
@@ -309,7 +314,7 @@ export function pasoAvion(
   const tch = Number.isFinite(techo) ? techo : 1e9;
   let impacto = -1;
   for (let i = 0; i < n; i++) {
-    const r = subpaso(a, m, mx, my, gas, h, suelo, tch, ev);
+    const r = subpaso(a, m, mx, my, gas, h, suelo, tch, ev, agil);
     if (r > impacto) impacto = r;
   }
   if (impacto >= 0) ev.push({ tipo: 'toqueSuelo', velocidad: impacto });
@@ -320,9 +325,9 @@ export function pasoAvion(
 /** One integration sub-step. Returns the ground impact speed (≥0) or -1. */
 function subpaso(
   a: Avion, m: ModeloAvion, mx: number, my: number, gas: number, h: number,
-  suelo: Suelo, techo: number, ev: EventoVuelo[],
+  suelo: Suelo, techo: number, ev: EventoVuelo[], agil: boolean,
 ): number {
-  const p = PARAMS[m];
+  const p = (agil ? AGILES : PARAMS)[m];
   const e = estado(a);
   const dn = danos.get(a) ?? SANO;
   e.t += h;
