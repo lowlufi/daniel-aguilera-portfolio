@@ -593,6 +593,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
   /** Splash columns where things hit the sea: screen-independent, world coords. */
   const splashes: { x: number; t: number }[] = [];
+  /** The minimap's terrain, cached until the ground changes. */
+  const miniTerreno = { clave: '', cv: document.createElement('canvas') };
   /** Scratch canvas to tint a sinking plane blue. */
   const aguaTinte = Object.assign(document.createElement('canvas'), { width: 80, height: 60 });
   /** True over open sea (not the island). */
@@ -632,6 +634,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (HEIGHTS[xi] > bottom) HEIGHTS[xi] = Math.max(4, bottom, baseAt(xi) - 18);
       // A scorched rim of deep dirt along the new surface.
       const h = Math.round(HEIGHTS[xi]);
+      // The disc may have cut below the capped floor: fill that back with deep earth.
+      const hueco = row(Math.round(bottom)) - (row(h) + 3);
+      if (hueco > 0) A.R(sg, xi, row(h) + 3, 1, hueco + 1, P.d1);
       A.R(sg, xi, row(h), 1, 1, P.d0);
       A.R(sg, xi, row(h) + 1, 1, 2, P.d1);
     }
@@ -811,6 +816,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     fighterQueue: 0,
     /** The one-on-one duel with Margarita's fighter is on: nothing else spawns. */
     duelo: false,
+    /** The storm clears halfway through its wave: 0 = full storm, 1 = clear moonlit night. */
+    despeje: 0,
+    tormentaTot: 0,
     /** A flare burst in progress: next flare, its timer, and seekers fooled so far. */
     salva: null as { i: number; t: number; enganados: number } | null,
     /** The nuclear bomb on its way down under a parachute. */
@@ -848,7 +856,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     hudT: 0,
   };
   // The self-playing game behind the title menu makes no sound.
-  callarJuegoSi(() => s.attract);
+  callarJuegoSi(() => s.attract || s.mode !== 'play');
 
   /* ── Sizing ── */
 
@@ -927,7 +935,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     AB.viento(v, p.carga);
     AB.altitud(p.y, v);
     AB.zonaNueva(zonaAltitud(p.y));
-    AB.tormenta(s.mapa === 'tormenta' ? 1 : 0);
+    AB.tormenta(s.mapa === 'tormenta' ? 1 - s.despeje : 0);
     AB.hielo(s.hielo);
     for (const a of s.aereos) {
       if (a.tipo !== 'ovni') continue;
@@ -1583,9 +1591,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** A delayed effect that only happens if the same game is still on. */
   function later(fn: () => void, ms: number) {
     const gen = s.gen;
-    window.setTimeout(() => {
-      if (gen === s.gen) fn();
-    }, ms);
+    const run = () => {
+      if (gen !== s.gen) return;
+      // Paused: wait until the game runs again (no blasts or sounds while paused).
+      if (s.paused) window.setTimeout(run, 100);
+      else fn();
+    };
+    window.setTimeout(run, ms);
   }
 
   /** A flying mouse shot down by the player: points, its balloon, and UFOs leave a prize. */
@@ -1607,6 +1619,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.airQueue = [];
     s.bigQueue = [];
     s.fighterQueue = 6 + 2 * Math.floor((s.wave - 1) / 4);
+    s.tormentaTot = s.fighterQueue;
+    s.despeje = 0;
     s.fighterT = 2;
     s.rayoT = rand(4, 7);
   }
@@ -2444,7 +2458,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         n++;
       }
       if (n) pop(x, y + 30, n > 1 ? `⚡ ¡${n} misiles apagados!` : '⚡ ¡Misil apagado!', '#7af0ff');
-      s.zonas.push({ tipo: 'emp', x, y, r: R2, t: 0, vida: 0.7, tick: 0 });
+      s.zonas.push({ tipo: 'emp', x, y, r: R2, t: 0, vida: 1, tick: 0 });
       L.luz(s.luces, x, y, 80, '#7af0ff', 0.4);
       if (!s.attract) AB.rayoOvni();
     } else blast(x, y, FA.ENERGIA.bombaJugador, 'jugador', 4);
@@ -2616,7 +2630,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (input.bomb && s.bombT <= 0 && s.bombAmmo >= 1) {
       s.bombAmmo--;
       for (let i = 0; i < s.spec.bombs; i++) {
-        s.bombs.push({ ...FA.soltarBomba(p, i), tipo: s.bomba });
+        // A stick of bombs spreads out a little instead of falling as one blob.
+        const sb = FA.soltarBomba(p, i);
+        sb.vx += (i - (s.spec.bombs - 1) / 2) * 14;
+        s.bombs.push({ ...sb, tipo: s.bomba });
         // «Lluvia de bombas»: two more fanned out either side of each one.
         if (s.boost === 'lluvia') for (const dv of [-35, 35]) {
           const b = FA.soltarBomba(p, i);
@@ -3964,6 +3981,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const w of splashes) w.t += dt;
     s.relampago = Math.max(0, s.relampago - dt * 2.5);
     if (s.mapa === 'tormenta' && s.mode === 'play') {
+      // Half the fighters down: the rain stops and the clouds part over a moonlit sea.
+      const caidos = s.tormentaTot - s.fighterQueue - s.fighters.length;
+      const quiere = s.tormentaTot > 0 && caidos >= s.tormentaTot / 2 ? 1 : 0;
+      const antes = s.despeje;
+      s.despeje = clamp(s.despeje + Math.sign(quiere - s.despeje) * dt / 6, 0, 1);
+      if (antes === 0 && s.despeje > 0) {
+        s.banner = '🌙 ¡Se despeja el cielo!';
+        window.setTimeout(() => {
+          if (s.banner.startsWith('🌙')) s.banner = '';
+        }, 2400);
+      }
+      // No more lightning once it's clearing.
+      if (s.despeje > 0.3) s.rayoT = Math.max(s.rayoT, 1);
       s.rayoT -= dt;
       const p = s.plane;
       if (!s.rayo && s.rayoT <= 0) {
@@ -4188,10 +4218,24 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const z of s.zonas) {
       const k = Math.min(1, z.t / 0.4) * Math.min(1, (z.vida - z.t) / 1.2);
       if (z.tipo === 'fuego') AD.drawFuego(g, sx(z.x), sy(z.y), z.r * 2, s.t, k);
-      else if (z.tipo === 'gas') AD.drawGas(g, sx(z.x), sy(z.y), z.r, s.t, k);
+      else if (z.tipo === 'gas') {
+        // The cloud stays above the surface: clip it at the ground under its middle.
+        g.save();
+        g.beginPath();
+        g.rect(0, 0, vw, sy(ground(z.x)) + 2);
+        g.clip();
+        AD.drawGas(g, sx(z.x), sy(z.y), z.r, s.t, k);
+        g.restore();
+      }
       else if (z.tipo === 'hielo') {
         // Frost spread on the ground: pale crystals glinting.
-        g.globalAlpha = 0.75 * k;
+        g.globalAlpha = 0.85 * k;
+        // A continuous white-blue mantle hugging the ground, then the crystals on it.
+        for (let i = -z.r; i <= z.r; i++) {
+          const gy = sy(ground(z.x + i));
+          const edge = 1 - Math.abs(i) / z.r;
+          A.R(g, sx(z.x + i), gy - 1 - Math.round(edge * 2), 1, 2 + Math.round(edge * 2), i % 3 ? '#e6f6ff' : '#bfe8ff');
+        }
         for (let i = -z.r; i <= z.r; i += 3) {
           const hgt = 1 + ((i * 7 + 13) & 3);
           A.R(g, sx(z.x + i), sy(ground(z.x + i)) - hgt, 2, hgt, i % 2 ? '#bfe8ff' : '#e6f6ff');
@@ -4200,12 +4244,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         g.globalAlpha = 1;
       } else {
         // The EMP: a cyan ring racing out, crackling.
-        const rr = z.r * Math.min(1, z.t / z.vida);
-        g.globalAlpha = 0.8 * (1 - z.t / z.vida);
-        for (let a = 0; a < 40; a++) {
-          const an = (a / 40) * Math.PI * 2;
-          const j = (a + Math.floor(s.t * 30)) % 3;
-          A.R(g, Math.round(sx(z.x) + Math.cos(an) * rr), Math.round(sy(z.y) + Math.sin(an) * rr * 0.9) + j - 1, 2, 2, j ? '#7af0ff' : P.white);
+        const k = Math.min(1, z.t / z.vida);
+        g.globalAlpha = 0.9 * (1 - k);
+        for (const [rr, c] of [[z.r * Math.sqrt(k), '#7af0ff'], [z.r * k * 0.7, '#e6fbff']] as const) {
+          const n = Math.max(40, Math.round(rr * 0.9));
+          for (let a = 0; a < n; a++) {
+            const an = (a / n) * Math.PI * 2;
+            const j = (a + Math.floor(s.t * 30)) % 3;
+            A.R(g, Math.round(sx(z.x) + Math.cos(an) * rr), Math.round(sy(z.y) + Math.sin(an) * rr * 0.9) + j - 1, 2, 2, j ? c : P.white);
+          }
         }
         g.globalAlpha = 1;
       }
@@ -4564,12 +4611,22 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       A.R(g, rx - 1, top - 1, rw + 2, H + 2, '#262048');
       for (const z of [500, 1300, 1900]) A.R(g, rx, ht(z), rw, 1, 'rgba(255,255,255,0.08)');
       // Terrain silhouette, sampled once per column.
-      for (let c = 0; c < rw; c++) {
-        const gy = ht(Math.max(0, ground(((c + 0.5) / rw) * LEVEL)));
-        const sea = mapaActual === 'oceano' && (c + 0.5) / rw * LEVEL > ISLA;
-        A.R(g, rx + c, gy, 1, top + H - gy, sea ? '#3a6ab8' : '#4f8a5a');
-        A.R(g, rx + c, gy, 1, 1, sea ? '#9ad8ff' : '#8fd48a');
+      // Painted once into a small canvas, redone only when the terrain changes.
+      const clave = `${mapaActual}|${rw}|${s.craters.length}|${s.bridges.length}|${s.gen}`;
+      if (miniTerreno.clave !== clave) {
+        miniTerreno.clave = clave;
+        miniTerreno.cv.width = Math.max(1, rw);
+        miniTerreno.cv.height = H;
+        const mg = miniTerreno.cv.getContext('2d')!;
+        mg.clearRect(0, 0, rw, H);
+        for (let c = 0; c < rw; c++) {
+          const gy = ht(Math.max(0, ground(((c + 0.5) / rw) * LEVEL))) - top;
+          const sea = mapaActual === 'oceano' && (c + 0.5) / rw * LEVEL > ISLA;
+          A.R(mg, c, gy, 1, H - gy, sea ? '#3a6ab8' : '#4f8a5a');
+          A.R(mg, c, gy, 1, 1, sea ? '#9ad8ff' : '#8fd48a');
+        }
       }
+      g.drawImage(miniTerreno.cv, rx, top);
       // The view the camera shows.
       const v0 = at(s.camX);
       const vwid = Math.max(3, Math.round((vw / LEVEL) * rw));
@@ -4613,18 +4670,48 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** Rain, the lightning bolt (and its warning glow) and the sky flashing white. */
   function dibujarTormenta(vw: number, vh: number, sx: (x: number) => number, sy: (y: number) => number) {
     const calm = still || s.calma;
+    const llueve = 1 - s.despeje;
     // A darker, wetter sky.
-    g.globalAlpha = 0.3;
+    g.globalAlpha = 0.3 * llueve;
     g.fillStyle = '#141226';
     g.fillRect(0, 0, vw, vh);
-    // Slanted rain streaks.
-    g.globalAlpha = 0.5;
-    const n = Math.round((vw * vh) / 900);
+    // Rain: fine and faint, but it reacts — it falls with the wind, slides past with the
+    // plane's speed (streaks lean along the relative wind), brightens in a lightning flash,
+    // patters on the plane and pocks the sea.
+    const p = s.plane;
+    const viento = FV.viento(s.t, p.x, p.y);
+    const rvx = viento * 0.6 - p.vx, rvy = -360 - p.vy;
+    const rv = Math.hypot(rvx, rvy) || 1;
+    const ux = rvx / rv, uy = -rvy / rv;
+    const largo = clamp(rv / 90, 2, 7);
+    g.globalAlpha = (0.16 + 0.35 * s.relampago) * llueve;
+    const n = Math.round(((vw * vh) / 1500) * llueve);
+    const W = vw + 40, H = vh + 40;
     for (let i = 0; i < n; i++) {
-      const x = ((i * 73.13 + (calm ? 0 : s.t * 70)) % (vw + 20)) - 10;
-      const y = ((i * 151.7 + (calm ? 0 : s.t * 420)) % (vh + 20)) - 10;
-      A.R(g, Math.round(x), Math.round(y), 1, 3, '#a8c0f0');
-      A.R(g, Math.round(x) - 1, Math.round(y) + 3, 1, 2, '#a8c0f0');
+      // World-anchored drops: the camera's motion shows in them, not just the clock.
+      const bx = i * 73.13 - s.camX + (calm ? 0 : s.t * viento * 0.6);
+      const by = i * 151.7 + s.camY + (calm ? 0 : s.t * 360);
+      const x = (((bx % W) + W) % W) - 20;
+      const y = (((by % H) + H) % H) - 20;
+      const L2 = largo * (0.7 + ((i * 7) % 5) * 0.12);
+      for (let j = 0; j < L2; j += 1.5) A.R(g, Math.round(x - ux * j), Math.round(y - uy * j), 1, 1, i % 4 ? '#9ab4e0' : '#c8daf8');
+    }
+    // Drops bursting on the plane's nose and wings.
+    if (!s.dead && !calm && llueve > 0.3) {
+      g.globalAlpha = 0.5;
+      const px = sx(p.x), py = sy(p.y);
+      for (let i = 0; i < 4; i++) {
+        const ph = (s.t * 9 + i * 0.27) % 1;
+        A.R(g, Math.round(px + Math.cos(p.rumbo) * 6 - ux * ph * 6 + (i - 2) * 3), Math.round(py - Math.sin(p.rumbo) * 6 - uy * ph * 6 - 3), 1, 1, '#e6f0ff');
+      }
+    }
+    // Rings on the sea surface.
+    g.globalAlpha = 0.35 * llueve;
+    const mar = sy(OC.NIVEL_MAR);
+    if (mar < vh) for (let i = 0; i < 14; i++) {
+      const ph = (s.t * 1.7 + i * 0.37) % 1;
+      const x = ((((i * 97.3 - s.camX) % vw) + vw) % vw);
+      A.R(g, Math.round(x - ph * 3), mar + 1, 1 + Math.round(ph * 6), 1, '#cfe3f0');
     }
     g.globalAlpha = 1;
     const r = s.rayo;

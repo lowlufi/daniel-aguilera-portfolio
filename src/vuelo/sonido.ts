@@ -127,7 +127,7 @@ export function suena(n: Muestra, o: { vol?: number; rate?: number; pan?: number
   return true;
 }
 
-type Loop = { src: AudioBufferSourceNode; gain: GainNode; pan: StereoPannerNode | null };
+type Loop = { src: AudioBufferSourceNode; gain: GainNode; pan: StereoPannerNode | null; quieto?: number };
 const loops = new Map<Motor, Loop>();
 
 /**
@@ -157,6 +157,22 @@ export function motor(n: Motor, vol: number, rate: number, pan = 0) {
     loops.set(n, l);
   }
   const t = ctx.currentTime;
+  // A loop left silent for a while is stopped and freed; it's rebuilt when needed.
+  if (vol < 0.005) {
+    l.quieto = (l.quieto ?? 0) + 1;
+    if (l.quieto > 90) {
+      try {
+        l.src.stop();
+      } catch {
+        /* already stopped */
+      }
+      l.src.disconnect();
+      l.gain.disconnect();
+      l.pan?.disconnect();
+      loops.delete(n);
+      return;
+    }
+  } else l.quieto = 0;
   l.gain.gain.setTargetAtTime(Math.max(0, vol), t, 0.08);
   l.src.playbackRate.setTargetAtTime(Math.max(0.3, Math.min(2.5, rate)), t, 0.12);
   l.pan?.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), t, 0.1);

@@ -21,6 +21,20 @@ function h01(a: number, b: number) {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
+/** A filled pixel disc from a cache: D.disc paints row by row, too slow for big clouds every frame. */
+const discos = new Map<string, HTMLCanvasElement>();
+function disco(g: Ctx, x: number, y: number, r: number, c: string) {
+  const k = `${r}|${c}`;
+  let cv = discos.get(k);
+  if (!cv) {
+    cv = document.createElement('canvas');
+    cv.width = cv.height = r * 2 + 3;
+    D.disc(cv.getContext('2d')!, r + 1, r + 1, r, c);
+    discos.set(k, cv);
+  }
+  g.drawImage(cv, x - r - 1, y - r - 1);
+}
+
 /* ── Bombs ───────────────────────────────────────────────────────────────── */
 
 /** Sprites for the non-plain bombs, nose to +x, centred. */
@@ -170,7 +184,7 @@ export function drawFuego(g: Ctx, x: number, yGround: number, w: number, t: numb
     const sx = X0 + i * 3 + Math.round(Math.sin(t * 2 + i) * 2 + life * 4);
     const sy = Y - 6 - Math.round(life * 26 * (0.6 + k * 0.4));
     g.globalAlpha = a0 * k * 0.45 * (1 - life);
-    D.disc(g, sx, sy, 1 + Math.round(life * 3), '#f0f0f6');
+    disco(g, sx, sy, 1 + Math.round(life * 3), '#f0f0f6');
   }
   // Glowing bed along the ground.
   g.globalAlpha = a0 * (0.5 + 0.4 * k);
@@ -199,12 +213,12 @@ export function drawGas(g: Ctx, x: number, y: number, r: number, t: number, k: n
   const X = Math.round(x), Y = Math.round(y);
   const pr = Math.max(2, Math.round(r * 0.45));
   g.globalAlpha = a0 * k * 0.3;
-  D.disc(g, X, Y, Math.max(2, Math.round(r * 0.6)), '#3a8a3a');
+  disco(g, X, Y, Math.max(2, Math.round(r * 0.6)), '#3a8a3a');
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 + t * 0.6 * (i % 2 ? 1 : -1);
     const d = r * 0.55 * (0.7 + 0.3 * Math.sin(t * 1.3 + i));
     g.globalAlpha = a0 * k * (i % 3 === 1 ? 0.3 : 0.4);
-    D.disc(g, X + Math.round(Math.cos(a) * d), Y + Math.round(Math.sin(a) * d * 0.7), pr, GAS_C[i % 3]);
+    disco(g, X + Math.round(Math.cos(a) * d), Y + Math.round(Math.sin(a) * d * 0.7), pr, GAS_C[i % 3]);
   }
   // A few bright bubbles drifting up.
   g.globalAlpha = a0 * k * 0.7;

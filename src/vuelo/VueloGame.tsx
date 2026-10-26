@@ -146,6 +146,22 @@ function FondoTarjeta({ m }: { m: ModeloAvion }) {
   return <img src={src} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ imageRendering: 'pixelated' }} />;
 }
 
+/** Hangar thumbnails per pilot, made once per session (toDataURL is slow on phones). */
+const MINIS = new Map<ModeloAvion, Record<Avion, string>>();
+function miniaturas(piloto: ModeloAvion) {
+  let out = MINIS.get(piloto);
+  if (!out) {
+    // The pilot is global to the sprite painter: borrow it for the thumbnails and give it back.
+    const antes = dibujo.pilotoActual();
+    dibujo.fijarPiloto(piloto);
+    out = {} as Record<Avion, string>;
+    for (const a of HG.HANGAR) out[a.id] = dibujo.planeSprite(a.id).toDataURL();
+    dibujo.fijarPiloto(antes);
+    MINIS.set(piloto, out);
+  }
+  return out;
+}
+
 /**
  * The hangar: pick the plane (each with its real weapons) and the bomb load.
  * Locked ones show what unlocks them.
@@ -154,15 +170,7 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
   piloto: ModeloAvion; avion: Avion; bomba: BombaTipo; libres: Avion[]; bombas: BombaTipo[];
   onAvion: (a: Avion) => void; onBomba: (b: BombaTipo) => void; onClose: () => void;
 }) {
-  const sprites = useMemo(() => {
-    // The pilot is global to the sprite painter: borrow it for the thumbnails and give it back.
-    const antes = dibujo.pilotoActual();
-    dibujo.fijarPiloto(piloto);
-    const out = {} as Record<Avion, string>;
-    for (const a of HG.HANGAR) out[a.id] = dibujo.planeSprite(a.id).toDataURL();
-    dibujo.fijarPiloto(antes);
-    return out;
-  }, [piloto]);
+  const sprites = useMemo(() => miniaturas(piloto), [piloto]);
   const bombaSprites = useMemo(() => {
     const out = {} as Record<BombaTipo, string>;
     for (const b of HG.TIPOS_BOMBA) {
