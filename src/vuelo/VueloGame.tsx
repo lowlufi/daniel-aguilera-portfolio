@@ -42,6 +42,8 @@ const ELENCO = [
 const SONIDOS_CC0 = ['modusmogulus', 'craigsmith', 'qubodup', 'unfa', 'josecruz98', 'Alxy', 'Anthousai', 'Rocotilos'];
 
 const CHIP = 'inline-flex h-8 [@media(min-height:500px)]:h-10 items-center gap-1 rounded-full bg-[#fff8e7]/95 px-2.5 [@media(min-height:500px)]:px-3 text-xs [@media(min-height:500px)]:text-sm whitespace-nowrap font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] tabular-nums';
+/** The phone HUD: the same chips, small, in one tight row so the sky stays clear. */
+const CHIP_M = 'inline-flex h-6 items-center gap-0.5 rounded-full bg-[#fff8e7]/90 px-1.5 text-[10px] whitespace-nowrap font-black text-[#6b4f3a] shadow-[0_2px_0_rgba(91,70,54,0.2)] tabular-nums';
 const BTN = 'whitespace-nowrap rounded-full bg-[#fff8e7]/95 px-3 md:px-4 h-8 [@media(min-height:500px)]:h-10 text-xs md:text-sm font-extrabold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] hover:-translate-y-0.5 transition-transform';
 const GO = 'rounded-full bg-[#7ccf8a] px-6 py-3 text-base font-black text-[#1d4a26] shadow-[0_4px_0_#4f9c5d] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_1px_0_#4f9c5d] transition-transform';
 
@@ -165,6 +167,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const [muted, setMuted] = useState(readMuted);
   const [touchUi, setTouchUi] = useState(false);
   const [portrait, setPortrait] = useState(false);
+  // Phones get their own layout: compact HUD, small translucent buttons, extras in the pause menu.
+  const movil = touchUi && (phase === 'play' || phase === 'over');
+  const chip = movil ? CHIP_M : CHIP;
+  const [verticalOk, setVerticalOk] = useState(false);
 
   useEffect(() => {
     const g = createVuelo(canvasRef.current!, boxRef.current!, {
@@ -420,7 +426,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       game.current?.nitro();
       lastTap.current = { t: -1e9, side: 0 };
     } else lastTap.current = { t: now, side };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* a pointer that already ended */
+    }
     fingers.current.set(e.pointerId, side);
     applyTurn();
   };
@@ -430,7 +440,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   };
   const throttle = (v: number) => ({
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
-      e.currentTarget.setPointerCapture(e.pointerId);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* a pointer that already ended */
+      }
       game.current?.touch({ gas: v });
     },
     onPointerUp: () => game.current?.touch({ gas: 0 }),
@@ -474,9 +488,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       }
       return !v;
     });
-  const hold = (key: 'fire' | 'bomb' | 'flare' | 'gun' | 'nuke') => ({
+  const hold = (key: 'fire' | 'bomb' | 'flare' | 'gun' | 'nuke' | 'tonel') => ({
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
-      e.currentTarget.setPointerCapture(e.pointerId);
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* a pointer that already ended */
+      }
       game.current?.touch({ [key]: true });
     },
     onPointerUp: () => game.current?.touch({ [key]: false }),
@@ -508,27 +526,27 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
           {phase === 'intro' || phase === 'titulo' || phase === 'creditos' ? null : phase === 'menu' ? (
-            <span className={`${CHIP} px-4`}>✈️ Escuadrón Dui</span>
+            <span className={`${chip} px-4`}>✈️ Escuadrón Dui</span>
           ) : (
             hud && (
               <>
-                <span className={CHIP} title="Aviones que te quedan" aria-label={`Aviones: ${hud.lives}`}>
+                <span className={chip} title="Aviones que te quedan" aria-label={`Aviones: ${hud.lives}`}>
                   ✈️ ×{hud.lives}
                 </span>
                 <span
-                  className={`${CHIP} ${hud.lost.length ? 'ring-2 ring-[#ff4a5a]' : ''}`}
+                  className={`${chip} ${hud.lost.length ? 'ring-2 ring-[#ff4a5a]' : ''}`}
                   title={hud.lost.length ? `Dañado: ${hud.lost.join(', ')}` : 'Avión intacto'}
                   aria-label={`Blindaje: ${hud.hp} de ${hud.hpMax}${hud.lost.length ? `. Perdiste ${hud.lost.join(', ')}` : ''}`}
                 >
                   <Pips n={hud.hp} max={hud.hpMax} on="🛡️" off="💥" />
                   <span className="ml-1 tabular-nums text-[10px] opacity-70">{hud.hp}/{hud.hpMax}</span>
                 </span>
-                <span className={`${CHIP} ${hud.stolen ? 'animate-pulse ring-4 ring-[#ff4a5a]' : ''}`} title="Pescado en la despensa" aria-label={`Despensa: ${hud.meta} de ${hud.metaMax}`}>
+                <span className={`${chip} ${hud.stolen ? 'animate-pulse ring-4 ring-[#ff4a5a]' : ''}`} title="Pescado en la despensa" aria-label={`Despensa: ${hud.meta} de ${hud.metaMax}`}>
                   <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
                 </span>
-                <span className={CHIP}>⭐ {hud.score}</span>
+                <span className={chip}>⭐ {hud.score}</span>
                 {hud.mejoras.coraza > 0 && (
-                  <span className={`${CHIP} text-[#c8507a]`} title="Coraza de la mejora «Salud»: cada una absorbe un golpe" aria-label={`Coraza: ${hud.mejoras.coraza}`}>
+                  <span className={`${chip} text-[#c8507a]`} title="Coraza de la mejora «Salud»: cada una absorbe un golpe" aria-label={`Coraza: ${hud.mejoras.coraza}`}>
                     ❤️ ×{hud.mejoras.coraza}
                   </span>
                 )}
@@ -543,22 +561,22 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   </span>
                 )}
                 {hud.nukes > 0 && (
-                  <span className={`${CHIP} bg-[#f4ffc0] text-[#4a5a1a]`} title="Bomba nuclear: tecla N o botón ☢️">
+                  <span className={`${chip} bg-[#f4ffc0] text-[#4a5a1a]`} title="Bomba nuclear: tecla N o botón ☢️">
                     ☢️ ×{hud.nukes}
                   </span>
                 )}
                 {hud.boost && (
-                  <span className={`${CHIP} animate-pulse bg-[#ffe0f0] text-[#c8507a]`} title="Mejora especial de un avión derribado">
+                  <span className={`${chip} animate-pulse bg-[#ffe0f0] text-[#c8507a]`} title="Mejora especial de un avión derribado">
                     ⭐ {hud.boost} · {hud.boostT} s
                   </span>
                 )}
-                <span className={CHIP}>🌊 {hud.wave} · 🐭 {hud.left}</span>
-                <span className={CHIP} title="Altura">⛰️ {hud.altitude.toLocaleString('es-CL')} m</span>
-                <span className={`${CHIP} max-[899px]:hidden`} title="Viento: empuja las bombas y el humo" aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}>
+                <span className={chip}>🌊 {hud.wave} · 🐭 {hud.left}</span>
+                <span className={chip} title="Altura">⛰️ {hud.altitude.toLocaleString('es-CL')} m</span>
+                <span className={`${chip} max-[899px]:hidden`} title="Viento: empuja las bombas y el humo" aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}>
                   🌬️ {hud.wind < 0 ? '◀'.repeat(Math.min(3, Math.ceil(-hud.wind / 4))) : hud.wind > 0 ? '▶'.repeat(Math.min(3, Math.ceil(hud.wind / 4))) : '·'}
                 </span>
                 <span
-                  className={CHIP}
+                  className={chip}
                   title="Armamento: atrapa los globos de los enemigos para ganar más puestos"
                   aria-label={`Misiles ${hud.ammo} de ${hud.rack}, bombas ${hud.bombs} de ${hud.bombMax}, bengalas ${hud.flares} de ${hud.flareMax}`}
                 >
@@ -597,7 +615,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               {paused ? '▶️' : '⏸️'}
             </button>
           )}
-          {phase === 'play' && hud && (
+          {phase === 'play' && hud && !movil && (
             <button
               type="button"
               aria-label={`Cielo: ${({ auto: 'automático', dia: 'día', tarde: 'tarde', noche: 'noche' } as Record<string, string>)[hud.sky]}. Cambiar`}
@@ -608,28 +626,32 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               {({ auto: '🌄', dia: '☀️', tarde: '🌅', noche: '🌙' } as Record<string, string>)[hud.sky]}
             </button>
           )}
-          {phase === 'play' && hud && hud.zoom[0] > 1 && (
+          {phase === 'play' && hud && hud.zoom[0] > 1 && !movil && (
             <button type="button" aria-label={hud.zoom[1] === hud.zoom[0] - 1 ? 'Volver a acercar' : 'Alejar la cámara'} title="Zoom (Z)" onClick={() => game.current?.zoom()} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
               {hud.zoom[1] ? '🔎' : '🔍'}
             </button>
           )}
-          <button type="button" aria-label={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
-            {muted ? '🔇' : '🔊'}
-          </button>
-          <button type="button" onClick={() => navigate('/')} className={`${BTN} hidden lg:block`}>
-            🏝️ Isla
-          </button>
-          <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} bg-[#ffe3a3] ring-2 ring-[#f0a45d]/60`}>
-            <span className="lg:hidden">Clásica</span>
-            <span className="hidden lg:inline">Versión clásica</span>
-          </button>
+          {!movil && (
+            <>
+              <button type="button" aria-label={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
+                {muted ? '🔇' : '🔊'}
+              </button>
+              <button type="button" onClick={() => navigate('/')} className={`${BTN} hidden lg:block`}>
+                🏝️ Isla
+              </button>
+              <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} bg-[#ffe3a3] ring-2 ring-[#f0a45d]/60`}>
+                <span className="lg:hidden">Clásica</span>
+                <span className="hidden lg:inline">Versión clásica</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {/* Wave banner and missile alarm. */}
       {phase === 'play' && hud?.banner && (
-        <div className="pointer-events-none absolute inset-x-0 top-[22%] z-10 text-center">
-          <span className="inline-block rounded-3xl bg-[#fff8e7]/95 px-6 py-3 text-2xl md:text-3xl font-black text-[#6b4f3a] shadow-[0_5px_0_rgba(91,70,54,0.2)]">
+        <div className={`pointer-events-none absolute inset-x-0 z-10 text-center ${movil ? 'top-[16%]' : 'top-[22%]'}`}>
+          <span className={`inline-block font-black text-[#6b4f3a] shadow-[0_5px_0_rgba(91,70,54,0.2)] ${movil ? 'rounded-2xl bg-[#fff8e7]/85 px-3 py-1 text-sm' : 'rounded-3xl bg-[#fff8e7]/95 px-6 py-3 text-2xl md:text-3xl'}`}>
             {hud.banner}
           </span>
         </div>
@@ -786,6 +808,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <Key k="L" label="Bengalas" />
                 <Key k="H · F" label="Metralla (se calienta)" />
                 <Key k="N" label="Bomba nuclear (de los ovnis)" />
+                <Key k="R" label="Tonel: esquiva misiles" />
                 <Key k="Z · rueda" label="Zoom" />
                 <Key k="Esc" label="Pausa" />
               </ul>
@@ -1018,6 +1041,18 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <button type="button" onClick={toHangar} className={`${BTN} h-12`}>Salir al hangar</button>
               <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Menú principal</button>
             </div>
+            {touchUi && hud && (
+              <div className="mt-3 flex flex-wrap justify-center gap-2">
+                <button type="button" onClick={() => game.current?.cycleSky()} className={`${BTN} h-10`}>
+                  {({ auto: '🌄', dia: '☀️', tarde: '🌅', noche: '🌙' } as Record<string, string>)[hud.sky]} Cielo
+                </button>
+                {hud.zoom[0] > 1 && (
+                  <button type="button" onClick={() => game.current?.zoom()} className={`${BTN} h-10`}>🔍 Zoom</button>
+                )}
+                <button type="button" onClick={toggleMute} className={`${BTN} h-10`}>{muted ? '🔇 Sonido' : '🔊 Sonido'}</button>
+                <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} h-10`}>Versión clásica</button>
+              </div>
+            )}
             <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 text-sm font-black text-[#6b4f3a]">
               <input type="checkbox" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="h-5 w-5 accent-[#f0a45d]" />
               Menos movimiento (sin sacudidas ni destellos fuertes)
@@ -1026,34 +1061,46 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
 
+      {/* Phones held upright: the game is made for landscape. */}
+      {portrait && touchUi && !verticalOk && (phase === 'play' || phase === 'menu') && (
+        <div role="dialog" aria-modal="true" aria-label="Gira el teléfono" className="absolute inset-0 z-[60] grid place-items-center bg-[#120c24]/90 p-6 text-center text-white">
+          <div>
+            <div className="girar-telefono text-6xl">📱</div>
+            <p className="mt-4 text-xl font-black">Gira el teléfono</p>
+            <p className="mt-1 text-sm font-bold text-white/80">Escuadrón Dui se juega en horizontal: así ves el cielo, el suelo y a los ratones.</p>
+            <button type="button" onClick={() => setVerticalOk(true)} className={`${BTN} mt-5 h-10`}>Jugar igual</button>
+          </div>
+        </div>
+      )}
       {phase === 'play' && touchUi && !paused && (
         <>
           <div className="absolute inset-x-0 bottom-0 top-16 z-10 flex touch-none" onPointerDown={onSkyDown} onPointerUp={onSkyUp} onPointerCancel={onSkyUp} onLostPointerCapture={onSkyUp}>
             {/* Each half lights up while held; big round arrows say which way the nose turns. */}
             <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === 1 ? 'bg-white/10' : ''}`}>
-              <span className={`absolute bottom-10 left-5 grid h-16 w-16 place-items-center rounded-full text-3xl font-black text-white ring-2 ring-white/60 drop-shadow ${turning === 1 ? 'bg-white/40' : 'bg-white/15'}`}>⟲</span>
+              <span className={`absolute bottom-6 left-4 grid h-11 w-11 place-items-center rounded-full text-xl font-black text-white ring-2 ring-white/60 drop-shadow ${turning === 1 ? 'bg-white/40' : 'bg-white/15'}`}>⟲</span>
             </div>
             <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === -1 ? 'bg-white/10' : ''}`}>
-              <span className={`absolute bottom-28 right-5 grid h-16 w-16 place-items-center rounded-full text-3xl font-black text-white ring-2 ring-white/60 drop-shadow [@media(max-height:420px)]:bottom-24 ${turning === -1 ? 'bg-white/40' : 'bg-white/15'}`}>⟳</span>
+              <span className={`absolute bottom-[7.5rem] right-4 grid h-11 w-11 place-items-center rounded-full text-xl font-black text-white ring-2 ring-white/60 drop-shadow ${turning === -1 ? 'bg-white/40' : 'bg-white/15'}`}>⟳</span>
             </div>
             {turns < 3 && !hud?.enTierra && (
-              <span className="pointer-events-none absolute bottom-28 left-5 rounded-full bg-[#3a2a6a]/50 px-3 py-1 text-[11px] font-black text-white [@media(max-height:420px)]:bottom-[6.5rem]">
+              <span className="pointer-events-none absolute bottom-20 left-4 rounded-full bg-[#3a2a6a]/50 px-2.5 py-0.5 text-[10px] font-black text-white">
                 Mantén izquierda o derecha para girar · doble toque: 🔥 nitro
               </span>
             )}
           </div>
-          <div className="absolute bottom-5 right-3 z-10 flex items-end gap-2 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
-            <div className="flex flex-col gap-2">
+          <div className="absolute bottom-3 right-3 z-10 flex items-end gap-1.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
+            <div className="flex flex-col gap-1.5">
               <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2🔥' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
                 {hud?.nitro === 'activo' ? '🔥' : '⏩'}
               </TouchButton>
               <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>🛑</TouchButton>
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               <TouchButton label="Bengalas" {...hold('flare')}>✨</TouchButton>
               <TouchButton label="Bomba" {...hold('bomb')}>💣</TouchButton>
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
+              <TouchButton label="Tonel" {...hold('tonel')}>🌀</TouchButton>
               <TouchButton label="Metralla" active={hud?.hot} {...hold('gun')}>💥</TouchButton>
               {!!hud?.nukes && (
                 <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>☢️</TouchButton>
@@ -1072,13 +1119,13 @@ function TouchButton({ label, big, active, children, ...rest }: { label: string;
     <button
       type="button"
       aria-label={label}
-      className={`flex flex-col items-center justify-center rounded-full shadow-[0_4px_0_rgba(91,70,54,0.25)] ring-2 active:translate-y-0.5 ${
-        active ? 'bg-[#ffe3a3] ring-[#f0a45d]' : 'bg-[#fff8e7]/85 ring-white/70'
-      } ${big ? 'h-20 w-20 text-3xl [@media(max-height:420px)]:h-16 [@media(max-height:420px)]:w-16' : 'h-14 w-14 text-xl [@media(max-height:420px)]:h-12 [@media(max-height:420px)]:w-12'} opacity-90`}
+      className={`flex flex-col items-center justify-center rounded-full shadow-[0_3px_0_rgba(91,70,54,0.25)] ring-2 active:translate-y-0.5 active:opacity-100 ${
+        active ? 'bg-[#ffe3a3] ring-[#f0a45d]' : 'bg-[#fff8e7]/70 ring-white/60'
+      } ${big ? 'h-16 w-16 text-2xl' : 'h-11 w-11 text-base'} opacity-80`}
       {...rest}
     >
       <span aria-hidden className="leading-none">{children}</span>
-      <span aria-hidden className="mt-0.5 text-[9px] font-black leading-none text-[#6b4f3a]">{label}</span>
+      <span aria-hidden className="mt-0.5 text-[7px] font-black leading-none text-[#6b4f3a]">{label}</span>
     </button>
   );
 }

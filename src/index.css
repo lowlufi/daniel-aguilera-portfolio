@@ -355,3 +355,24 @@ html.lite .liquid-glass-strong::before {
     animation: none;
   }
 }
+
+/* «Gira el teléfono»: the phone rocks toward landscape. */
+.girar-telefono {
+  display: inline-block;
+  animation: girar-telefono 1.6s ease-in-out infinite;
+}
+@keyframes girar-telefono {
+  0%,
+  30% {
+    transform: rotate(0deg);
+  }
+  60%,
+  100% {
+    transform: rotate(-90deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .girar-telefono {
+    animation: none;
+  }
+}

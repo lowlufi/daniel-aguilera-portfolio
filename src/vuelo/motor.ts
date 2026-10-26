@@ -148,7 +148,7 @@ export type Hud = {
 
 export type Result = { pilot: string; score: number; best: number; wave: number; kills: number; reason: 'avion' | 'despensa'; record: boolean };
 
-export type Controls = { x: number; y: number; gas: number; fire: boolean; bomb: boolean; flare: boolean; gun: boolean; nuke: boolean };
+export type Controls = { x: number; y: number; gas: number; fire: boolean; bomb: boolean; flare: boolean; gun: boolean; nuke: boolean; tonel: boolean };
 
 /* ── Battle damage ─────────────────────────────────────────────────────── */
 
@@ -203,8 +203,8 @@ const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
   chorrillana: { nombre: 'Chorrillana: misil triple', t: 10 },
 };
 /** Super nitro: how long it burns, its push, and the recharge time. */
-const NITRO_T = 2.5;
-const NITRO_ACC = 2.6 * FA.GRAVEDAD;
+const NITRO_T = 3;
+const NITRO_ACC = 4.2 * FA.GRAVEDAD;
 const NITRO_CD = 9;
 /** Seconds holding the nose on an enemy before the missiles lock on. */
 const LOCK_TIME = 1;
@@ -612,7 +612,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       A.R(sg, xi, row(h) + 1, 1, 2, P.d1);
     }
   }
-  const input: Controls = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false };
+  const input: Controls = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false };
   const keys = new Set<string>();
 
   const s = {
@@ -704,6 +704,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
     hielo: 0,
+    /** Aerobatics: the barrel roll in progress (s), its cooldown, and the loop counter (rad). */
+    tonelT: 0,
+    tonelCd: 0,
+    tonelUlt: -9,
+    giroAcc: 0,
+    giroQuieto: 0,
+    tonelWasDown: false,
     /** ⭐ upgrade points and the levels bought; the shop holds the break open while it's up. */
     puntosMejora: 0,
     niv: { dano: 0, salud: 0, defensa: 0, municion: 0 } as Record<Mejorable, number>,
@@ -951,10 +958,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.combo = 0;
     s.comboT = 0;
     // A clean slate: nothing carries over from the title screen's autopilot.
-    Object.assign(input, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false });
+    Object.assign(input, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false });
     s.nukes = 0;
     keys.clear();
-    Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false });
+    Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false });
     s.boost = '';
     s.boostT = 0;
     s.nitroT = 0;
@@ -1365,6 +1372,55 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
 
   const flyingNow = () => s.mode === 'play' && !s.dead;
+
+  /**
+   * The barrel roll (R / 🌀): a quick full roll that throws off guided missiles
+   * close by (half the time) and gives a blink of invulnerability.
+   */
+  function tonel() {
+    if (s.tonelCd > 0 || s.despegue || s.congelado) return;
+    const p = s.plane;
+    s.tonelT = 0.55;
+    s.tonelCd = 1.4;
+    s.inv = Math.max(s.inv, 0.35);
+    let esquivados = 0;
+    for (const sh of s.shots) {
+      if (sh.enemy && sh.tgt === p && sh.m.guiado && Math.hypot(sh.m.x - p.x, sh.m.y - p.y) < 160 && Math.random() < 0.5) {
+        sh.m.guiado = false;
+        esquivados++;
+      }
+    }
+    const doble = s.t - s.tonelUlt < 1.3;
+    s.tonelUlt = s.t;
+    const pts = doble ? 150 : 50;
+    s.score += pts;
+    pop(p.x, p.y + 22, doble ? `🌀 ¡Doble tonel! +${pts}` : esquivados ? `🌀 ¡Tonel! Esquivaste ${esquivados}` : `🌀 ¡Tonel! +${pts}`, '#7ad8ff');
+    if (!s.attract) AB.uf();
+  }
+
+  /** Counts full loops (360° of pitch) and pays for them; a hesitant pull resets it. */
+  function acrobacias(dt: number) {
+    const p = s.plane;
+    s.tonelT = Math.max(0, s.tonelT - dt);
+    s.tonelCd = Math.max(0, s.tonelCd - dt);
+    if (s.despegue) return;
+    const w = p.omega ?? 0;
+    if (Math.abs(w) < 0.6) {
+      s.giroQuieto += dt;
+      if (s.giroQuieto > 0.8) s.giroAcc = 0;
+    } else {
+      s.giroQuieto = 0;
+      if (Math.sign(w) !== Math.sign(s.giroAcc) && Math.abs(s.giroAcc) > 0.5) s.giroAcc = 0;
+      s.giroAcc += w * dt;
+    }
+    if (Math.abs(s.giroAcc) >= Math.PI * 2) {
+      s.giroAcc = 0;
+      s.score += 200;
+      s.nitroCd = Math.max(0, s.nitroCd - 2);
+      pop(p.x, p.y + 24, '🔄 ¡Rizo! +200', P.gold);
+      if (!s.attract) AB.uf();
+    }
+  }
   /** Damage multiplier from the «daño» upgrade. */
   const danoMul = () => 1 + 0.15 * s.niv.dano;
   /** Most slots a weapon can have: the base cap plus the «munición» upgrade. */
@@ -2480,8 +2536,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         firePlayer();
         fireGun(dt);
         if (input.nuke && !s.nukeWasDown && s.nukes > 0) detonarNuclear();
+        if (input.tonel && !s.tonelWasDown) tonel();
+        acrobacias(dt);
       }
       s.nukeWasDown = input.nuke;
+      s.tonelWasDown = input.tonel;
       stepLock(dt);
       stepPistas(dt);
     }
@@ -3327,11 +3386,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // missiles, enemies and effects stand out against any scenery.
     if (!s.sinFiltro) {
       g.globalCompositeOperation = 'saturation';
-      g.globalAlpha = 0.35;
+      g.globalAlpha = 0.45;
       g.fillStyle = '#808080';
       g.fillRect(0, 0, vw, vh);
       g.globalCompositeOperation = 'source-over';
-      g.globalAlpha = theme === 'noche' ? 0.08 : 0.14;
+      g.globalAlpha = theme === 'noche' ? 0.1 : 0.18;
       g.fillStyle = '#2a2048';
       g.fillRect(0, 0, vw, vh);
       g.globalAlpha = 1;
@@ -3528,7 +3587,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     // Banked and top-view frames as it rolls or pulls hard (g smoothed so they don't flicker).
-    if (!s.dead) drawPlaneGiro(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, p.alabeo, s.cargaSuave, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
+    // During a barrel roll the drawn bank spins a full turn (the physics keep flying straight).
+    const giroVisual = s.tonelT > 0 ? Math.cos(Math.PI * 2 * (1 - s.tonelT / 0.55)) * (p.alabeo >= 0 ? 1 : -1) : p.alabeo;
+    if (!s.dead) drawPlaneGiro(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, giroVisual, s.cargaSuave, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
     // Bubble shield from the special upgrade: a shimmering ring around the plane.
     if (s.boost === 'escudo' && !s.dead) {
       const cx = sx(p.x), cy = sy(p.y);
@@ -3554,6 +3615,58 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw);
 
     if (s.mapa === 'tormenta') dibujarTormenta(vw, vh, sx, sy);
+
+    // Sense of speed: streaks rushing past with the nitro (and a few at top speed).
+    if (s.mode === 'play' && !s.dead && !(still || s.calma)) {
+      const v = Math.hypot(p.vx, p.vy);
+      const top = FV.PARAMS[s.spec.id].velMax;
+      const k = s.nitroT > 0 ? 1 : clamp((v - top * 0.85) / (top * 0.3), 0, 0.5);
+      if (k > 0) {
+        const ux = p.vx / (v || 1), uy = -p.vy / (v || 1);
+        const n = Math.round(46 * k);
+        g.globalAlpha = 0.55 * k + 0.15;
+        for (let i = 0; i < n; i++) {
+          const seed = i * 97.31;
+          const len = 14 + ((i * 37) % 40) * k;
+          const off = (s.t * 900 + seed * 13) % (vw + vh);
+          const cx = ((seed * 7.3) % vw) - ux * off * 0.6;
+          const cy = ((seed * 3.1) % vh) - uy * off * 0.6;
+          const x0 = ((cx % vw) + vw) % vw, y0 = ((cy % vh) + vh) % vh;
+          g.strokeStyle = i % 3 ? '#ffffff' : '#bfe8ff';
+          g.lineWidth = 1;
+          g.beginPath();
+          g.moveTo(Math.round(x0), Math.round(y0));
+          g.lineTo(Math.round(x0 - ux * len), Math.round(y0 - uy * len));
+          g.stroke();
+        }
+        g.globalAlpha = 1;
+        if (s.nitroT > 0) {
+          // A warm edge glow, like the air burning at the frame.
+          g.globalAlpha = 0.12;
+          g.fillStyle = '#ffb347';
+          g.fillRect(0, 0, vw, 3);
+          g.fillRect(0, vh - 3, vw, 3);
+          g.globalAlpha = 1;
+        }
+      }
+    }
+
+    // Enemy markers: a small red chevron over every enemy in view, so none blends into the scenery.
+    if (s.mode === 'play' && !s.dead) {
+      const marca = (x: number, y: number) => {
+        const X = sx(x), Y = sy(y);
+        if (X < -10 || X > vw + 10 || Y < -10 || Y > vh + 10) return;
+        const b = Math.floor(s.t * 3) % 2;
+        A.R(g, X - 3, Y - 1 + b, 7, 1, '#3a1a2a');
+        A.R(g, X - 2, Y + b, 5, 1, '#ff4a5a');
+        A.R(g, X - 1, Y + 1 + b, 3, 1, '#ff4a5a');
+        A.R(g, X, Y + 2 + b, 1, 1, '#3a1a2a');
+      };
+      for (const c of s.cars) marca(c.mid.x, c.y + A.VEH_LOOK[c.kind].h + 7);
+      for (const a of s.aereos) marca(a.x, a.y + 14);
+      for (const f of s.fighters) marca(f.a.x, f.a.y + 14);
+      for (const u of s.gigantes) if (u.viva) marca(u.x, u.y + 22);
+    }
 
     // Frost creeping in from the edges as the ice grows; cracks when frozen.
     if (s.hielo > 0.05 && s.mode === 'play') dibujarEscarcha(vw, vh);
@@ -3920,10 +4033,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   const CODES: Record<string, string> = {
     ArrowLeft: 'l', KeyA: 'l', ArrowRight: 'r', KeyD: 'r', ArrowUp: 'u', KeyW: 'u', ArrowDown: 'd', KeyS: 'd',
-    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyL: 'flare', KeyH: 'gun', KeyF: 'gun', KeyN: 'nuke',
+    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyL: 'flare', KeyH: 'gun', KeyF: 'gun', KeyN: 'nuke', KeyR: 'tonel',
     KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
   };
-  const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false };
+  const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false };
   /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none. */
   let turn = 0;
   function syncInput() {
@@ -3937,6 +4050,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     input.flare = keys.has('flare') || touch.flare;
     input.gun = keys.has('gun') || touch.gun;
     input.nuke = keys.has('nuke') || touch.nuke;
+    input.tonel = keys.has('tonel') || touch.tonel;
   }
   const onKey = (e: KeyboardEvent) => {
     const k = CODES[e.code];
@@ -3972,6 +4086,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     usar('nitro');
     pop(s.plane.x, s.plane.y + 18, '¡SUPER NITRO!', '#7ad8ff');
     if (!s.attract) AB.nitro();
+    // Ignition: a sonic ring and a flash behind the plane.
+    VFX.explosion(s.fx, s.plane.x - Math.cos(s.plane.rumbo) * 14, s.plane.y - Math.sin(s.plane.rumbo) * 14, 1.2, { quieto: still || s.calma, color: 'humo' });
+    s.shake = Math.max(s.shake, 5);
     return true;
   }
   const onHide = () => {
@@ -4079,7 +4196,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (p) S.callar();
       if (p) {
         // Nothing stays held across a pause: fingers lifted while paused never send their «up».
-        Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false });
+        Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false });
         turn = 0;
         onBlur();
       }
@@ -4116,6 +4233,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     },
     setTouch(t: boolean) {
+      // On a phone the camera starts closer (×2), so the plane and the mice read well.
+      if (t && !view.touch) {
+        view.want = Math.max(view.want, 2);
+        fit();
+      }
       view.touch = t;
     },
   };
