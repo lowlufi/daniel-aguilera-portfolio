@@ -963,7 +963,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <Key k="← ↑ → ↓" label="Pilotear (o WASD)" />
                 <Key k="E · Shift" label="Acelerar" on={hud?.throttle === 1} />
                 <Key k="E E (dos veces)" label="Super nitro" on={hud?.nitro === 'activo'} />
-                <Key k="Q · Ctrl" label="Frenar" on={hud?.throttle === -1} />
+                <Key k="Q · Ctrl" label="Frenar (apaga el nitro)" on={hud?.throttle === -1} />
                 <Key k="Espacio" label="Misil (sale por la nariz)" />
                 <Key k="K" label="Bomba" />
                 <Key k="L" label="Bengalas" />

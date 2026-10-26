@@ -182,6 +182,8 @@ const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
 const NITRO_T = 3;
 const NITRO_ACC = 4.2 * FA.GRAVEDAD;
 const NITRO_CD = 9;
+/** How long the engine-cooling glow lasts after braking hard, s. */
+const ENFRIA_T = 1.4;
 /** Seconds holding the nose on an enemy before the missiles lock on. */
 const LOCK_TIME = 1;
 /** The trip to a new map: seconds of autopilot, with the nitro lit one second in. */
@@ -755,6 +757,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     boost: '' as '' | Mejora,
     boostT: 0,
     nitroT: 0,
+    /** Engine spooling down after braking hard (or cutting the nitro), s left; and whether the brake was already held. */
+    enfriaT: 0,
+    frenoAntes: false,
     nitroCd: 0,
     lockCand: null as Fijable | null,
     lockKey: null as object | null,
@@ -973,6 +978,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.boostT = 0;
     s.nitroT = 0;
     s.nitroCd = 0;
+    s.enfriaT = 0;
     s.hielo = 0;
     s.congelado = false;
     s.transT = 0;
@@ -2611,6 +2617,22 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }
         }
       }
+      // Braking (Q) cuts the nitro; braking hard at speed spools the engine down, glowing as it cools.
+      const frena = input.gas < 0 && !s.despegue;
+      if (frena && !s.frenoAntes) {
+        const rapido = Math.hypot(p.vx, p.vy) > FV.PARAMS[s.spec.id].velMax * 0.7;
+        if (s.nitroT > 0) apagarNitro();
+        else if (rapido) s.enfriaT = ENFRIA_T;
+      }
+      s.frenoAntes = frena;
+      if (s.enfriaT > 0) {
+        s.enfriaT = Math.max(0, s.enfriaT - dt);
+        const k = s.enfriaT / ENFRIA_T;
+        const tx = p.x - Math.cos(p.rumbo) * (s.spec.hit + 3), ty = p.y - Math.sin(p.rumbo) * (s.spec.hit + 3);
+        L.luz(s.luces, tx, ty, 6 + 8 * k, k > 0.5 ? '#ff7a3c' : '#c0405a', 0.04 * k);
+        // Hot exhaust turning into grey smoke as it cools.
+        if (Math.random() < dt * (10 + 20 * (1 - k))) puff(tx, ty, rand(0.8, 1.6), k < 0.4, 0.5 + 0.3 * (1 - k), -p.vx * 0.1 + rand(-8, 8), -p.vy * 0.1 + rand(4, 16));
+      }
       // Super nitro: a hard shove along the nose, past the normal top speed.
       if (s.nitroT > 0) {
         s.nitroT -= dt;
@@ -3834,6 +3856,27 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         A.R(g, Math.round(bx - ux * i - w / 2), Math.round(by - uy * i - w / 2), w, w, cols[Math.min(cols.length - 1, Math.floor((i / len) * cols.length))]);
       }
     }
+    // Engine cooling: the jet shrinks and reddens, the nozzle glows and fades, heat shimmers behind.
+    if (s.enfriaT > 0 && s.nitroT <= 0 && !s.dead) {
+      const k = s.enfriaT / ENFRIA_T;
+      const ux = Math.cos(p.rumbo), uy = -Math.sin(p.rumbo);
+      const bx = sx(p.x) - ux * (s.spec.hit + 2), by = sy(p.y) - uy * (s.spec.hit + 2);
+      const len = Math.round(9 * k * k) + (Math.random() < 0.5 ? 1 : 0);
+      const cols = k > 0.6 ? ['#ffe48a', '#ff9a3c', '#e05a3a'] : k > 0.3 ? ['#ff9a3c', '#e05a3a', '#8a3a5a'] : ['#e05a3a', '#8a3a5a', '#4a3a5a'];
+      for (let i = 0; i < len; i++) A.R(g, Math.round(bx - ux * i - 1), Math.round(by - uy * i - 1), i < 3 ? 2 : 1, i < 3 ? 2 : 1, cols[Math.min(2, Math.floor((i / Math.max(1, len)) * 3))]);
+      // The nozzle ring, cherry red going dark, with a blue flicker of the last fuel.
+      g.globalAlpha = 0.5 + 0.5 * k;
+      A.R(g, Math.round(bx - 1), Math.round(by - 2), 3, 4, k > 0.4 ? '#ff5a3c' : '#a8304a');
+      if (Math.random() < 0.3 * k) A.R(g, Math.round(bx), Math.round(by - 1), 1, 2, '#7ad8ff');
+      // Heat shimmer: a few wavering pale pixels trailing behind.
+      g.globalAlpha = 0.35 * k;
+      for (let i = 0; i < 6; i++) {
+        const d = 5 + i * 3;
+        const w = Math.sin(s.t * 30 + i * 1.7) * 2;
+        A.R(g, Math.round(bx - ux * d - uy * w), Math.round(by - uy * d + ux * w), 1, 1, '#fff2e0');
+      }
+      g.globalAlpha = 1;
+    }
     if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw);
 
     if (s.mapa === 'tormenta') dibujarTormenta(vw, vh, sx, sy);
@@ -4290,11 +4333,26 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   let lastAcc = -1e9;
   function tapAccel() {
     const now = performance.now();
+    if (now - lastAcc < 350 && s.nitroT > 0) {
+      apagarNitro();
+      lastAcc = -1e9;
+      return;
+    }
     if (now - lastAcc < 350 && startNitro()) {
       lastAcc = -1e9;
       return;
     }
     lastAcc = now;
+  }
+  /** Cuts the super nitro short: the unused part comes back as charge. */
+  function apagarNitro() {
+    if (s.nitroT <= 0) return;
+    const resto = s.nitroT / NITRO_T;
+    s.nitroT = 0;
+    s.nitroCd = NITRO_CD * Math.max(0.35, 1 - resto * 0.6);
+    s.enfriaT = ENFRIA_T;
+    pop(s.plane.x, s.plane.y + 18, 'Nitro apagado', '#9ad8ff');
+    if (!s.attract) AB.nitroFin();
   }
   /** Fires the super nitro if it's charged; false if it isn't. */
   function startNitro() {
