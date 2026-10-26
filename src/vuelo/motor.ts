@@ -190,7 +190,7 @@ const NITRO_CD = 9;
 /** How long the engine-cooling glow lasts after braking hard, s. */
 const ENFRIA_T = 1.4;
 /** Seconds holding the nose on an enemy before the missiles lock on. */
-const LOCK_TIME = 1;
+const LOCK_TIME = 0.4;
 /** The trip to a new map: seconds of autopilot, with the nitro lit one second in. */
 const TRANS_T = 3.4;
 const FLARE_RELOAD = 4;
@@ -405,6 +405,8 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   /** The player's missile: which one of the plane's kit. Enemy seekers: already rolled against stealth. */
   k?: HG.KitMisil;
   sigilo?: boolean;
+  /** A spent enemy missile falling under gravity. */
+  cae?: boolean;
 };
 /** A falling bomb of the player's, with its load; bomblets are the cluster's children. */
 type BombaJ = Bomba & { tipo: BombaTipo; sub?: boolean; rebotes?: number };
@@ -582,6 +584,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
   /** Splash columns where things hit the sea: screen-independent, world coords. */
   const splashes: { x: number; t: number }[] = [];
+  /** Scratch canvas to tint a sinking plane blue. */
+  const aguaTinte = Object.assign(document.createElement('canvas'), { width: 80, height: 60 });
   /** True over open sea (not the island). */
   const sobreMar = (x: number) => (mapaActual === 'oceano' || mapaActual === 'tormenta') && x > ISLA;
   let chapoteoT = 0;
@@ -798,6 +802,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     fighterQueue: 0,
     /** The one-on-one duel with Margarita's fighter is on: nothing else spawns. */
     duelo: false,
+    /** The plane went into the sea: where it entered, and its heading as it sinks. */
+    hundido: null as { x: number; vx: number; ang: number } | null,
+    /** Where the last spent missile came down (dev checks). */
+    caidaXY: [0, 0] as [number, number],
     fighterT: 0,
     bigQueue: [] as G.TipoGrande[],
     /** The flying boss (cheese airship or UFO mothership), if one is here. */
@@ -960,6 +968,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.gigantes = [];
     s.fighters = [];
     s.fighterQueue = 0;
+    s.hundido = null;
     s.duelo = false;
     s.bigQueue = [];
     s.jefe = null;
@@ -1328,7 +1337,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * A blast of the given energy. Blasts from the player hurt vehicles, blasts
    * from the mice hurt the plane, and every blast pushes everything nearby.
    */
-  function blast(x: number, y: number, energy: number, from: 'jugador' | 'raton' | 'nadie', damage: number) {
+  function blast(x: number, y: number, energy: number, from: 'jugador' | 'raton' | 'nadie' | 'caida', damage: number) {
+    // 'caida': a spent missile falling under gravity hurts whatever it lands on, mice and plane alike.
+    const hiereRatones = from === 'jugador' || from === 'caida';
     if (from === 'jugador') damage *= danoMul();
     const ex = FA.explosion(energy);
     // Blasts that touch the ground leave a crater.
@@ -1357,8 +1368,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
     }
-    for (const u of s.gigantes) if (u.viva) giantHit(u, G.explotar(u, x, y, energy, from === 'jugador' ? damage : 0));
-    if (from === 'jugador' && s.jefe && JF.tocado(s.jefe, x, y, ex.radio)) {
+    for (const u of s.gigantes) if (u.viva) giantHit(u, G.explotar(u, x, y, energy, hiereRatones ? damage : 0));
+    if (hiereRatones && s.jefe && JF.tocado(s.jefe, x, y, ex.radio)) {
       const h = JF.golpear(s.jefe, x, y, damage * BOSS_MUL[s.spec.id]);
       s.jefeFlash = 0.1;
       if (h.bloqueado) pop(x, y + 10, s.jefe.tipo === 'nodriza' ? '¡Escudo!' : '¡Blindado!', P.metal);
@@ -1368,7 +1379,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         pop(x, y + 12, `+${h.puntos}`);
       }
     }
-    if (from === 'jugador') {
+    if (hiereRatones) {
       for (const f of s.fighters) {
         const dmg = damage * ex.dano(Math.max(0, Math.hypot(f.a.x - x, f.a.y - y) - CZ.RADIO));
         if (dmg >= 0.25) hurtFighter(f, dmg);
@@ -1386,7 +1397,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const d = Math.hypot(c.mid.x - x, c.mid.y - y);
       const imp = ex.impulso(d);
       if (imp > 0.5) FA.empujeVehiculo(c, ((c.mid.x - x) / (d || 1)) * imp, ((c.mid.y - y) / (d || 1)) * imp + imp * 0.5);
-      if (from === 'jugador') {
+      if (hiereRatones) {
         let dmg = damage * ex.dano(d);
         if (c.kind === 'portaaviones') {
           // A huge hull: measure to its nearest plate, not its middle, and bombs (big
@@ -1404,7 +1415,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const d = Math.hypot(p.x - x, p.y - y);
       const imp = ex.impulso(d);
       if (imp > 0.5) FV.empujar(p, s.spec.id, ((p.x - x) / (d || 1)) * imp, ((p.y - y) / (d || 1)) * imp);
-      if (from === 'raton' && ex.dano(Math.max(0, d - s.spec.hit)) * damage >= 0.3) {
+      if ((from === 'raton' || from === 'caida') && ex.dano(Math.max(0, d - s.spec.hit)) * damage >= 0.3) {
         s.lastHit = 'misil';
         hurtPlane(damage >= 2 ? 2 : 1, x, y);
       }
@@ -1814,6 +1825,18 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.dead = true;
     s.deadT = 0;
     s.hp = 0;
+    // Into the sea: no fireball, a huge splash and the plane sinks out of sight.
+    if (sobreMar(p.x) && p.y - OC.NIVEL_MAR < 30) {
+      s.hundido = { x: p.x, vx: p.vx * 0.25, ang: p.rumbo };
+      VFX.salpicar(s.fx, p.x, OC.NIVEL_MAR, 4, still || s.calma);
+      for (let i = -2; i <= 2; i++) if (splashes.length < 30) splashes.push({ x: p.x + i * 9, t: Math.abs(i) * 0.08 });
+      for (let i = 0; i < 8; i++) puff(p.x + rand(-16, 16), OC.NIVEL_MAR + rand(2, 10), rand(1.5, 3), false, 0.8, rand(-20, 20), rand(20, 50));
+      AB.salpicadura(panOf(p.x), 4);
+      s.shake = 6;
+      s.overT = 1.8;
+      s.reason = 'avion';
+      return;
+    }
     for (const part of s.spec.parts) {
       if (s.lost.includes(part)) continue;
       const at = partAt(part);
@@ -1834,6 +1857,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const rx = clamp(s.camX + view.vw * (right ? 0.3 : 0.7), 40, LEVEL - 40);
     const ry = s.mapa === 'tormenta' ? 700 : Math.min(CEIL - 60, Math.max(220, ground(rx) + 120));
     s.plane = FV.nuevoAvion(s.spec.id, rx, ry, right);
+    s.hundido = null;
     s.lost = [];
     FV.fijarDano(s.plane, FV.SANO);
     s.hp = s.spec.hp;
@@ -2120,7 +2144,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function stepLock(dt: number) {
     const p = s.plane;
     let best: { key: object; f: Fijable } | null = null;
-    let bestA = 0.2;
+    let bestA = 0.28;
     const consider = (key: object, f: Fijable) => {
       const q = f.pos();
       const dx = q.x - p.x, dy = q.y - p.y;
@@ -3285,6 +3309,27 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (m.combustible > 0) L.luz(s.luces, m.x - Math.cos(m.rumbo) * 6, m.y - Math.sin(m.rumbo) * 6, sh.enemy ? 7 : 9, sh.enemy ? MS.MISILES[sh.m.tipo].estela.brillo : '#ffb030', 0.05);
       E.empujarPunto(sh.estela, m.x, m.y, m.rumbo, m.combustible > 0, dt);
       E.actualizarEstela(sh.estela, dt, wind);
+      if (sh.enemy && sh.cae) {
+        // A spent enemy missile falling: ballistic, nose along its fall, explodes on whatever it meets.
+        const em = sh.m;
+        const F = MS.MISILES[em.tipo];
+        FA.pasoBalistico(em, dt, FA.ARRASTRE_OBUS, wind);
+        em.t += dt;
+        em.rumbo = Math.atan2(em.vy, em.vx);
+        const toca =
+          em.y <= ground(em.x) ||
+          s.cars.some((c) => Math.abs(em.x - c.x) < A.VEH_LOOK[c.kind].w / 2 + 2 && em.y > c.y - 2 && em.y < c.y + A.VEH_LOOK[c.kind].h) ||
+          s.gigantes.some((u) => { if (!u.viva) return false; const b = G.caja(u); return em.x > b.x0 && em.x < b.x1 && em.y > b.y0 && em.y < b.y1; }) ||
+          s.fighters.some((f) => CZ.tocado(f, em.x, em.y, 2)) ||
+          s.aereos.some((a) => a.hp > 0 && Math.hypot(a.x - em.x, a.y - em.y) < AE.radio(a) + 2) ||
+          (flying && Math.hypot(em.x - p.x, em.y - p.y) < s.spec.hit + 3);
+        if (toca) {
+          em.t = -1;
+          s.caidaXY = [em.x, em.y];
+          blast(em.x, Math.max(em.y, ground(em.x)), Math.max(3, F.energia), 'caida', Math.max(2, F.danio * 2));
+        }
+        continue;
+      }
       if (sh.enemy) {
         const em = sh.m;
         const F = MS.MISILES[em.tipo];
@@ -3330,7 +3375,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
         if (r.estado === 'suelo') {
           em.t = -1;
-          blast(em.x, Math.max(em.y, ground(em.x)), F.energia, 'raton', F.danio);
+          // A spent one coming down hurts the mice it lands on too.
+          if (em.combustible <= 0) blast(em.x, Math.max(em.y, ground(em.x)), Math.max(3, F.energia), 'caida', Math.max(2, F.danio * 2));
+          else blast(em.x, Math.max(em.y, ground(em.x)), F.energia, 'raton', F.danio);
           continue;
         }
         // Boomerang: a dodged one turns round (about a second), relights and chases again.
@@ -3368,6 +3415,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }
         }
         if (r.estado === 'agotado') {
+          // Out of fuel and lost: it doesn't vanish, it drops like a stone and goes off where it lands.
+          if (em.combustible <= 0 && em.y > ground(em.x) + 6) {
+            sh.cae = true;
+            sh.tgt = null;
+            em.guiado = false;
+            continue;
+          }
           em.t = -1;
           blast(em.x, em.y, Math.min(F.energia, 1.5), 'nadie', 0);
           continue;
@@ -4026,6 +4080,40 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // During a barrel roll the drawn bank spins a full turn (the physics keep flying straight).
     const giroVisual = s.tonelT > 0 ? Math.cos(Math.PI * 2 * (1 - s.tonelT / 0.55)) * (p.alabeo >= 0 ? 1 : -1) : p.alabeo;
     if (!s.dead) drawPlaneGiro(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, giroVisual, s.cargaSuave, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
+    else if (s.hundido) {
+      // Sinking: under the surface, nose dropping, tinted by the water, trailing bubbles.
+      const h = s.hundido;
+      const k = Math.min(1, s.deadT / 2.4);
+      const hx = sx(h.x + h.vx * Math.min(s.deadT, 1.5));
+      const surf = sy(OC.NIVEL_MAR);
+      const hy = surf + 4 + k * 26;
+      const nose = h.ang + (Math.cos(h.ang) >= 0 ? -1 : 1) * k * 0.9;
+      g.save();
+      g.beginPath();
+      g.rect(0, surf + 1, vw, vh - surf);
+      g.clip();
+      // Tint only the plane's own pixels: paint it on a scratch canvas, wash it blue, then lay it down.
+      const tg = aguaTinte.getContext('2d')!;
+      tg.globalCompositeOperation = 'source-over';
+      tg.clearRect(0, 0, 80, 60);
+      drawPlaneGiro(tg, s.spec.id, 40, 30, -nose, p.alabeo, 1, s.t, 0, false, s.lost);
+      tg.globalCompositeOperation = 'source-atop';
+      tg.globalAlpha = 0.35 + k * 0.45;
+      tg.fillStyle = '#2a6a9a';
+      tg.fillRect(0, 0, 80, 60);
+      tg.globalAlpha = 1;
+      g.globalAlpha = 1 - k * 0.55;
+      g.drawImage(aguaTinte, Math.round(hx - 40), Math.round(hy - 30));
+      g.restore();
+      g.globalAlpha = 1;
+      // Bubbles rising to the surface.
+      for (let i = 0; i < 9; i++) {
+        const ph = (s.deadT * 0.9 + i * 0.37) % 1;
+        const by = hy - ph * (hy - surf);
+        if (by <= surf + 1) continue;
+        A.R(g, Math.round(hx + Math.sin(i * 2.3 + s.deadT * 3) * 6), Math.round(by), i % 3 ? 1 : 2, i % 3 ? 1 : 2, '#cfefff');
+      }
+    }
     // Bubble shield from the special upgrade: a shimmering ring around the plane.
     if (s.boost === 'escudo' && !s.dead) {
       const cx = sx(p.x), cy = sy(p.y);
@@ -4630,7 +4718,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS };
 
   return {
     start,
