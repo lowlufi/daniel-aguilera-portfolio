@@ -73,6 +73,8 @@ const MAX_PUNTOS = 60;
 const VIDA_EXTRA = 1.3; // la estela dura un poco más que su `largo` nominal
 const R_MIN = 2.5; // radio base mínimo del humo (las estelas finas se perdían)
 const MAX_CHISPAS = 12;
+/** Cuánto se exagera la ondulación del humo respecto de la amplitud de cada estilo. */
+const ONDULA_MUL = 2.6;
 const VIDA_FUEGO = 0.18; // s que un punto sigue siendo parte de la cinta de fuego
 const COLA = 5; // px detrás del centro del misil donde está la tobera
 const SUBE = 9; // px/s a los que tiende a subir el humo
@@ -420,8 +422,9 @@ export function dibujarEstela(
     }
     let r = rb * (0.4 + 0.75 * Math.min(1, u * 3.5));
     if (u > 0.62) r *= 1 - ((u - 0.62) / 0.38) * 0.75;
-    // Ondulación perpendicular al rumbo con el que nació.
-    const w = amp * Math.min(1, u * 4) * Math.sin(p[o + PSEMILLA] + edad * 5 + k * 0.45);
+    // Ondulación perpendicular al rumbo con el que nació: bien visible, crece a medida
+    // que el humo envejece y se abre, con ondas largas que se mecen como una serpiente.
+    const w = amp * ONDULA_MUL * Math.min(1, u * 4) * (0.55 + 1.3 * u) * Math.sin(p[o + PSEMILLA] + edad * 4 + k * 0.32);
     const rm = p[o + PRUMBO];
     const q = aPantalla(p[o + PX] - Math.sin(rm) * w, p[o + PY] + Math.cos(rm) * w);
     const sx = Math.round(q[0]), sy = Math.round(q[1]);
