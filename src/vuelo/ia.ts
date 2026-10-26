@@ -59,6 +59,8 @@ const FICHAS: Record<string, Ficha> = {
   portaaviones: { vel: 8, medio: 75, alcance: 420, velBala: 140, canon: 30 },
   trolebus: { vel: 16, medio: 20, alcance: 300, velBala: 130, canon: 14 },
   bici: { vel: 52, medio: 8, alcance: 220, velBala: 150, canon: 8 },
+  micro: { vel: 22, medio: 20, alcance: 260, velBala: 150, canon: 12 },
+  portuario: { vel: 15, medio: 21, alcance: 300, velBala: 130, canon: 16 },
 };
 const ficha = (k: string) => FICHAS[k] ?? FICHAS.jeep;
 

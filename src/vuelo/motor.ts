@@ -62,7 +62,7 @@ export const PLANES: PlaneSpec[] = [
     pilot: 'Lulu',
     name: 'Avioneta Mostaza',
     blurb: 'Lulu, la gatita negra de ojos amarillos. Ágil: gira cerrado y suelta bombas seguido.',
-    parts: ['cola', 'ala', 'motor', 'cabina'], hp: 5, rack: 2, bombRack: 2, flareRack: 1, reload: 1.2, bombCd: 0.5, bombs: 1, hit: 7,
+    parts: ['cola', 'ala', 'motor', 'cabina'], hp: 5, rack: 2, bombRack: 2, flareRack: 3, reload: 1.2, bombCd: 0.5, bombs: 1, hit: 7,
     stats: { velocidad: 3, blindaje: 3, misiles: 3, bombas: 4 },
   },
   {
@@ -70,7 +70,7 @@ export const PLANES: PlaneSpec[] = [
     pilot: 'Dui',
     name: 'Caza Mandarina',
     blurb: 'Dui, el gato naranja. El más veloz: deja atrás a los misiles y dispara más.',
-    parts: ['cola', 'ala', 'motor'], hp: 4, rack: 3, bombRack: 1, flareRack: 1, reload: 0.85, bombCd: 0.9, bombs: 1, hit: 6,
+    parts: ['cola', 'ala', 'motor'], hp: 4, rack: 3, bombRack: 1, flareRack: 3, reload: 0.85, bombCd: 0.9, bombs: 1, hit: 6,
     stats: { velocidad: 5, blindaje: 2, misiles: 5, bombas: 2 },
   },
   {
@@ -78,7 +78,7 @@ export const PLANES: PlaneSpec[] = [
     pilot: 'Almendrita',
     name: 'Bombardero Nube',
     blurb: 'Almendrita, la yorkshire. Lento pero blindado: suelta tres bombas de una vez.',
-    parts: ['cola', 'ala', 'motor', 'cabina', 'bodega'], hp: 6, rack: 2, bombRack: 3, flareRack: 1, reload: 1.3, bombCd: 0.9, bombs: 3, hit: 9,
+    parts: ['cola', 'ala', 'motor', 'cabina', 'bodega'], hp: 6, rack: 2, bombRack: 3, flareRack: 3, reload: 1.3, bombCd: 0.9, bombs: 3, hit: 9,
     stats: { velocidad: 2, blindaje: 5, misiles: 2, bombas: 5 },
   },
 ];
@@ -123,6 +123,8 @@ export type Hud = {
   warn: boolean;
   /** The wing is stalled. */
   stall: boolean;
+  /** Nuclear bombs in the hold. */
+  nukes: number;
   /** Ice 0…1 near the ceiling, and whether the controls are frozen. */
   hielo: number;
   congelado: boolean;
@@ -142,7 +144,7 @@ export type Hud = {
 
 export type Result = { pilot: string; score: number; best: number; wave: number; kills: number; reason: 'avion' | 'despensa'; record: boolean };
 
-export type Controls = { x: number; y: number; gas: number; fire: boolean; bomb: boolean; flare: boolean; gun: boolean };
+export type Controls = { x: number; y: number; gas: number; fire: boolean; bomb: boolean; flare: boolean; gun: boolean; nuke: boolean };
 
 /* ── Battle damage ─────────────────────────────────────────────────────── */
 
@@ -178,8 +180,8 @@ const PANTRY = { x0: 22, x1: 86 };
 const META_X = 98;
 const META_MAX = 5;
 /** Most slots a reward balloon can raise each weapon to. */
-type Arma = Exclude<Premio, 'reparar' | 'especial'>;
-const CAP_MAX: Record<Arma, number> = { misil: 8, bomba: 6, bengala: 4 };
+type Arma = Exclude<Premio, 'reparar' | 'especial' | 'vida' | 'nuclear'>;
+const CAP_MAX: Record<Arma, number> = { misil: 8, bomba: 6, bengala: 6 };
 const PRIZE_NAME: Record<Arma, string> = { misil: 'misil', bomba: 'bomba', bengala: 'bengala' };
 const BOMB_RELOAD = 2.2;
 /** Special upgrades from a downed fighter's golden balloon. */
@@ -205,23 +207,38 @@ const FRIO_DESDE = CEIL - 380;
 const HIELO_SUBE = 0.22;
 const HIELO_BAJA = 0.35;
 
+const sm = (a: number, b: number, v: number) => {
+  const k = Math.min(1, Math.max(0, (v - a) / (b - a)));
+  return k * k * (3 - 2 * k);
+};
+/** San Antonio from inland to the coast: San Juan, the flat Llolleo wetland,
+ *  the Barrancas rise, the flat port quay and Cartagena's lower beach. */
 const hillsAt = (x: number) => {
-  const hills = 28 + 8 * Math.sin(x / 170) + 4 * Math.sin(x / 53 + 2) + 1.5 * Math.sin(x / 23);
+  const wob = 8 * Math.sin(x / 170) + 4 * Math.sin(x / 53 + 2) + 1.5 * Math.sin(x / 23);
+  let h = 28 + wob * (1 - 0.6 * sm(400, 600, x) * (1 - sm(1000, 1150, x)));
+  h += 26 * sm(1100, 1350, x) * (1 - sm(1550, 1750, x));
+  const port = sm(1700, 1800, x) * (1 - sm(2650, 2750, x));
+  h = h * (1 - port) + 30 * port - 6 * sm(2750, 2900, x);
   // Flat around the pantry.
   const k = Math.min(1, Math.max(0, (x - 150) / 140));
-  return 28 + (hills - 28) * k;
+  return 28 + (h - 28) * k;
 };
 // The terrain as a height per column, so explosions can dig craters in it
 // (like in Worms). Reset at the start of every game.
 const HEIGHTS = new Float32Array(LEVEL + 2);
 /** The two maps: the valley (hills) and, after the first boss, the open sea. */
-type Mapa = 'valle' | 'oceano' | 'valparaiso';
+type Mapa = 'valle' | 'oceano' | 'valparaiso' | 'tormenta';
+/** One map per wave, then round again (harder): San Antonio → sea → Valparaíso → storm. */
+const SIGUIENTE: Record<Mapa, Mapa> = { valle: 'oceano', oceano: 'valparaiso', valparaiso: 'tormenta', tormenta: 'valle' };
+const NOMBRE_MAPA: Record<Mapa, string> = { valle: 'San Antonio', oceano: 'el mar de San Antonio', valparaiso: 'los cerros de Valparaíso', tormenta: 'la tormenta: solo cazas' };
+/** Most planes the player can bank. */
+const MAX_VIDAS = 5;
 /** End of the pantry's island on the sea map; past it there's only water. */
 const ISLA = 150;
 const islandAt = (x: number) => (x < 110 ? 30 : x < ISLA ? OC.NIVEL_MAR + (30 - OC.NIVEL_MAR) * (1 - (x - 110) / (ISLA - 110)) : OC.NIVEL_MAR);
 let mapaActual: Mapa = 'valle';
 const resetHeights = () => {
-  for (let x = 0; x < HEIGHTS.length; x++) HEIGHTS[x] = mapaActual === 'oceano' ? islandAt(x) : mapaActual === 'valparaiso' ? VP.cerrosAt(x) : hillsAt(x);
+  for (let x = 0; x < HEIGHTS.length; x++) HEIGHTS[x] = mapaActual === 'oceano' || mapaActual === 'tormenta' ? islandAt(x) : mapaActual === 'valparaiso' ? VP.cerrosAt(x) : hillsAt(x);
 };
 resetHeights();
 const ground = (x: number) => {
@@ -242,10 +259,12 @@ const VEH: Record<VehiculoTipo, VSpec> = {
   portaaviones: { speed: 8, hp: 30, masa: 20, score: 5000, cd: 99, color: '#f08a94' },
   trolebus: { speed: 16, hp: 1.4, masa: 3, score: 200, cd: 4.2, color: '#b49af4' },
   bici: { speed: 52, hp: 0.5, masa: 0.6, score: 150, cd: 3.6, color: '#b49af4' },
+  micro: { speed: 22, hp: 1.2, masa: 2.5, score: 180, cd: 3.8, color: '#b49af4' },
+  portuario: { speed: 15, hp: 1.6, masa: 4, score: 220, cd: 4.6, color: '#b49af4' },
 };
 /** Which land vehicle's missile catalogue each kind uses. */
 const ARMA_DE: Record<VehiculoTipo, 'jeep' | 'camion' | 'tanque' | 'sam'> = {
-  jeep: 'jeep', camion: 'camion', tanque: 'tanque', sam: 'sam', margarita: 'jeep', lancha: 'jeep', fragata: 'sam', portaaviones: 'sam', trolebus: 'camion', bici: 'jeep',
+  jeep: 'jeep', camion: 'camion', tanque: 'tanque', sam: 'sam', margarita: 'jeep', lancha: 'jeep', fragata: 'sam', portaaviones: 'sam', trolebus: 'camion', bici: 'jeep', micro: 'jeep', portuario: 'camion',
 };
 /** Margarita on foot or at the helm of her aircraft carrier. */
 const isBoss = (k: VehiculoTipo) => k === 'margarita' || k === 'portaaviones';
@@ -345,7 +364,7 @@ type Shard = Cuerpo & { c: string };
 export type Resumen = {
   oleada: number; enemigos: number; puntos: number; tiempo: number; pescado: number; aviones: number;
   /** The map the plane flies off to after this card, if any. */
-  destino: '' | 'oceano' | 'valparaiso';
+  destino: '' | Mapa;
   /** The wave's mini-mission and whether it was done; what comes next. */
   mision: string; cumplida: boolean; siguiente: string;
 };
@@ -459,7 +478,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     mapaActual = m;
     s.mapa = m;
     resetHeights();
-    if (m === 'oceano') {
+    if (m === 'oceano' || m === 'tormenta') {
+      // The storm is over the open sea, hidden under a floor of dark cloud.
       marStrip ??= OC.aguaStrip(LEVEL, ground, PANTRY);
       strip = marStrip;
     } else if (m === 'valparaiso') {
@@ -483,7 +503,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     r = Math.round(r);
     if (r < 3 || x < PANTRY.x1 + 20) return;
     // The sea doesn't dig: it splashes.
-    if (mapaActual === 'oceano') {
+    if (mapaActual === 'oceano' || mapaActual === 'tormenta') {
       if (splashes.length < 30) splashes.push({ x, t: 0 });
       VFX.salpicar(s.fx, x, OC.NIVEL_MAR, Math.min(3, r / 6), still || s.calma);
       if (!s.attract) AB.salpicadura(panOf(x), Math.min(4, r / 5));
@@ -505,7 +525,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       A.R(sg, xi, row(h) + 1, 1, 2, P.d1);
     }
   }
-  const input: Controls = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false };
+  const input: Controls = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false };
   const keys = new Set<string>();
 
   const s = {
@@ -538,9 +558,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     reloadT: 0,
     fireT: 0,
     bombT: 0,
-    flares: 1,
+    flares: 3,
     /** Weapon slots (grow with reward balloons) and bombs in the bay. */
-    cap: { misil: 2, bomba: 2, bengala: 1 } as Record<Arma, number>,
+    cap: { misil: 2, bomba: 2, bengala: 3 } as Record<Arma, number>,
     bombAmmo: 2,
     bombReloadT: 0,
     /** Reward balloons: tied to enemies (by id) and floating free. */
@@ -597,6 +617,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
     hielo: 0,
+    /** Storm: seconds to the next strike, the bolt in progress, the sky flash. */
+    rayoT: 6,
+    rayo: null as { x: number; t: number; tope: number } | null,
+    relampago: 0,
+    /** Nuclear bombs in the hold (from UFOs) and the press edge. */
+    nukes: 0,
+    nukeWasDown: false,
     cargaSuave: 1,
     congelado: false,
     luces: L.crearLuces(),
@@ -806,9 +833,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     resetWorld();
     s.attract = false;
     // A clean slate: nothing carries over from the title screen's autopilot.
-    Object.assign(input, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false });
+    Object.assign(input, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false });
+    s.nukes = 0;
     keys.clear();
-    Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false });
+    Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false });
     s.boost = '';
     s.boostT = 0;
     s.nitroT = 0;
@@ -892,7 +920,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const ids: ModeloAvion[] = ['caza', 'avioneta', 'bombardero'];
     start(ids[Math.floor(Math.random() * ids.length)]);
     s.attract = true;
-    const mapas: Mapa[] = ['valle', 'oceano', 'valparaiso'];
+    const mapas: Mapa[] = ['valle', 'oceano', 'valparaiso', 'tormenta'];
     cambiarMapa(mapas[Math.floor(Math.random() * mapas.length)]);
     s.wave = 2 + Math.floor(Math.random() * 3);
     nextWave();
@@ -966,6 +994,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.bigQueue = s.mapa === 'oceano' ? [] : G.elegirGrandes(s.wave, Math.random);
     s.fighterQueue = s.mapa === 'oceano' ? Math.max(1, CZ.cuantos(s.wave)) : CZ.cuantos(s.wave);
     s.fighterT = rand(7, 12);
+    if (s.mapa === 'tormenta') prepararTormenta();
     s.bigT = rand(3, 6);
     s.airT = rand(4, 7);
     s.phase = 'break';
@@ -976,6 +1005,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
 
   function waveList(n: number): VehiculoTipo[] {
+    if (s.mapa === 'tormenta') return []; // only fighters up here
     if (s.mapa === 'valparaiso') {
       // On the hills: downhill bikers, trolleybuses and the usual convoy.
       const count = Math.min(30, 5 + Math.round(n * 2));
@@ -989,10 +1019,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     const count = n === 1 ? 4 : Math.min(34, 5 + Math.round(n * 2.2));
     const w: Partial<Record<VehiculoTipo, number>> =
-      n === 1 ? { jeep: 1 } :
-      n === 2 ? { jeep: 0.45, camion: 0.35, tanque: 0.2 } :
-      n === 3 ? { jeep: 0.35, camion: 0.35, tanque: 0.3 } :
-      { jeep: 0.3, camion: 0.28, tanque: 0.24, sam: 0.18 };
+      n === 1 ? { jeep: 0.6, micro: 0.4 } :
+      n === 2 ? { jeep: 0.3, micro: 0.2, portuario: 0.3, tanque: 0.2 } :
+      n === 3 ? { jeep: 0.25, micro: 0.15, portuario: 0.3, tanque: 0.3 } :
+      { jeep: 0.2, micro: 0.12, portuario: 0.26, tanque: 0.24, sam: 0.18 };
     const out: VehiculoTipo[] = [];
     for (let i = 0; i < count; i++) {
       let r = Math.random();
@@ -1136,14 +1166,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (dmg < 0.25) continue;
         a.hp -= dmg;
         s.airFlash.set(a.id, 0.12);
-        if (a.hp <= 0) {
-          award(AIR_SCORE[a.tipo], a.x, a.y);
-          releasePrize(s.airPrize.get(a.id), a.x, a.y + 10);
-          for (let i = 0; i < 2; i++) VFX.pieza(s.fx, a.x, a.y, a.vx * 0.5 + rand(-50, 50), rand(20, 80), null, '#a88af0');
-          s.airPrize.delete(a.id);
-          const ax = a.x, ay = a.y;
-          window.setTimeout(() => blast(ax, ay, FA.ENERGIA.vehiculo, 'jugador', 0.8), 50);
-        }
+        if (a.hp <= 0) abatirAereo(a);
       }
     }
     for (const c of s.cars) {
@@ -1168,6 +1191,57 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
 
   const flyingNow = () => s.mode === 'play' && !s.dead;
+
+  /** A flying mouse shot down by the player: points, its balloon, and UFOs leave a prize. */
+  function abatirAereo(a: AE.Aereo) {
+    award(AIR_SCORE[a.tipo], a.x, a.y);
+    releasePrize(s.airPrize.get(a.id), a.x, a.y + 10);
+    s.airPrize.delete(a.id);
+    // A UFO always leaves something big: an extra plane or a nuclear bomb.
+    if (a.tipo === 'ovni') releasePrize(s.lives < MAX_VIDAS && Math.random() < 0.5 ? 'vida' : 'nuclear', a.x + 12, a.y + 14);
+    for (let i = 0; i < 2; i++) VFX.pieza(s.fx, a.x, a.y, a.vx * 0.5 + rand(-50, 50), rand(20, 80), null, '#a88af0');
+    const ax = a.x, ay = a.y;
+    window.setTimeout(() => blast(ax, ay, FA.ENERGIA.vehiculo, 'jugador', 0.8), 50);
+  }
+
+  /** The storm's wave: fighters only, a few at a time, coming quickly. */
+  function prepararTormenta() {
+    s.queue = [];
+    s.airQueue = [];
+    s.bigQueue = [];
+    s.fighterQueue = 6 + 2 * Math.floor((s.wave - 1) / 4);
+    s.fighterT = 2;
+    s.rayoT = rand(4, 7);
+  }
+
+  /**
+   * ☢️ The nuclear bomb: everything on screen goes, missiles included; bosses
+   * take a heavy blow. A white-out, a long shake and a deep boom.
+   */
+  function detonarNuclear() {
+    s.nukes--;
+    const x0 = s.camX - 20, x1 = s.camX + view.vw + 20;
+    const seen = (x: number) => x > x0 && x < x1;
+    for (const c of s.cars) if (seen(c.x)) hurtCar(c, isBoss(c.kind) ? s.bossMax * 0.35 : 99);
+    for (const a of s.aereos) if (a.hp > 0 && seen(a.x)) {
+      a.hp = 0;
+      abatirAereo(a);
+    }
+    for (const f of s.fighters) if (seen(f.a.x)) hurtFighter(f, 99);
+    for (const u of s.gigantes) if (u.viva && seen(u.x)) giantHit(u, G.golpear(u, u.x, u.y + 6, 99));
+    for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) sh.m.t = -1;
+    s.proy = [];
+    if (s.jefe && seen(s.jefe.x)) for (let i = 0; i < 6; i++) {
+      const h = JF.golpear(s.jefe, s.jefe.x + rand(-40, 40), s.jefe.y + rand(-20, 20), 6);
+      if (h.derrotado) award(h.puntos ?? 0, s.jefe.x, s.jefe.y);
+    }
+    const cx = s.camX + view.vw / 2, cy = s.camY + view.vh / 2;
+    for (let i = 0; i < 6; i++) VFX.explosion(s.fx, cx + rand(-view.vw / 3, view.vw / 3), cy + rand(-60, 60), 8, { quieto: still || s.calma });
+    s.flashMap = 1;
+    s.shake = 12;
+    pop(s.plane.x, s.plane.y + 30, '☢️ ¡BOMBA NUCLEAR!', P.gold);
+    if (!s.attract) AB.explosion(40, 60, 0);
+  }
 
   /** Damages a mouse fighter; at 0 it blows apart (scored only if the player did it). */
   function hurtFighter(f: CZ.Caza, dmg: number, byPlayer = true) {
@@ -1250,8 +1324,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (c.kind === 'portaaviones') s.enValpo = true;
       releasePrize('especial', c.mid.x, c.mid.y + 30);
       // Beating her on land opens the way to the sea.
-      if (c.kind === 'margarita' && s.mapa === 'valle') s.toMapa = 'oceano';
-      if (c.kind === 'portaaviones') s.toMapa = 'valparaiso';
       s.shake = 8;
       for (let i = 0; i < 2; i++) s.crates.push({ x: c.mid.x + i * 10 - 5, y: c.mid.y + 10, vx: rand(-15, 15), vy: 80, t: 0, landed: 0 });
       window.setTimeout(() => blast(c.mid.x, c.mid.y, FA.ENERGIA.bomba, 'nadie', 0), 60);
@@ -1555,7 +1627,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sfx.star();
     sfx.reveal();
     S.suena('recoger', { vol: 1 });
-    if (kind === 'especial') {
+    if (kind === 'vida') {
+      s.lives = Math.min(MAX_VIDAS, s.lives + 1);
+      pop(x, y + 16, '✈️ ¡Avión extra!', P.gold);
+      AB.mejora();
+    } else if (kind === 'nuclear') {
+      s.nukes = Math.min(3, s.nukes + 1);
+      pop(x, y + 16, `☢️ ¡Bomba nuclear! (${view.touch ? 'botón ☢️' : 'tecla N'})`, P.gold);
+      AB.mejora();
+    } else if (kind === 'especial') {
       // A special upgrade at random (or a full nitro).
       const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'nitro'];
       const pick = opts[Math.floor(Math.random() * opts.length)];
@@ -1715,7 +1795,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           hit = true;
           a.hp -= 0.18;
           s.airFlash.set(a.id, 0.08);
-          if (a.hp <= 0) blast(a.x, a.y, 0.4, 'jugador', 1);
+          if (a.hp <= 0) abatirAereo(a);
         }
       }
       for (const u of s.gigantes) {
@@ -1818,7 +1898,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     ];
     if (s.fighterQueue >= 2 || (s.mapa === 'oceano' && s.wave >= 3)) opts.push(['cazas', 'Derriba 2 cazas', 2]);
     // Only goals that can be met in this wave; the first wave keeps it easy.
-    const pool = s.wave === 1 ? opts.filter(([id]) => id === 'despensa') : opts;
+    const pool = s.mapa === 'tormenta'
+      ? ([['cazas', 'Derriba 4 cazas', 4], ['piezas', 'Termina sin perder piezas', 1], ['combo3', 'Haz un combo ×3', 1]] as [MisionId, string, number][])
+      : s.wave === 1 ? opts.filter(([id]) => id === 'despensa') : opts;
     const [id, texto, meta] = pool[Math.floor(Math.random() * pool.length)];
     return { id, texto, meta, prog: 0, hecha: false, fallida: false };
   }
@@ -1991,7 +2073,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (before > TRANS_T - 1 && s.transT <= TRANS_T - 1) {
           s.nitroCd = 0;
           startNitro();
-          if (!s.attract && s.toMapa === 'oceano') AB.rumboAlMar();
+          if (!s.attract && (s.toMapa === 'oceano' || s.toMapa === 'tormenta')) AB.rumboAlMar();
         }
         if (s.transT <= 0) {
           s.transT = 0;
@@ -2001,6 +2083,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.queue = waveList(s.wave);
           s.bigQueue = destino === 'oceano' ? [] : G.elegirGrandes(s.wave, Math.random);
           s.fighterQueue = Math.max(1, CZ.cuantos(s.wave));
+          if (destino === 'tormenta') prepararTormenta();
           s.shots = [];
           s.proy = [];
           p.x = 260;
@@ -2010,9 +2093,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           p.rumbo = 0;
           p.alabeo = 1;
           s.flashMap = 1;
-          s.banner = destino === 'oceano' ? '🌊 ¡Frente a San Antonio, mar adentro!' : '🏘️ ¡Bienvenido a Valparaíso!';
+          s.banner = { oceano: '🌊 ¡Frente a San Antonio, mar adentro!', valparaiso: '🏘️ ¡Bienvenido a Valparaíso!', tormenta: '⛈️ ¡Tormenta! Solo cazas', valle: '🏠 ¡De vuelta en San Antonio!' }[destino];
+          if (destino === 'tormenta') p.y = 700;
           window.setTimeout(() => {
-            if (s.banner.startsWith('🌊') || s.banner.startsWith('🏘️')) s.banner = '';
+            if (/^(🌊|🏘️|⛈️|🏠)/.test(s.banner)) s.banner = '';
           }, 2200);
         }
       }
@@ -2121,7 +2205,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (!s.congelado) {
         firePlayer();
         fireGun(dt);
+        if (input.nuke && !s.nukeWasDown && s.nukes > 0) detonarNuclear();
       }
+      s.nukeWasDown = input.nuke;
       stepLock(dt);
       stepPistas(dt);
     }
@@ -2173,11 +2259,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
         // Mouse fighters, from wave 3 on, one at a time from the edge of the view.
         s.fighterT -= dt;
-        if (s.fighterQueue > 0 && s.fighterT <= 0 && !s.jefe) {
+        const tormenta = s.mapa === 'tormenta';
+        if (s.fighterQueue > 0 && s.fighterT <= 0 && !s.jefe && (!tormenta || s.fighters.length < 3)) {
           s.fighterQueue--;
           const fromRight = Math.random() < 0.6;
-          s.fighters.push(CZ.crear(clamp(s.camX + (fromRight ? view.vw + 80 : -80), 40, LEVEL - 40), clamp(p.y + rand(-40, 120), 150, CEIL - 100), !fromRight, s.wave));
-          s.fighterT = rand(9, 15);
+          s.fighters.push(CZ.crear(clamp(s.camX + (fromRight ? view.vw + 80 : -80), 40, LEVEL - 40), clamp(p.y + rand(-40, 120), tormenta ? 360 : 150, CEIL - 100), !fromRight, s.wave, tormenta));
+          s.fighterT = tormenta ? rand(2.5, 4) : rand(9, 15);
           if (!s.banner) {
             s.banner = '✈️ ¡Cazas ratón en el aire!';
             window.setTimeout(() => {
@@ -2217,12 +2304,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }, 2600);
           AB.jefeLlega();
         } else
-        if (clear && s.jefeFor !== s.wave && s.mapa === 'valparaiso' && (s.wave % 6 === 4 || s.wave % 6 === 0)) {
+        if (clear && s.jefeFor !== s.wave && s.mapa === 'valparaiso') {
           // Airship after wave 3 (9, 15…), mothership after wave 6 (12, 18…).
           s.jefeFor = s.wave;
-          spawnBoss(s.wave % 6 === 4 ? 'dirigible' : 'nodriza');
+          spawnBoss(Math.floor((s.wave - 1) / 4) % 2 ? 'nodriza' : 'dirigible');
         } else
-        if (clear && s.mapa !== 'oceano' && (s.mapa === 'valle' ? s.wave % BOSS_EVERY === 1 : s.wave % BOSS_EVERY === 2) && s.bossFor !== s.wave) {
+        if (clear && s.mapa === 'valle' && s.bossFor !== s.wave) {
           // The wave is clear… and here comes the neighbour.
           s.bossFor = s.wave;
           const v = FA.nuevoVehiculo(LEVEL + 40, ground, VEH.margarita.masa);
@@ -2243,24 +2330,23 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.score += bonus;
           if (!s.dead) repair();
           if (!s.attract) AB.oleadaSuperada();
-          // The voyage: wave 2 at sea off San Antonio, wave 3 on in Valparaíso,
-          // whether the boss was beaten or got away.
-          if (s.mapa === 'valle' && s.wave === 1) s.toMapa = 'oceano';
-          if (s.mapa === 'oceano') s.toMapa = 'valparaiso';
+          // The voyage: every wave ends by flying on to the next map, whether
+          // its boss was beaten or got away.
+          s.toMapa = SIGUIENTE[s.mapa];
+          // A plane for every wave survived.
+          if (s.lives < MAX_VIDAS) {
+            s.lives++;
+            pop(s.plane.x, s.plane.y + 30, '✈️ ¡+1 avión!', P.gold);
+          }
           // The wave's mini-mission: done if its goal was reached and nothing failed it.
           const ms = s.mision;
           if (ms && !ms.hecha && !ms.fallida && (ms.id === 'despensa' || ms.id === 'piezas')) completaMision();
           // A clean wave eases the silent help off a little.
           if (s.deathsWave === 0) s.ayuda = Math.max(0, s.ayuda - 0.1);
           const next = s.wave + 1;
-          const destino: Resumen['destino'] = s.toMapa && s.toMapa !== 'valle' && s.toMapa !== s.mapa ? s.toMapa : '';
-          const siguiente = destino === 'oceano'
-            ? 'el mar de San Antonio: barcos y cazas'
-            : destino === 'valparaiso'
-              ? 'los cerros de Valparaíso'
-              : next % 3 === 2 || next % 6 === 4 || next % 6 === 0
-                ? '¡viene un jefe al final!'
-                : 'más cazas ratón';
+          const destino: Resumen['destino'] = s.toMapa && s.toMapa !== s.mapa ? s.toMapa : '';
+          const siguiente = destino ? NOMBRE_MAPA[destino] : 'más ratones';
+          void next;
           // The end-of-wave card: what this wave was worth.
           s.resumen = {
             oleada: s.wave, enemigos: s.kills - s.ckKills, puntos: s.score - s.ckScore, tiempo: Math.round(s.t - s.waveStartT),
@@ -2831,6 +2917,37 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.costa += (target - s.costa) * Math.min(1, dt * 0.6);
     }
     for (const w of splashes) w.t += dt;
+    s.relampago = Math.max(0, s.relampago - dt * 2.5);
+    if (s.mapa === 'tormenta' && s.mode === 'play') {
+      s.rayoT -= dt;
+      const p = s.plane;
+      if (!s.rayo && s.rayoT <= 0) {
+        // A strike near the plane, with a glowing warning first; or a far flash.
+        if (Math.random() < 0.6) s.rayo = { x: p.x + rand(-140, 140), t: 0, tope: p.y + rand(120, 220) };
+        else {
+          s.relampago = 0.35;
+          const pan = rand(-1, 1);
+          if (!s.attract) window.setTimeout(() => AB.explosion(10, 1400, pan), rand(400, 1400));
+        }
+        s.rayoT = rand(3.5, 7);
+      }
+      if (s.rayo) {
+        const r = s.rayo;
+        const before = r.t;
+        r.t += dt;
+        if (before < 0.8 && r.t >= 0.8) {
+          s.relampago = 0.9;
+          if (!s.attract) AB.explosion(18, Math.abs(p.x - r.x) + 200, panOf(r.x));
+          if (Math.abs(p.x - r.x) < 16 && p.y < r.tope && !s.dead) {
+            s.lastHit = 'choque';
+            hurtPlane(1, p.x, p.y);
+            pop(p.x, p.y + 20, '⚡ ¡Rayo!', '#bfe8ff');
+          }
+          for (const f of s.fighters) if (Math.abs(f.a.x - r.x) < 16 && f.a.y < r.tope) hurtFighter(f, 99, false);
+        }
+        if (r.t > 1.05) s.rayo = null;
+      }
+    }
     for (let i = splashes.length - 1; i >= 0; i--) if (splashes[i].t > 0.9) splashes.splice(i, 1);
     s.flashMap = Math.max(0, s.flashMap - dt);
   }
@@ -2846,7 +2963,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       return c ? 1 - clamp(c.hp / s.bossMax, 0, 1) : 0;
     })();
     const atardecer = s.mapa === 'oceano' && (s.enValpo || carrierK > 0.35);
-    const theme = s.themePick === 'auto' ? (atardecer ? 'tarde' : THEMES[Math.max(0, s.wave - 1) % 3]) : s.themePick;
+    const nocheTormenta = s.mapa === 'tormenta';
+    const theme = s.themePick === 'auto' ? (nocheTormenta ? 'noche' : atardecer ? 'tarde' : THEMES[Math.max(0, s.wave - 1) % 3]) : s.themePick;
     L.intensidadNoche(theme === 'noche' || s.plane.y > 1900 ? 1 : theme === 'tarde' ? 0.5 : 0);
     const shake = still || s.calma ? 0 : Math.min(s.jefe || s.cars.some((c) => isBoss(c.kind)) ? 9 : 6, Math.max(s.shake, VFX.sacudida(s.fx)));
     const shx = shake > 0.3 ? Math.round(rand(-shake, shake)) : 0;
@@ -2858,7 +2976,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // The cozy backdrop: sky, clouds, mountains, the village and the woods.
     // The far layers move at half speed when the camera climbs.
     const horizon = Math.round(vh - A.DIRT - 18 + s.camY * 0.5 + shy);
-    dibujarFondo(g, { vw, vh, camX: cam, camY: s.camY, horizonte: horizon, t: s.t, ambiente: theme, quieto: still, paisaje: s.mapa, costa: s.costa, viaje: s.viaje });
+    dibujarFondo(g, { vw, vh, camX: cam, camY: s.camY, horizonte: horizon, t: s.t, ambiente: theme, quieto: still, paisaje: s.mapa === 'tormenta' ? 'oceano' : s.mapa, costa: s.mapa === 'tormenta' ? 0.5 : s.costa, viaje: s.viaje });
     // Backdrop filter: a little less colour and a soft dusk veil, so planes,
     // missiles, enemies and effects stand out against any scenery.
     if (!s.sinFiltro) {
@@ -2876,6 +2994,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Ground strip (painted once for the whole level) and the pantry's flag.
     g.drawImage(strip.canvas, cam, 0, vw, strip.canvas.height, 0, sy(strip.top), vw, strip.canvas.height);
     if (s.mapa === 'valparaiso') VP.dibujarDetallesValpo(g, cam, (alt: number) => sy(alt), vw, s.t, still);
+    // The storm: the sea is lost under a heaving floor of dark cloud.
+    if (s.mapa === 'tormenta') {
+      for (let x = 0; x < vw; x += 2) {
+        const wx = x + cam;
+        const top = sy(250 + 14 * Math.sin(wx / 37 + s.t * 0.4) + 8 * Math.sin(wx / 13 - s.t * 0.7));
+        if (top < vh) {
+          A.R(g, x, top, 2, vh - top, '#2b2a48');
+          A.R(g, x, top, 2, 2, '#4a4870');
+        }
+      }
+    }
     if (s.mapa === 'oceano') {
       OC.dibujarOlas(g, cam, sy(OC.NIVEL_MAR), vw, s.t, still);
       for (const w of splashes) OC.dibujarSalpicadura(g, sx(w.x), sy(OC.NIVEL_MAR), 1 - w.t / 0.9);
@@ -3012,6 +3141,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw);
+
+    if (s.mapa === 'tormenta') dibujarTormenta(vw, vh, sx, sy);
 
     // Frost creeping in from the edges as the ice grows; cracks when frozen.
     if (s.hielo > 0.05 && s.mode === 'play') dibujarEscarcha(vw, vh);
@@ -3211,6 +3342,64 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
   }
 
+  /** Rain, the lightning bolt (and its warning glow) and the sky flashing white. */
+  function dibujarTormenta(vw: number, vh: number, sx: (x: number) => number, sy: (y: number) => number) {
+    const calm = still || s.calma;
+    // A darker, wetter sky.
+    g.globalAlpha = 0.3;
+    g.fillStyle = '#141226';
+    g.fillRect(0, 0, vw, vh);
+    // Slanted rain streaks.
+    g.globalAlpha = 0.5;
+    const n = Math.round((vw * vh) / 900);
+    for (let i = 0; i < n; i++) {
+      const x = ((i * 73.13 + (calm ? 0 : s.t * 70)) % (vw + 20)) - 10;
+      const y = ((i * 151.7 + (calm ? 0 : s.t * 420)) % (vh + 20)) - 10;
+      A.R(g, Math.round(x), Math.round(y), 1, 3, '#a8c0f0');
+      A.R(g, Math.round(x) - 1, Math.round(y) + 3, 1, 2, '#a8c0f0');
+    }
+    g.globalAlpha = 1;
+    const r = s.rayo;
+    if (r) {
+      const x = sx(r.x);
+      if (r.t < 0.8) {
+        // Warning: the cloud above glows and a faint guide line shows where it will fall.
+        g.globalAlpha = 0.25 + 0.25 * (Math.floor(s.t * 12) % 2);
+        for (let y = 0; y < sy(r.tope); y += 4) A.R(g, x, y, 1, 2, '#bfe8ff');
+        A.R(g, x - 10, 0, 21, 6, '#e6f6ff');
+        g.globalAlpha = 1;
+      } else {
+        // The bolt: a jagged white line with a blue glow.
+        let px = x, py = 0;
+        const bottom = sy(r.tope);
+        while (py < bottom) {
+          const nx = px + Math.round(rand(-5, 5));
+          const ny = Math.min(bottom, py + Math.round(rand(6, 12)));
+          g.strokeStyle = '#9ad8ff';
+          g.lineWidth = 3;
+          g.beginPath();
+          g.moveTo(px, py);
+          g.lineTo(nx, ny);
+          g.stroke();
+          g.strokeStyle = '#ffffff';
+          g.lineWidth = 1;
+          g.beginPath();
+          g.moveTo(px, py);
+          g.lineTo(nx, ny);
+          g.stroke();
+          px = nx;
+          py = ny;
+        }
+      }
+    }
+    if (s.relampago > 0) {
+      g.globalAlpha = (calm ? 0.25 : 0.7) * s.relampago;
+      g.fillStyle = '#e6f0ff';
+      g.fillRect(0, 0, vw, vh);
+      g.globalAlpha = 1;
+    }
+  }
+
   /**
    * Frost on the screen: ice crystals from a fixed pattern, reaching further
    * in from each edge as the ice grows; frozen solid adds cracks and a blink.
@@ -3287,10 +3476,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       wind: Math.round(FV.viento(s.t, s.plane.x, s.plane.y)),
       altitude: Math.round((s.plane.y * FV.ESCALA.metrosPorPx) / 50) * 50,
       sky: s.themePick,
-      zone: nombreZona(zonaAltitud(s.plane.y), s.mapa),
+      zone: s.mapa === 'tormenta' ? 'Tormenta' : nombreZona(zonaAltitud(s.plane.y), s.mapa),
       warn: s.warn,
       stall: s.mode === 'play' && !s.dead && s.stallT > 0 && s.inv <= 0 && !s.congelado,
       hielo: Math.round(s.hielo * 20) / 20,
+      nukes: s.nukes,
       congelado: s.congelado,
       zoom: [view.levels.length, view.zi],
       throttle: Math.sign(input.gas),
@@ -3315,10 +3505,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   const CODES: Record<string, string> = {
     ArrowLeft: 'l', KeyA: 'l', ArrowRight: 'r', KeyD: 'r', ArrowUp: 'u', KeyW: 'u', ArrowDown: 'd', KeyS: 'd',
-    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyL: 'flare', KeyH: 'gun', KeyF: 'gun',
+    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyL: 'flare', KeyH: 'gun', KeyF: 'gun', KeyN: 'nuke',
     KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
   };
-  const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false };
+  const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false };
   /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none. */
   let turn = 0;
   function syncInput() {
@@ -3331,6 +3521,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     input.bomb = keys.has('bomb') || touch.bomb;
     input.flare = keys.has('flare') || touch.flare;
     input.gun = keys.has('gun') || touch.gun;
+    input.nuke = keys.has('nuke') || touch.nuke;
   }
   const onKey = (e: KeyboardEvent) => {
     const k = CODES[e.code];
@@ -3435,7 +3626,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, cambiarMapa, prepararTormenta };
 
   return {
     start,

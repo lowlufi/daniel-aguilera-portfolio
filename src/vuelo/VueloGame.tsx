@@ -370,7 +370,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       }
       return !v;
     });
-  const hold = (key: 'fire' | 'bomb' | 'flare' | 'gun') => ({
+  const hold = (key: 'fire' | 'bomb' | 'flare' | 'gun' | 'nuke') => ({
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
       game.current?.touch({ [key]: true });
@@ -423,6 +423,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
                 </span>
                 <span className={CHIP}>⭐ {hud.score}</span>
+                {hud.nukes > 0 && (
+                  <span className={`${CHIP} bg-[#f4ffc0] text-[#4a5a1a]`} title="Bomba nuclear: tecla N o botón ☢️">
+                    ☢️ ×{hud.nukes}
+                  </span>
+                )}
                 {hud.boost && (
                   <span className={`${CHIP} animate-pulse bg-[#ffe0f0] text-[#c8507a]`} title="Mejora especial de un avión derribado">
                     ⭐ {hud.boost} · {hud.boostT} s
@@ -570,7 +575,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             )}
             {hud.resumen.destino ? (
               <p className="mt-3 animate-pulse rounded-full bg-[#7ad8ff] px-3 py-1 text-sm font-black text-[#1a3a6a]">
-                🔥 ¡Super nitro! {hud.resumen.destino === 'oceano' ? 'Rumbo al mar de San Antonio 🌊' : 'Rumbo a Valparaíso 🏘️'}
+                🔥 ¡Super nitro! Rumbo a{' '}
+                {({ oceano: 'el mar de San Antonio 🌊', valparaiso: 'Valparaíso 🏘️', tormenta: 'la tormenta ⛈️', valle: 'San Antonio 🏠' } as Record<string, string>)[hud.resumen.destino]}
               </p>
             ) : (
               <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {hud.resumen.siguiente}</p>
@@ -634,6 +640,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <Key k="K" label="Bomba" />
                 <Key k="L" label="Bengalas" />
                 <Key k="H · F" label="Metralla (se calienta)" />
+                <Key k="N" label="Bomba nuclear (de los ovnis)" />
                 <Key k="Z · rueda" label="Zoom" />
                 <Key k="Esc" label="Pausa" />
               </ul>
@@ -910,6 +917,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             </div>
             <div className="flex flex-col gap-2">
               <TouchButton label="Metralla" active={hud?.hot} {...hold('gun')}>💥</TouchButton>
+              {!!hud?.nukes && (
+                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>☢️</TouchButton>
+              )}
             </div>
             <TouchButton label="Misil" big {...hold('fire')}>🚀</TouchButton>
           </div>

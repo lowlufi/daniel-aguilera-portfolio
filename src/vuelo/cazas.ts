@@ -29,6 +29,9 @@ export type Caza = {
   escDir: number;
   /** Muzzle flash left, s. */
   fogonazo: number;
+  /** Storm aces: fragile but they dogfight hard (break turns, quicker bursts). */
+  agresivo: boolean;
+  quiebre: number;
 };
 
 export type Disparo = { x: number; y: number; vx: number; vy: number };
@@ -48,10 +51,10 @@ export function cuantos(oleada: number): number {
   return oleada < 3 ? 0 : Math.min(4, 1 + Math.floor((oleada - 3) / 2));
 }
 
-export function crear(x: number, y: number, haciaDerecha: boolean, oleada: number): Caza {
+export function crear(x: number, y: number, haciaDerecha: boolean, oleada: number, agresivo = false): Caza {
   const a = FV.nuevoAvion('caza', x, y, haciaDerecha);
-  const hp = 2 + Math.min(1.5, (oleada - 3) * 0.15);
-  return { id: ++ids, a, hp, hpMax: hp, gunCd: 2, rafaga: 0, rafT: 0, misilCd: 6 + Math.random() * 4, flash: 0, escape: 0, escDir: 1, fogonazo: 0 };
+  const hp = agresivo ? 1.2 : 2 + Math.min(1.5, (oleada - 3) * 0.15);
+  return { id: ++ids, a, hp, hpMax: hp, gunCd: agresivo ? 1 : 2, rafaga: 0, rafT: 0, misilCd: 6 + Math.random() * 4, flash: 0, escape: 0, escDir: 1, fogonazo: 0, agresivo, quiebre: 0 };
 }
 
 /** One step of a fighter's brain and flight. */
@@ -73,6 +76,17 @@ export function paso(c: Caza, jugador: Movil, vivo: boolean, dt: number, suelo: 
   } else if (d < 70) {
     c.escape = 1.4;
     c.escDir = Math.cos(a.rumbo) >= 0 ? 1 : -1;
+  }
+  // An ace with the player on its tail breaks hard to the side to shake it off.
+  if (c.agresivo && vivo && c.escape <= 0) {
+    const behind = -(dx * Math.cos(a.rumbo) + dy * Math.sin(a.rumbo)) / (d || 1);
+    if (c.quiebre <= 0 && behind > 0.75 && d < 230) c.quiebre = 0.9 + Math.random() * 0.5;
+    if (c.quiebre > 0) {
+      c.quiebre -= dt;
+      const side = c.id % 2 ? 1 : -1;
+      tx = a.x - Math.sin(a.rumbo) * 300 * side;
+      ty = a.y + Math.cos(a.rumbo) * 300 * side;
+    }
   }
   if (!vivo) {
     tx = a.x + (Math.cos(a.rumbo) >= 0 ? 400 : -400);
@@ -104,7 +118,7 @@ export function paso(c: Caza, jugador: Movil, vivo: boolean, dt: number, suelo: 
   } else if (c.gunCd <= 0 && d < 280 && mira < 0.14) {
     c.rafaga = 6;
     c.rafT = 0;
-    c.gunCd = clamp(2.6 - oleada * 0.08, 1.3, 2.6) + Math.random() * 0.8;
+    c.gunCd = (c.agresivo ? 1.1 : clamp(2.6 - oleada * 0.08, 1.3, 2.6)) + Math.random() * 0.8;
   }
   // Now and then a seeker missile from further out.
   c.misilCd -= dt;

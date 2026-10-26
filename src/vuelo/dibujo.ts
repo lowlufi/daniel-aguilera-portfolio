@@ -386,7 +386,7 @@ export function pilotPortrait(m: ModeloAvion) {
 
 /* ── Mice and their vehicles ─────────────────────────────────────────────── */
 
-export type VehiculoTipo = 'jeep' | 'camion' | 'tanque' | 'sam' | 'margarita' | 'lancha' | 'fragata' | 'portaaviones' | 'trolebus' | 'bici';
+export type VehiculoTipo = 'jeep' | 'camion' | 'tanque' | 'sam' | 'margarita' | 'lancha' | 'fragata' | 'portaaviones' | 'trolebus' | 'bici' | 'micro' | 'portuario';
 
 const V = '#b49af4', V0 = '#8064d8', V1 = '#e0d4ff', VINK = '#3a2a7a';
 const TIRE = '#4a3a5a';
@@ -814,6 +814,51 @@ function paintBici(g: Ctx, f: number) {
   R(g, -1, -15, 2, 1, '#ffd0dc');
 }
 
+/* ── San Antonio: the colectivo bus and the port truck ──────────────────── */
+
+/** A lilac micro with its destination board, mice at every window. */
+function paintMicro(g: Ctx, f: number) {
+  R(g, -21, -21, 42, 7, VINK);
+  R(g, -20, -20, 40, 5, P.cream);
+  escribir(g, 'CARTAGENA', -18, -20, VINK);
+  R(g, -20, -15, 40, 11, V0);
+  R(g, -19, -15, 38, 8, V);
+  R(g, -19, -15, 38, 1, V1);
+  R(g, -19, -8, 38, 1, P.white);
+  R(g, -21, -13, 3, 5, P.gl1);
+  mouse(g, -15, -9);
+  for (let i = 0; i < 5; i++) {
+    const wx = -10 + i * 6;
+    R(g, wx, -13, 5, 4, P.gl1);
+    if (i % 2) windowMouse(g, wx + 1, -9);
+  }
+  R(g, 16, -14, 3, 8, P.gl0);
+  R(g, -21, -7, 2, 2, P.gold1);
+  wheel(g, -12, -4, 3, f);
+  wheel(g, 11, -4, 3, f);
+}
+
+/** A port truck hauling a terracotta container. */
+function paintPortuario(g: Ctx, f: number) {
+  // Container with corrugated ribs.
+  R(g, -8, -19, 29, 12, '#a04a3a');
+  R(g, -7, -18, 27, 10, '#e07a5f');
+  R(g, -7, -18, 27, 1, '#f4a890');
+  for (let x = -5; x < 20; x += 3) R(g, x, -16, 1, 7, '#c05a45');
+  // Chassis and the cab with a mouse driver.
+  R(g, -10, -7, 31, 3, P.metal0);
+  R(g, -21, -17, 12, 12, V0);
+  R(g, -20, -17, 10, 10, V);
+  R(g, -20, -17, 10, 1, V1);
+  R(g, -20, -15, 5, 4, P.gl1);
+  mouse(g, -14, -10);
+  R(g, -22, -8, 2, 2, P.gold);
+  R(g, -11, -21, 2, 6, P.metal0);
+  wheel(g, -15, -4, 3, f);
+  wheel(g, 6, -4, 3, f);
+  wheel(g, 14, -4, 3, f);
+}
+
 /** `below`: px of hull painted under the waterline (boats only). */
 export const VEH_LOOK: Record<VehiculoTipo, { w: number; h: number; paint: (g: Ctx, f: number) => void; ink?: string; below?: number }> = {
   jeep: { w: 24, h: 18, paint: paintJeep },
@@ -826,6 +871,8 @@ export const VEH_LOOK: Record<VehiculoTipo, { w: number; h: number; paint: (g: C
   portaaviones: { w: 150, h: 40, paint: paintPortaaviones, below: 9 },
   trolebus: { w: 40, h: 20, paint: paintTrolebus, ink: '#2a5a3a' },
   bici: { w: 16, h: 14, paint: paintBici },
+  micro: { w: 40, h: 20, paint: paintMicro },
+  portuario: { w: 42, h: 22, paint: paintPortuario },
 };
 
 export function vehicleSprite(k: VehiculoTipo, f: number) {
@@ -1116,10 +1163,12 @@ export function scorchMarks(g: Ctx, k: VehiculoTipo, x: number, y: number, seed:
 }
 
 /** What a reward balloon gives: one more slot of missiles, bombs or flares. */
-export type Premio = 'misil' | 'bomba' | 'bengala' | 'reparar' | 'especial';
+export type Premio = 'misil' | 'bomba' | 'bengala' | 'reparar' | 'especial' | 'vida' | 'nuclear';
 const PRIZE_COL: Record<Premio, [string, string, string]> = {
   reparar: [P.g0, P.g2, P.g3],
   especial: ['#c8507a', '#ff8ac8', '#ffe0f0'],
+  vida: ['#2f6ab8', '#7ab8ff', '#e0f0ff'],
+  nuclear: ['#4a5a1a', '#c8e048', '#f4ffc0'],
   misil: [P.r0, P.r1, P.r3],
   bomba: ['#2a5a9a', '#74b4f0', '#d8f0ff'],
   bengala: [P.gold0, P.gold, P.gold1],
@@ -1138,7 +1187,7 @@ export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number,
   const by = Y - (big ? 14 : 10) - r;
   // String.
   for (let i = 0; i < (big ? 14 : 10); i++) R(g, X + Math.round((sway * i) / 12), Y - i, 1, 1, '#8a7a9a');
-  if ((big || kind === 'especial') && Math.floor(t * 3) % 2) {
+  if ((big || kind === 'especial' || kind === 'vida' || kind === 'nuclear') && Math.floor(t * 3) % 2) {
     g.globalAlpha = 0.5;
     D.disc(g, X + sway, by, r + 3, c2);
     g.globalAlpha = 1;
@@ -1156,6 +1205,17 @@ export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number,
   } else if (kind === 'bomba') {
     D.disc(g, ix, by + 1, 2, '#2a2438');
     R(g, ix + 1, by - 2, 1, 2, P.gold);
+  } else if (kind === 'vida') {
+    // A little plane: one more life.
+    R(g, ix - 3, by, 7, 1, P.white);
+    R(g, ix - 1, by - 2, 2, 5, P.white);
+    R(g, ix + 3, by - 1, 1, 3, P.white);
+  } else if (kind === 'nuclear') {
+    // The radiation trefoil, tiny.
+    R(g, ix, by, 1, 1, '#2a2438');
+    R(g, ix - 2, by - 3, 2, 2, '#2a2438');
+    R(g, ix + 1, by - 3, 2, 2, '#2a2438');
+    R(g, ix - 1, by + 2, 3, 2, '#2a2438');
   } else if (kind === 'especial') {
     // A golden star: a special upgrade from a downed fighter.
     R(g, ix, by - 3, 1, 7, P.gold1);
@@ -1462,8 +1522,8 @@ function faro(g: Ctx, x: number, y: number) {
 function pilaContenedores(g: Ctx, x: number, y: number, n: number, seed: number) {
   const COLS = ['#e07a5f', '#3d85c6', '#f2cc8f', '#8fd3c8', '#c9a7e0'];
   for (let j = 0; j < n; j++) {
-    const c = COLS[(seed >> (j * 3)) % COLS.length];
-    const xx = x + ((seed >> (j + 5)) % 2) * 3;
+    const c = COLS[(seed >>> (j * 3)) % COLS.length];
+    const xx = x + ((seed >>> (j + 5)) % 2) * 3;
     const yy = y - 9 * (j + 1);
     R(g, xx - 1, yy - 1, 22, 10, '#3e4a6b');
     R(g, xx, yy, 20, 8, c);

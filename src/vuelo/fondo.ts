@@ -2,14 +2,15 @@
  * El fondo del juego de aviones: todo lo que está detrás del suelo.
  *
  * Estilo «dulce»: pixel art pastel, formas redondas, contornos en un tono más
- * oscuro del mismo color (nunca negro) y nada de anti-aliasing. Capas de
- * atrás hacia adelante:
+ * oscuro del mismo color (nunca negro) y nada de anti-aliasing. Same sky,
+ * clouds, stratosphere and space for every map; the land layers depend on
+ * `paisaje`:
  *
- *   cielo a bandas · estrellas y aurora (noche) · sol / sol poniente / luna
- *   · nubes lejanas y cirros · banco de nubes en el horizonte · cordillera
- *   con nieve · niebla · nubes medianas · colinas a rayas · niebla · globos
- *   · pueblito (casitas, campanario, molino, humo, faroles) · pajaritos
- *   · nubes cercanas · bosque de árboles redondos · luciérnagas (noche)
+ *   valle      → San Antonio: coastal range, then sectors by world x (San Juan,
+ *                Llolleo, Barrancas, the port, Cartagena)
+ *   oceano     → the sea, with the coast on the horizon (San Antonio → coast →
+ *                Valparaíso, by `costa`), sailboats, gulls and glitter
+ *   valparaiso → far ridges, the bay, cerros packed with houses, camanchaca
  *
  * Cada capa estática se pinta una sola vez por ambiente en una tira que se
  * repite en x (los colores salen de un material base «de día» que se tiñe
@@ -2080,13 +2081,568 @@ const tareasValpo = (a: Ambiente): Tarea<Valpo>[] => [
   (c) => (c.bruma = capaNiebla(a, 0.7)),
 ];
 
+/* ── Sky life: small cozy things that fill each altitude band ──────────── */
+
+/*
+ * Nothing here may read as an enemy or a missile: no lilac or pink, nothing
+ * that rushes at the camera, low contrast (hazed toward the sky). Sprites are
+ * painted once per ambiente; per frame it's a handful of drawImage/fillRect.
+ */
+
+/** Fades a canvas toward the haze color (`k` 0..1), in place. */
+function brumar(cv: Cv, a: Ambiente, k: number) {
+  const g = cv.getContext('2d')!;
+  g.globalCompositeOperation = 'source-atop';
+  g.globalAlpha = k;
+  g.fillStyle = css(PAL[a].bruma);
+  g.fillRect(0, 0, cv.width, cv.height);
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+  return cv;
+}
+
+/** A Chilean kite (volantín): a two-colour diamond with crossed sticks. */
+function volantin(a: Ambiente, c0: string, c1: string) {
+  const b = new Buf(13, 13);
+  const k = 0.3;
+  for (let y = 0; y <= 10; y++) {
+    const w = y <= 4 ? y + 1 : 11 - y;
+    for (let x = -w; x <= w; x++) b.px(6 + x, 1 + y, pack(mat(a, x < 0 ? c0 : c1, k)));
+  }
+  const palo = pack(mat(a, '#8a6a4a', k));
+  for (let y = 1; y <= 11; y++) b.px(6, y, palo);
+  for (let x = 1; x <= 11; x++) b.px(x, 5, palo);
+  b.outline(pack(mat(a, '#5a5a7a', k)));
+  return b.canvas();
+}
+
+/** A little cream airplane towing a banner. Faces right. */
+function avionetaLetrero(a: Ambiente) {
+  const cv = document.createElement('canvas');
+  const txt = 'VUELA ALTO';
+  const tw = anchoTexto(txt);
+  cv.width = tw + 30;
+  cv.height = 12;
+  const g = cv.getContext('2d')!;
+  const R = (x: number, y: number, w: number, h: number, c: string) => {
+    g.fillStyle = c;
+    g.fillRect(x, y, w, h);
+  };
+  // Banner (left), tow line, then the plane.
+  R(0, 2, tw + 6, 9, '#7a7a96');
+  R(1, 3, tw + 4, 7, '#fff6e5');
+  escribir(g, txt, 3, 4, '#5a6a9a');
+  R(tw + 6, 6, 9, 1, '#9a9ab0');
+  const px = tw + 15;
+  R(px, 4, 12, 4, '#7a7a96');
+  R(px + 1, 5, 10, 2, '#ffe9a8');
+  R(px + 9, 3, 3, 1, '#7a7a96');
+  R(px + 4, 7, 5, 2, '#d8c890');
+  R(px + 12, 4, 1, 4, '#c8d0e8');
+  R(px + 2, 1, 2, 4, '#d8c890');
+  return brumar(cv, a, 0.35);
+}
+
+/** A tall cumulus tower (cumulus congestus) with a flat base. */
+function torreNube(a: Ambiente, seed: number, w: number, h: number) {
+  const p = palNube(a, 0.2);
+  const b = new Buf(w + 4, h + 4);
+  const r = rng(seed);
+  const bolas: [number, number, number][] = [];
+  for (let y = h - 6; y > 8; y -= 6) {
+    const k = 1 - (h - y) / h;
+    const ancho = (w / 2 - 4) * (0.45 + 0.55 * k);
+    for (let i = 0; i < 3; i++) bolas.push([w / 2 + 2 + (i - 1) * ancho * 0.6 + (r() - 0.5) * 4, y, Math.round(4 + ancho * 0.35 + r() * 2)]);
+  }
+  for (const [x, y, rr] of bolas) b.disc(x, y, rr, pack(p.sombra));
+  for (const [x, y, rr] of bolas) b.disc(x - 1, y - 2, rr - 1, pack(p.cuerpo));
+  for (const [x, y, rr] of bolas) if (rr > 5) b.disc(x - rr * 0.4, y - rr * 0.5, Math.round(rr * 0.35), pack(p.luz));
+  for (let y = h; y < b.h; y++) for (let x = 0; x < b.w; x++) b.d[y * b.w + x] = 0;
+  b.outline(pack(p.tinta));
+  return b.canvas();
+}
+
+/** A long, flat cloud bridge. */
+function puenteNube(a: Ambiente, seed: number, w: number) {
+  const p = palNube(a, 0.3);
+  const b = new Buf(w, 18);
+  const r = rng(seed);
+  for (let x = 6; x < w - 6; x += 5) b.disc(x, 11 - Math.round(r() * 3), 4 + Math.round(r() * 2), pack(p.sombra));
+  for (let x = 6; x < w - 6; x += 5) b.disc(x - 1, 9 - Math.round(r() * 3), 3 + Math.round(r() * 2), pack(p.cuerpo));
+  for (let y = 15; y < 18; y++) for (let x = 0; x < w; x++) b.d[y * w + x] = 0;
+  b.outline(pack(p.tinta));
+  return b.canvas();
+}
+
+/** A dark storm cloud far away, and the same cloud lit from inside. */
+function nubeTormenta(seed: number) {
+  const oscura = { cuerpo: hex('#3c3a6e'), luz: hex('#4a4880'), sombra: hex('#302e5e'), tinta: hex('#262452') };
+  const lit = { cuerpo: hex('#8a88c0'), luz: hex('#c4c2ec'), sombra: hex('#6a68a8'), tinta: hex('#4a4888') };
+  return [nube(96, seed, oscura), nube(96, seed, lit)];
+}
+
+/** Slanted sun rays for the afternoon, dithered thin. */
+function rayosSol() {
+  const W = 220;
+  const H = 260;
+  const b = new Buf(W, H);
+  const col = pack(hex('#fff0c8'));
+  for (const [x0, ancho] of [[30, 12], [74, 8], [110, 16], [160, 9], [196, 6]] as const)
+    for (let y = 0; y < H; y++) {
+      const fade = 1 - y / H;
+      for (let i = 0; i < ancho; i++) {
+        const x = Math.round(x0 + i - y * 0.35);
+        if (x >= 0 && x < W && tramado(x, y, 0.4 * fade)) b.d[y * W + x] = col;
+      }
+    }
+  return b.canvas();
+}
+
+/** A weather balloon: a pale sphere with its little instrument box. */
+function globoSonda(a: Ambiente) {
+  const b = new Buf(11, 24);
+  b.disc(5, 5, 4, pack(mat(a, '#e8eef6', 0.2)));
+  b.disc(4, 4, 2, pack(mat(a, '#ffffff', 0.2)));
+  for (let y = 10; y < 20; y++) b.px(5, y, pack(mat(a, '#9aa0b8', 0.2)));
+  b.rect(4, 20, 3, 2, pack(mat(a, '#f2b060', 0.2)));
+  b.outline(pack(mat(a, '#7a88a8', 0.3)));
+  return b.canvas();
+}
+
+/** A high jet's contrail, thinning to nothing at the tail. */
+function estelaAlta() {
+  const W = 240;
+  const b = new Buf(W, 3);
+  const col = pack(hex('#f4f8ff'));
+  for (let x = 0; x < W; x++) {
+    const k = x / W;
+    for (let y = 0; y < 3; y++) if (tramado(x, y, y === 1 ? k : k * 0.5)) b.d[y * W + x] = col;
+  }
+  return b.canvas();
+}
+
+/** A soft dithered haze band (the bright edge of the atmosphere). */
+function bandaBruma(a: Ambiente) {
+  const W = 64;
+  const H = 24;
+  const b = new Buf(W, H);
+  const col = pack(hex(a === 'noche' ? '#5a5a98' : a === 'tarde' ? '#ffd8c0' : '#dceaff'));
+  for (let y = 0; y < H; y++) {
+    const k = 1 - Math.abs(y - H / 2) / (H / 2);
+    for (let x = 0; x < W; x++) if (tramado(x, y, k * 0.55)) b.d[y * W + x] = col;
+  }
+  return b.canvas();
+}
+
+/** Noctilucent clouds: thin electric-blue ripples. */
+function noctilucente(seed: number) {
+  const W = 260;
+  const H = 16;
+  const b = new Buf(W, H);
+  const r = rng(seed);
+  const cs = [pack(hex('#7ab8e8')), pack(hex('#b4e0ff')), pack(hex('#e4f6ff'))];
+  for (let j = 0; j < 4; j++) {
+    const y0 = 3 + j * 3;
+    const ph = r() * 6;
+    for (let x = 0; x < W; x++) {
+      const env = Math.sin((x / W) * Math.PI);
+      const y = Math.round(y0 + Math.sin(x * 0.09 + ph) * 1.5);
+      if (tramado(x, y, env * (0.5 + 0.4 * Math.sin(x * 0.05 + j)))) b.px(x, y, cs[(j + (x >> 4)) % 3]);
+    }
+  }
+  return b.canvas();
+}
+
+/** The space station: a truss with modules and four wide solar arrays. */
+function estacion() {
+  const b = new Buf(27, 11);
+  const panel = pack(hex('#5a72a8'));
+  const rejilla = pack(hex('#8aa4d4'));
+  for (const x of [1, 6, 17, 22])
+    for (const y of [0, 7]) {
+      b.rect(x, y, 4, 4, panel);
+      b.px(x + 1, y + 1, rejilla);
+      b.px(x + 3, y + 2, rejilla);
+    }
+  b.rect(0, 5, 27, 1, pack(hex('#b8bcd0')));
+  b.rect(10, 3, 7, 5, pack(hex('#e4e6f0')));
+  b.rect(12, 2, 3, 7, pack(hex('#c8ccdc')));
+  b.px(11, 4, pack(hex('#ffffff')));
+  return b.canvas();
+}
+
+type Vida = {
+  volantines: Cv[];
+  letrero: Cv;
+  torres: Cv[];
+  puentes: Cv[];
+  tormenta: Cv[];
+  rayos: Cv;
+  sonda: Cv;
+  estela: Cv;
+  bruma: Cv;
+  noctilucentes: Cv[];
+  iss: Cv;
+};
+
+const tareasVida = (a: Ambiente): Tarea<Vida>[] => [
+  (c) => {
+    c.volantines = [volantin(a, '#f2cc8f', '#e07a5f'), volantin(a, '#8fd3c8', '#3d85c6'), volantin(a, '#b5d99c', '#ffd27f')];
+    c.letrero = avionetaLetrero(a);
+  },
+  (c) => {
+    c.torres = [torreNube(a, 901, 60, 96), torreNube(a, 902, 46, 70)];
+    c.puentes = [puenteNube(a, 903, 200), puenteNube(a, 904, 130)];
+  },
+  (c) => {
+    c.tormenta = nubeTormenta(905);
+    c.rayos = rayosSol();
+    c.sonda = globoSonda(a);
+    c.estela = estelaAlta();
+    c.bruma = bandaBruma(a);
+    c.noctilucentes = [noctilucente(906), noctilucente(907)];
+    c.iss = estacion();
+  },
+];
+
+/** Kites: [world x, height above the near hills, colour, string sway phase]. */
+const VOLANTINES: [number, number, number, number][] = [[180, 70, 0, 0], [520, 92, 1, 1.7], [1300, 64, 2, 3.1], [2050, 84, 0, 4.4], [2900, 76, 1, 0.9]];
+/** Cloud towers and bridges: [world x, altitude, sprite]. */
+const TORRES: [number, number, number][] = [[300, 820, 0], [1150, 1000, 1], [1900, 760, 0], [2600, 1120, 1]];
+const PUENTES: [number, number, number][] = [[700, 980, 0], [1600, 1180, 1], [2300, 900, 1]];
+/** Ice crystals and mid-sky stars: [x 0..1, y 0..1, phase]. */
+const CRISTALES: [number, number, number][] = (() => {
+  const r = rng(909);
+  return Array.from({ length: 22 }, () => [r(), r(), r() * 10] as [number, number, number]);
+})();
+/** Seeds and butterflies near the ground: [x 0..1, height, phase, butterfly?]. */
+const SEMILLAS: [number, number, number, number][] = (() => {
+  const r = rng(910);
+  return Array.from({ length: 12 }, (_, i) => [r(), 10 + r() * 50, r() * 10, i % 4 === 0 ? 1 : 0] as [number, number, number, number]);
+})();
+
+/** Screen row for something that lives at world altitude A (k = how fast it slides with the camera). */
+const filaAlt = (o: OpcionesFondo, A: number, fy: number, k: number) => Math.round(o.vh * fy + (o.camY - A) * k);
+
+/**
+ * Low sky (in front of the landscape, behind the sea of clouds): kites,
+ * a banner plane, extra flocks, seeds and butterflies; at sea an albatross,
+ * pelicans and a far steamer's smoke; in Valparaíso far fireworks at night.
+ */
+function vidaBaja(g: Ctx, o: OpcionesFondo, C: Capas, V: Vida, t: number, ys: (k: number) => number) {
+  const { vw, vh, camX, ambiente: a } = o;
+  const mapa = o.paisaje ?? 'valle';
+  const cy = o.camY;
+  if (cy > 900) return;
+  const quieto = !!o.quieto;
+
+  // Kites over the hills (land maps), each on a long string that sways.
+  if (mapa !== 'oceano' && a !== 'noche') {
+    for (let i = 0; i < VOLANTINES.length; i++) {
+      const [X, alto, ci, ph] = VOLANTINES[i];
+      const x = Math.round(X - camX * 0.5 + Math.sin(t * 0.6 + ph) * 6);
+      if (x < -20 || x > vw + 20) continue;
+      const y = Math.round(ys(0.6) - alto + Math.sin(t * 0.9 + ph) * 3);
+      if (y > vh || y < -20) continue;
+      g.drawImage(V.volantines[ci], x - 6, y - 6);
+      // Tail of little bows, and the string down toward the ground.
+      g.fillStyle = '#8a8aa8';
+      for (let j = 1; j <= 4; j++) g.fillRect(x - 1 + Math.round(Math.sin(t * 3 + j + ph) * 1.5), y + 6 + j * 3, 3, 1);
+      for (let j = 1; j < 22; j++) {
+        const sy = y + 6 + j * 4;
+        if (sy > vh) break;
+        g.fillRect(x + Math.round(j * 1.6 + Math.sin(j * 0.3 + t * 0.6 + ph) * 1.5), sy, 1, 1);
+      }
+    }
+  }
+
+  // A little plane towing a banner, slowly across the low sky.
+  if (a !== 'noche' && !quieto) {
+    const ciclo = 70;
+    const f = mod(t / ciclo, 1);
+    if (f < 0.6) {
+      const s = V.letrero;
+      const x = Math.round(-s.width + (f / 0.6) * (vw + s.width * 2) - camX * 0.05);
+      const y = filaAlt(o, 340, 0.3, 0.5) + Math.round(Math.sin(t * 1.3) * 1.5);
+      if (y > -20 && y < vh) g.drawImage(s, x, y);
+    }
+  }
+
+  // Two more flocks in V, higher up.
+  if (C.pajaro && mapa !== 'oceano') {
+    for (let j = 0; j < 2; j++) {
+      const bx = mod(600 + j * 1300 - t * (10 + j * 3) - camX * 0.3, 2600) - 200;
+      const by = filaAlt(o, 260 + j * 170, 0.4, 0.55) + Math.round(Math.sin(t * 0.6 + j) * 3);
+      if (bx > -40 && bx < vw + 40 && by > -10 && by < vh) bandada(g, C.pajaro, bx, by, t, 3 + j * 2);
+    }
+  }
+
+  // Seeds drifting and butterflies, close above the ground (daytime, land).
+  if (mapa !== 'oceano' && a === 'dia' && !quieto) {
+    const base = ys(0.6);
+    for (let i = 0; i < SEMILLAS.length; i++) {
+      const [fx, el, ph, mari] = SEMILLAS[i];
+      const x = Math.round(mod(fx * (vw + 40) + t * (mari ? 9 : 6) - camX * 0.6, vw + 40) - 20);
+      const y = Math.round(base - el + Math.sin(t * (mari ? 2.4 : 0.8) + ph) * (mari ? 4 : 2));
+      if (y > vh || y < 0) continue;
+      if (mari) {
+        g.fillStyle = '#f2d070';
+        const up = Math.floor(t * 8 + ph) % 2;
+        g.fillRect(x - 1, y - up, 1, 2);
+        g.fillRect(x + 1, y - up, 1, 2);
+        g.fillStyle = '#7a6a5a';
+        g.fillRect(x, y, 1, 1);
+      } else {
+        g.fillStyle = '#f8f6ee';
+        g.fillRect(x, y, 1, 1);
+        g.fillRect(x - 1, y - 1, 3, 1);
+      }
+    }
+  }
+
+  // At sea: an albatross gliding, pelicans in a line and a far steamer's smoke.
+  if (mapa === 'oceano') {
+    if (a !== 'noche') {
+      const x = Math.round(mod(900 - t * 7 - camX * 0.25, 2200) - 200);
+      const y = filaAlt(o, 220, 0.35, 0.5) + Math.round(Math.sin(t * 0.5) * 4);
+      if (x > -20 && x < vw + 20 && y > -10 && y < vh) {
+        const tilt = Math.round(Math.sin(t * 0.5));
+        g.fillStyle = '#6a7090';
+        g.fillRect(x - 9, y + 1 - tilt, 7, 1);
+        g.fillRect(x + 3, y + 1 + tilt, 7, 1);
+        g.fillStyle = '#f4f4f0';
+        g.fillRect(x - 8, y - tilt, 6, 1);
+        g.fillRect(x + 3, y + tilt, 6, 1);
+        g.fillRect(x - 2, y, 5, 2);
+        g.fillStyle = '#e0b060';
+        g.fillRect(x - 4, y + 1, 1, 1);
+      }
+      const px = Math.round(mod(1600 - t * 11 - camX * 0.4, 2400) - 200);
+      const py = filaAlt(o, 120, 0.55, 0.6);
+      if (px > -60 && px < vw + 20 && py > -10 && py < vh)
+        for (let i = 0; i < 4; i++) {
+          const xx = px + i * 9;
+          const yy = py + i * 2 + Math.round(Math.sin(t * 1.2 + i * 0.7));
+          g.fillStyle = '#7a7080';
+          g.fillRect(xx - 3, yy, 7, 1);
+          g.fillStyle = '#b8b0a8';
+          g.fillRect(xx - 1, yy - 1, 3, 1);
+          g.fillStyle = '#e0b060';
+          g.fillRect(xx - 3, yy - 1, 2, 1);
+        }
+    }
+    // A far steamer on the horizon puffing smoke.
+    const yH = ys(0.04);
+    const sx = Math.round(mod(2200 - camX * 0.06 - t * 1.5, 1800) - 100);
+    if (sx > -20 && sx < vw + 20 && yH < vh && yH > 0) {
+      g.fillStyle = a === 'noche' ? '#4a4a78' : '#6a6a8a';
+      g.fillRect(sx - 6, yH - 3, 13, 3);
+      g.fillRect(sx - 1, yH - 6, 3, 3);
+      for (let j = 0; j < 3; j++) {
+        const ph = quieto ? j / 3 : mod(t * 0.25 + j / 3, 1);
+        const sp = C.humo[Math.min(2, Math.floor(ph * 3))];
+        g.drawImage(sp, Math.round(sx + ph * 10 - sp.width / 2), Math.round(yH - 8 - ph * 14 - sp.height / 2));
+      }
+    }
+  }
+
+  // Valparaíso at night: now and then a far firework blooms over the hills.
+  if (mapa === 'valparaiso' && a === 'noche' && !quieto) {
+    const PER = 11;
+    const ciclo = Math.floor(t / PER);
+    const u = (t - ciclo * PER) / 1.6;
+    if (u < 1) {
+      const fx = Math.round(vw * (0.2 + ((ciclo * 37) % 60) / 100));
+      const fy = Math.round(ys(0.5) - 90 - ((ciclo * 53) % 40));
+      const rr = 3 + u * 15;
+      g.globalAlpha = (1 - u) * 0.55;
+      const cols = ['#ffe7a0', '#a8f0e0', '#ffffff'];
+      for (let i = 0; i < 12; i++) {
+        const ang = (i / 12) * TAU;
+        g.fillStyle = cols[(i + ciclo) % 3];
+        g.fillRect(Math.round(fx + Math.cos(ang) * rr), Math.round(fy + Math.sin(ang) * rr + u * u * 6), 1, 1);
+      }
+      g.globalAlpha = 1;
+    }
+  }
+}
+
+/**
+ * Higher bands: cumulus towers and cloud bridges, sun rays in the afternoon,
+ * a far storm flickering at night, a weather balloon, a jet contrail, ice
+ * glints, a haze band, noctilucent clouds, the space station and the first
+ * faint stars between the clouds and space.
+ */
+function vidaAlta(g: Ctx, o: OpcionesFondo, V: Vida, t: number, altMid: number, antes: boolean) {
+  const { vw, vh, camX, ambiente: a } = o;
+  const quieto = !!o.quieto;
+
+  if (antes) {
+    // Cloud towers rising out of the sea of clouds, and long cloud bridges.
+    if (altMid > 450 && altMid < 1700) {
+      for (let i = 0; i < TORRES.length; i++) {
+        const [X, A, si] = TORRES[i];
+        const s = V.torres[si];
+        const x = Math.round(mod(X - camX * 0.12 - t * 0.6, 3000) - 200);
+        if (x > vw || x + s.width < 0) continue;
+        // Rooted in the sea of clouds (same top as in dibujarFondo), sinking a bit by altitude.
+        const cyR = Math.round(o.camY);
+        const topMar = Math.round(vh * 0.6 + (1 - ss(200, 750, cyR)) * vh * 0.45 + ss(1250, 1800, cyR) * vh * 0.55);
+        const y = topMar + 10 + Math.round(Math.max(0, A - 800) * 0.04) - s.height;
+        if (y > vh || y + s.height < 0) continue;
+        g.drawImage(s, x, y);
+      }
+    }
+    // Sun rays through the clouds in the afternoon.
+    if (a === 'tarde') {
+      const k = ss(300, 600, altMid) * (1 - ss(1100, 1400, altMid));
+      if (k > 0.05) {
+        g.globalAlpha = k * 0.28;
+        g.drawImage(V.rayos, Math.round(vw * 0.7 - 40), Math.round(vh * 0.12));
+        g.globalAlpha = 1;
+      }
+    }
+    // A far storm cloud at night with a very soft flicker.
+    if (a === 'noche' && altMid > 420 && altMid < 1500) {
+      const [osc, luz] = V.tormenta;
+      const x = Math.round(mod(1500 - camX * 0.08, 2400) - 200);
+      const y = filaAlt(o, 900, 0.45, 0.5);
+      if (x < vw && x + osc.width > 0 && y < vh && y + osc.height > 0) {
+        g.drawImage(osc, x, y);
+        const f = mod(t, 9.3);
+        if (!quieto && (f < 0.08 || (f > 0.16 && f < 0.22))) {
+          g.globalAlpha = 0.5;
+          g.drawImage(luz, x, y);
+          g.fillStyle = '#fff6c0';
+          g.fillRect(x + 40, y + osc.height - 4, 1, 4);
+          g.fillRect(x + 41, y + osc.height, 1, 3);
+          g.fillRect(x + 40, y + osc.height + 3, 1, 3);
+          g.globalAlpha = 1;
+        }
+      }
+    }
+    return;
+  }
+
+  // Long cloud bridges, in front of the sea of clouds.
+  if (altMid > 650 && altMid < 1600) {
+    for (let i = 0; i < PUENTES.length; i++) {
+      const [X, A, si] = PUENTES[i];
+      const s = V.puentes[si];
+      const x = Math.round(mod(X - camX * 0.18 - t * 1.2, 2800) - 260);
+      if (x > vw || x + s.width < 0) continue;
+      const y = filaAlt(o, A, 0.5, 0.6);
+      if (y > vh || y + s.height < 0) continue;
+      g.drawImage(s, x, y);
+    }
+  }
+
+  // The bright haze edge of the lower atmosphere.
+  {
+    const k = ss(1150, 1400, altMid) * (1 - ss(1700, 2000, altMid));
+    if (k > 0.05) {
+      g.globalAlpha = k * 0.3;
+      tira(g, V.bruma, camX * 0.02, filaAlt(o, 1500, 0.55, 0.4), vw);
+      g.globalAlpha = 1;
+    }
+  }
+
+  // A weather balloon rising very slowly, and a high jet laying a contrail.
+  if (altMid > 1050 && altMid < 2000) {
+    const s = V.sonda;
+    const A = 1200 + (quieto ? 250 : mod(t * 6, 600));
+    const x = Math.round(mod(1100 - camX * 0.15, 2000) - 100 + Math.sin(t * 0.4) * 4);
+    const y = filaAlt(o, A, 0.5, 0.7);
+    if (x > -20 && x < vw && y > -30 && y < vh) g.drawImage(s, x, y);
+    if (!quieto) {
+      const f = mod(t / 50, 1);
+      if (f < 0.7) {
+        const e = V.estela;
+        const jx = Math.round(-60 + (f / 0.7) * (vw + 300));
+        const jy = filaAlt(o, 1600, 0.3, 0.35);
+        if (jy > -5 && jy < vh) {
+          g.globalAlpha = 0.6;
+          g.drawImage(e, jx - e.width, jy);
+          g.globalAlpha = 1;
+          g.fillStyle = '#e4e8f4';
+          g.fillRect(jx, jy, 3, 2);
+        }
+      }
+    }
+  }
+
+  // Ice crystals glinting, and the first faint stars between clouds and space.
+  {
+    const kHielo = ss(1150, 1350, altMid) * (1 - ss(1800, 2050, altMid));
+    const kEstr = ss(900, 1500, altMid) * (1 - ss(1700, 2100, altMid));
+    if (kHielo > 0.05 || kEstr > 0.05) {
+      for (let i = 0; i < CRISTALES.length; i++) {
+        const [fx, fy, ph] = CRISTALES[i];
+        const estrella = i % 2 === 0;
+        const k = estrella ? kEstr : kHielo;
+        if (k < 0.05) continue;
+        const x = Math.round(mod(fx * (vw + 20) - camX * (estrella ? 0.03 : 0.1), vw + 20) - 10);
+        const y = Math.round(mod(fy * vh * (estrella ? 0.6 : 1) + o.camY * (estrella ? 0.04 : 0.2), vh));
+        const s = quieto ? 0.5 : Math.sin(t * (estrella ? 1.6 : 3.1) + ph * 6);
+        if (!estrella && s < 0.82) continue;
+        g.globalAlpha = k * (estrella ? 0.7 : 0.9);
+        g.fillStyle = estrella ? '#fff8e4' : '#e8f8ff';
+        g.fillRect(x, y, 1, 1);
+        if (s > 0.9) {
+          g.fillRect(x - 1, y, 3, 1);
+          g.fillRect(x, y - 1, 1, 3);
+        }
+      }
+      g.globalAlpha = 1;
+    }
+  }
+
+  // Noctilucent clouds, brighter at dusk and night.
+  {
+    const k = ss(1700, 1900, altMid) * (1 - ss(2150, 2450, altMid)) * (a === 'dia' ? 0.5 : 1);
+    if (k > 0.05) {
+      g.globalAlpha = k * 0.6;
+      for (let i = 0; i < V.noctilucentes.length; i++) {
+        const s = V.noctilucentes[i];
+        const x = Math.round(mod(400 + i * 900 - camX * 0.04 - t * 0.8, 1800) - 300);
+        if (x > vw || x + s.width < 0) continue;
+        g.drawImage(s, x, filaAlt(o, 1950 + i * 120, 0.35, 0.3));
+      }
+      g.globalAlpha = 1;
+    }
+  }
+
+  // The space station crossing slowly, its light blinking.
+  if (!quieto) {
+    const k = ss(1850, 2150, altMid);
+    if (k > 0.05) {
+      const f = mod(t / 80, 1);
+      if (f < 0.65) {
+        const s = V.iss;
+        const u = f / 0.65;
+        const x = Math.round(-30 + u * (vw + 60));
+        const y = Math.round(vh * 0.22 + u * vh * 0.05 + (o.camY - 2300) * 0.08);
+        g.globalAlpha = k;
+        g.drawImage(s, x, y);
+        if (Math.floor(t * 1.5) % 2) {
+          g.fillStyle = '#ffffff';
+          g.fillRect(x + 13, y + 5, 1, 1);
+        }
+        g.globalAlpha = 1;
+      }
+    }
+  }
+}
+
 const AMBIENTES: Ambiente[] = ['dia', 'tarde', 'noche'];
 const BAJO = {} as Record<Ambiente, Obra<Capas>>;
 const ALTO = {} as Record<Ambiente, Obra<Alto>>;
 const MAR = {} as Record<Ambiente, Obra<Mar>>;
 const VALPO = {} as Record<Ambiente, Obra<Valpo>>;
 const SANANTONIO = {} as Record<Ambiente, Obra<SA>>;
+const VIDA = {} as Record<Ambiente, Obra<Vida>>;
 for (const a of AMBIENTES) {
+  VIDA[a] = new Obra(tareasVida(a));
   SANANTONIO[a] = new Obra(tareasSA(a));
   VALPO[a] = new Obra(tareasValpo(a));
   BAJO[a] = new Obra(tareas(a));
@@ -2094,7 +2650,7 @@ for (const a of AMBIENTES) {
   MAR[a] = new Obra(tareasMar(a));
 }
 const ESPACIO = new Obra(tareasEspacio());
-const ORDEN: Obra<unknown>[] = [BAJO.dia, SANANTONIO.dia, BAJO.tarde, SANANTONIO.tarde, BAJO.noche, SANANTONIO.noche, ESPACIO, ALTO.dia, ALTO.tarde, ALTO.noche, MAR.dia, MAR.tarde, MAR.noche, VALPO.dia, VALPO.tarde, VALPO.noche] as Obra<unknown>[];
+const ORDEN: Obra<unknown>[] = [BAJO.dia, SANANTONIO.dia, BAJO.tarde, SANANTONIO.tarde, BAJO.noche, SANANTONIO.noche, ESPACIO, ALTO.dia, ALTO.tarde, ALTO.noche, MAR.dia, MAR.tarde, MAR.noche, VALPO.dia, VALPO.tarde, VALPO.noche, VIDA.dia, VIDA.tarde, VIDA.noche] as Obra<unknown>[];
 
 /**
  * Pinta por adelantado lo que falte, de a poco (unos ms por llamada; cada
@@ -2437,6 +2993,11 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
     else dibujarCampo(g, o, C, SANANTONIO[a].todo(), t, ys);
   }
 
+  // Sky life: kites, flocks and sea birds low; cloud towers, rays and a far storm higher.
+  const VI = VIDA[a].todo();
+  if (ys(0.2) - 380 < vh) vidaBaja(g, o, C, VI, t, ys);
+  vidaAlta(g, o, VI, t, altMid, true);
+
   // Mar de nubes: sube a tapar el campo y se hunde al llegar a la estratósfera.
   if (H) {
     const m = H.mar;
@@ -2486,6 +3047,9 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
       }
     }
   }
+
+  // Sky life above the sea of clouds: bridges, haze, balloon, contrail, glints, noctilucent clouds, the station.
+  vidaAlta(g, o, VI, t, altMid, false);
 
   // Ovnis: dos lejanos que flotan y uno que cruza (a veces con su rayo).
   if (E && kEsp > 0.05) {
