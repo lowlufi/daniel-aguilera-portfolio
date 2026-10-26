@@ -265,13 +265,23 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setPlane(m);
     menu.aceptar();
   }, []);
+  // The game-over buttons wake up after a moment, so a held fire key can't skip the card.
+  const [overListo, setOverListo] = useState(false);
+  useEffect(() => {
+    if (phase !== 'over') return setOverListo(false);
+    const id = window.setTimeout(() => setOverListo(true), 800);
+    return () => window.clearTimeout(id);
+  }, [phase]);
   const confirmTimer = useRef(0);
+  const confirmando = useRef(false);
   useEffect(() => () => window.clearTimeout(confirmTimer.current), []);
   const confirmar = useCallback(() => {
-    if (confirmado) return;
+    if (confirmado || confirmando.current) return;
+    confirmando.current = true;
     setConfirmado(plane);
     jingleStart();
     confirmTimer.current = window.setTimeout(() => {
+      confirmando.current = false;
       setConfirmado(null);
       play();
     }, 1300);
@@ -319,6 +329,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       menu.pausa(!p);
       return !p;
     });
+    // Fingers held when pausing are forgotten (the touch layer unmounts and never hears them lift).
+    fingers.current.clear();
+    setTurning(0);
   }, [phase]);
 
   /** Back to the hangar to pick another plane (the self-playing game keeps flying behind). */
@@ -507,6 +520,16 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
                 </span>
                 <span className={CHIP}>⭐ {hud.score}</span>
+                {hud.mision && !hud.resumen && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow ${
+                      hud.mision.hecha ? 'bg-[#c8f0c8] text-[#2f6a3a]' : hud.mision.fallida ? 'bg-[#ead6b3]/80 text-[#a08060] line-through' : 'bg-[#fff8e7]/90 text-[#6b4f3a]'
+                    }`}
+                  >
+                    {hud.mision.hecha ? '🏅' : '🎯'} {hud.mision.texto}
+                    {hud.mision.meta > 1 && !hud.mision.hecha ? ` (${hud.mision.prog}/${hud.mision.meta})` : ''}
+                  </span>
+                )}
                 {hud.nukes > 0 && (
                   <span className={`${CHIP} bg-[#f4ffc0] text-[#4a5a1a]`} title="Bomba nuclear: tecla N o botón ☢️">
                     ☢️ ×{hud.nukes}
@@ -556,7 +579,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             )
           )}
         </div>
-        <div className="pointer-events-auto flex items-center gap-1.5">
+        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-1.5">
           {phase === 'play' && (
             <button type="button" aria-label={paused ? 'Seguir' : 'Pausa'} onClick={togglePause} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
               {paused ? '▶️' : '⏸️'}
@@ -574,7 +597,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             </button>
           )}
           {phase === 'play' && hud && hud.zoom[0] > 1 && (
-            <button type="button" aria-label={hud.zoom[1] ? 'Acercar' : 'Alejar la cámara'} title="Zoom (Z)" onClick={() => game.current?.zoom()} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
+            <button type="button" aria-label={hud.zoom[1] === hud.zoom[0] - 1 ? 'Volver a acercar' : 'Alejar la cámara'} title="Zoom (Z)" onClick={() => game.current?.zoom()} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
               {hud.zoom[1] ? '🔎' : '🔍'}
             </button>
           )}
@@ -614,25 +637,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
       {phase === 'play' && hud?.pista && !hud.resumen && !paused && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex justify-center px-4 [@media(max-height:500px)]:bottom-24">
+        <div className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 ${hud.enTierra && touchUi ? 'top-[38%]' : 'bottom-28 [@media(max-height:500px)]:bottom-24'}`}>
           <span className="rounded-full bg-[#3a2a6a]/75 px-4 py-1.5 text-center text-sm font-black text-white shadow">💡 {hud.pista}</span>
         </div>
       )}
-      {phase === 'play' && hud?.mision && !hud.resumen && !paused && (
-        <div className="pointer-events-none absolute left-3 top-[6.5rem] z-10 [@media(max-height:500px)]:top-[5.5rem]">
-          <span
-            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow ${
-              hud.mision.hecha ? 'bg-[#c8f0c8] text-[#2f6a3a]' : hud.mision.fallida ? 'bg-[#ead6b3]/80 text-[#a08060] line-through' : 'bg-[#fff8e7]/90 text-[#6b4f3a]'
-            }`}
-          >
-            {hud.mision.hecha ? '🏅' : '🎯'} {hud.mision.texto}
-            {hud.mision.meta > 1 && !hud.mision.hecha ? ` (${hud.mision.prog}/${hud.mision.meta})` : ''}
-          </span>
-        </div>
-      )}
       {phase === 'play' && hud?.resumen && !paused && (
-        <div className="pointer-events-none absolute inset-x-0 top-[14%] z-20 flex justify-center px-4">
-          <div className="w-full max-w-sm animate-[aparece_0.35s_ease-out] rounded-[1.6rem] bg-[#fff8e7]/95 p-4 text-center shadow-[0_6px_0_rgba(91,70,54,0.2)] ring-4 ring-[#ead6b3]">
+        <div className="pointer-events-none absolute inset-x-0 top-[14%] z-[45] flex justify-center px-4 [@media(max-height:500px)]:top-2">
+          <div className="w-full max-w-sm animate-[aparece_0.35s_ease-out] overflow-auto rounded-[1.6rem] bg-[#fff8e7]/95 p-4 text-center [@media(max-height:500px)]:max-h-[calc(100dvh-1rem)] [@media(max-height:500px)]:p-2 shadow-[0_6px_0_rgba(91,70,54,0.2)] ring-4 ring-[#ead6b3]">
             <div className="flex items-center justify-center gap-3">
               <img src={thumbs[plane].pilot} alt="" className="h-12 w-12 animate-bounce rounded-full bg-white p-0.5 ring-2 ring-[#f0a45d]" style={{ imageRendering: 'pixelated' }} />
               <h2 className="text-xl font-black text-[#e8742a]">¡Oleada {hud.resumen.oleada} superada!</h2>
@@ -666,7 +677,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {hud.resumen.siguiente}</p>
             )}
             {hud.resumen.dato && (
-              <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a]">💡 ¿Sabías que…? {hud.resumen.dato}</p>
+              <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a] [@media(max-height:500px)]:text-[10px]">💡 ¿Sabías que…? {hud.resumen.dato}</p>
             )}
             <p className="mt-1 text-[10px] font-bold text-[#a08060]">Partida guardada ✓ · puedes seguir otro día</p>
           </div>
@@ -850,7 +861,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <p className="mt-16 text-2xl font-black">¡Gracias por jugar!</p>
             <p className="mt-2 text-sm text-white/70">© 2026 {AUTOR} · danieleduardo.cl</p>
           </div>
-          <button type="button" autoFocus onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${BTN} absolute bottom-5 left-1/2 h-12 -translate-x-1/2`}>
+          <button type="button" autoFocus onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${BTN} fixed bottom-5 left-1/2 z-40 h-12 -translate-x-1/2`}>
             ← Volver
           </button>
         </div>
@@ -940,11 +951,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               {saved && (
-                <button type="button" autoFocus onClick={() => play(true)} className={GO}>
+                <button type="button" autoFocus disabled={!overListo} onClick={() => play(true)} className={GO}>
                   Seguir desde la oleada {saved.wave}
                 </button>
               )}
-              <button type="button" autoFocus={!saved} onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>Otra vez</button>
+              <button type="button" autoFocus={!saved} disabled={!overListo} onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>Otra vez</button>
               <button type="button" onClick={toHangar} className={`${BTN} h-12`}>Cambiar avión</button>
             </div>
           </div>
@@ -970,7 +981,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {phase === 'play' && touchUi && !paused && (
         <>
-          <div className="absolute inset-x-0 bottom-0 top-16 z-10 flex touch-none" onPointerDown={onSkyDown} onPointerUp={onSkyUp} onPointerCancel={onSkyUp}>
+          <div className="absolute inset-x-0 bottom-0 top-16 z-10 flex touch-none" onPointerDown={onSkyDown} onPointerUp={onSkyUp} onPointerCancel={onSkyUp} onLostPointerCapture={onSkyUp}>
             {/* Each half lights up while held; big round arrows say which way the nose turns. */}
             <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === 1 ? 'bg-white/10' : ''}`}>
               <span className={`absolute bottom-10 left-5 grid h-16 w-16 place-items-center rounded-full text-3xl font-black text-white ring-2 ring-white/60 drop-shadow ${turning === 1 ? 'bg-white/40' : 'bg-white/15'}`}>⟲</span>
@@ -978,7 +989,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === -1 ? 'bg-white/10' : ''}`}>
               <span className={`absolute bottom-28 right-5 grid h-16 w-16 place-items-center rounded-full text-3xl font-black text-white ring-2 ring-white/60 drop-shadow [@media(max-height:420px)]:bottom-24 ${turning === -1 ? 'bg-white/40' : 'bg-white/15'}`}>⟳</span>
             </div>
-            {turns < 3 && (
+            {turns < 3 && !hud?.enTierra && (
               <span className="pointer-events-none absolute bottom-28 left-5 rounded-full bg-[#3a2a6a]/50 px-3 py-1 text-[11px] font-black text-white [@media(max-height:420px)]:bottom-[6.5rem]">
                 Mantén izquierda o derecha para girar · doble toque: 🔥 nitro
               </span>

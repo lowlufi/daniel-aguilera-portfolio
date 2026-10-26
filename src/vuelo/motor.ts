@@ -3914,7 +3914,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.paused = p;
       if (p) AB.detener();
       if (p) S.callar();
-      if (p) onBlur();
+      if (p) {
+        // Nothing stays held across a pause: fingers lifted while paused never send their «up».
+        Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false });
+        turn = 0;
+        onBlur();
+      }
     },
     destroy() {
       cancelAnimationFrame(raf);
