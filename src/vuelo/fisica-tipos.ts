@@ -12,7 +12,12 @@ export type Movil = Vec & { vx: number; vy: number };
 /** Ground altitude at a given x (the terrain is a height field). */
 export type Suelo = (x: number) => number;
 
-export type ModeloAvion = 'avioneta' | 'caza' | 'bombardero';
+/** The three home planes; each one is also its pilot's id (Lulu, Dui, Almendrita). */
+export type ModeloBase = 'avioneta' | 'caza' | 'bombardero';
+/** Every plane in the hangar: the home ones plus the iconic jets and the saucer. */
+export type ModeloAvion = ModeloBase | 'raptor' | 'sukhoi' | 'b2' | 'ovni';
+/** Bomb loads: plain, cluster, white phosphorus, gas, and the saucer's plasma charge. */
+export type BombaTipo = 'comun' | 'racimo' | 'fosforo' | 'gas' | 'plasma';
 
 /**
  * Stick input. x: -1 left … +1 right, y: -1 down … +1 up, in SCREEN
