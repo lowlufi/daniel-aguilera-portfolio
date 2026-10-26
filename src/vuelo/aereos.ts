@@ -37,6 +37,8 @@ export type TipoAereo = 'helicoptero' | 'dron' | 'globo' | 'ovni';
 
 export type Aereo = {
   id: number;
+  /** A visitor (space UFOs that come on their own): it doesn't hold the wave up. */
+  extra?: boolean;
   tipo: TipoAereo;
   x: number;
   y: number;

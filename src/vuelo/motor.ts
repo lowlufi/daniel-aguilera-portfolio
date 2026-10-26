@@ -697,6 +697,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
     hielo: 0,
+    /** The mothership came because the plane lingered in space (not the level's boss). */
+    jefeEspacio: false,
+    /** Seconds the plane has been far below the UFOs: after a while they leave. */
+    lejosT: 0,
     /** Bumped on every new game: deferred effects from an older one are dropped. */
     gen: 0,
     /** A new game starts at home: the pilot walks out and climbs in, then the player takes off from the runway. */
@@ -1716,6 +1720,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const f of JF.focos(j)) if (Math.random() < dt * 12) VFX.fuego(s.fx, f.x, f.y, j.vx, j.vy, f.intensidad);
     if (r.muerto) {
       s.jefe = null;
+      s.jefeEspacio = false;
       s.shake = 10;
       AB.jefeVencido();
       releasePrize('especial', j.x, j.y);
@@ -2271,6 +2276,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           if (destino === 'tormenta') prepararTormenta();
           // Nothing follows the plane to the new map; the wave's goal suits the new map.
           s.jefe = null;
+          s.jefeEspacio = false;
           s.aereos = [];
           s.fighters = [];
           s.mision = elegirMision();
@@ -2481,7 +2487,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
         // Space is never empty: hang around up there and UFOs keep coming.
         if (!s.airQueue.length && s.airT <= 0 && p.y > AE.ALTURA_OVNI && s.aereos.filter((a) => a.tipo === 'ovni').length < 2) {
-          spawnAir(AE.crear('ovni', clamp(s.camX + view.vw + 60, 40, LEVEL - 40), AE.alturaAparicion('ovni', p.y, Math.random), Math.random, s.wave));
+          const visitas = AE.crear('ovni', clamp(s.camX + view.vw + 60, 40, LEVEL - 40), AE.alturaAparicion('ovni', p.y, Math.random), Math.random, s.wave);
+          for (const a of visitas) a.extra = true;
+          spawnAir(visitas);
           s.airT = rand(8, 12);
         }
         s.bigT -= dt;
@@ -2490,8 +2498,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.bigT = rand(6, 11);
         }
         const clear =
-          !s.queue.length && !s.cars.length && !s.aereos.length && !s.airQueue.length && !s.bigQueue.length &&
-          !s.gigantes.some((u) => u.viva) && !s.jefe && !s.fighters.length && !s.fighterQueue && s.overT === 0;
+          !s.queue.length && !s.cars.length && !s.aereos.some((a) => !a.extra) && !s.airQueue.length && !s.bigQueue.length &&
+          !s.gigantes.some((u) => u.viva) && (!s.jefe || s.jefeEspacio) && !s.fighters.length && !s.fighterQueue && s.overT === 0;
         if (clear && s.mapa === 'oceano' && s.bossFor !== s.wave) {
           // At sea, Margarita comes back at the helm of an aircraft carrier.
           s.bossFor = s.wave;
@@ -2690,9 +2698,30 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     stepBoss(dt, vista);
     // Hang around in space too long and the mothership comes looking.
     s.motherCd = Math.max(0, s.motherCd - dt);
+    // Back down from space: UFOs and a visiting mothership give up and fly off,
+    // so nothing up there can hold a wave forever.
+    s.lejosT = p.y < AE.ALTURA_OVNI - 300 && s.mode === 'play' ? s.lejosT + dt : 0;
+    if (s.lejosT > 6) {
+      s.lejosT = 0;
+      const idos = s.aereos.filter((a) => a.tipo === 'ovni' && a.hp > 0);
+      for (const a of idos) {
+        a.hp = 0;
+        puff(a.x, a.y, 3, false, 0.8);
+      }
+      if (idos.length) pop(p.x, p.y + 24, '🛸 Los ovnis se fueron', '#c9b4ff');
+      if (s.jefe && s.jefeEspacio) {
+        s.jefe = null;
+        s.jefeEspacio = false;
+        s.banner = '🛸 La nave nodriza se retiró';
+        window.setTimeout(() => {
+          if (s.banner.startsWith('🛸')) s.banner = '';
+        }, 2200);
+      }
+    }
     s.spaceT = p.y > 1900 && s.mode === 'play' ? s.spaceT + dt : 0;
     if (s.spaceT > 12 && !s.jefe && s.motherCd <= 0 && s.mode === 'play' && s.transT === 0 && s.phase === 'wave') {
       spawnBoss('nodriza');
+      s.jefeEspacio = true;
       s.motherCd = 60;
       s.spaceT = 0;
     }
