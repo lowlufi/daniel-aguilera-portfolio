@@ -117,6 +117,8 @@ function sideHead(g: Ctx, m: ModeloAvion, x: number, y: number) {
     R(g, x - 3, y - 7, 2, 2, P.o1);
     R(g, x + 1, y - 7, 2, 2, P.o1);
     D.disc(g, x, y - 3, 3, P.o2);
+    D.oval(g, x, y - 1, 4, 1, P.o2);
+    R(g, x - 1, y, 3, 1, P.o1);
     R(g, x - 2, y - 5, 2, 1, P.o3);
     R(g, x - 3, y - 4, 6, 1, P.k0);
     R(g, x + 1, y - 4, 2, 2, P.gl1);
@@ -132,13 +134,16 @@ function sideHead(g: Ctx, m: ModeloAvion, x: number, y: number) {
     R(g, x + 2, y - 3, 1, 1, '#1a1428');
     R(g, x + 3, y - 1, 1, 1, P.p1);
   } else {
-    R(g, x - 3, y - 7, 1, 2, '#b07838');
-    R(g, x + 2, y - 7, 1, 2, '#b07838');
-    D.disc(g, x, y - 3, 3, '#d8a060');
-    R(g, x - 3, y - 5, 4, 2, '#7a8aa8');
+    R(g, x - 3, y - 7, 1, 2, '#9a6030');
+    R(g, x + 2, y - 7, 1, 2, '#9a6030');
+    R(g, x - 3, y - 7, 1, 1, '#2a2430');
+    R(g, x + 2, y - 7, 1, 1, '#2a2430');
+    D.disc(g, x, y - 3, 3, '#cc8c4c');
+    R(g, x - 3, y - 5, 3, 2, '#2a2430');
     R(g, x - 1, y - 7, 3, 1, P.r2);
+    R(g, x + 1, y - 5, 1, 1, '#d8d0ca');
     R(g, x + 1, y - 4, 1, 1, P.eye);
-    D.oval(g, x + 2, y - 2, 1, 1, '#f4cc90');
+    D.oval(g, x + 2, y - 2, 1, 1, '#d8d0ca');
     R(g, x + 3, y - 2, 1, 1, '#2a2030');
   }
 }
@@ -168,7 +173,7 @@ function topHead(g: Ctx, m: ModeloAvion, x: number, y: number, tilt: number) {
     R(g, x - 2, y + 3, 2, 2, P.o1);
     R(g, x - 1, y - 3, 1, 1, P.blush);
     R(g, x - 1, y + 3, 1, 1, P.blush);
-    D.disc(g, x, y, 3, P.o2);
+    D.oval(g, x, y, 3, 4, P.o2);
     R(g, x - 2, y - 1, 1, 3, P.o1);
     R(g, x - 1, y - 2, 2, 1, P.o3);
     R(g, x + 1, y - 3, 1, 7, P.k0);
@@ -177,10 +182,12 @@ function topHead(g: Ctx, m: ModeloAvion, x: number, y: number, tilt: number) {
     if (tilt) R(g, x + 2, y + 3, 1, 1, P.blush);
     R(g, x + 4, y, 1, 1, P.cream);
   } else {
-    // Almendrita: tan face, steel-blue crown, pink bow on the top-knot.
-    const T = '#d8a060', T0 = '#b07838', T1 = '#f4cc90', B = '#7a8aa8';
+    // Almendrita: brown face, black saddle, grey muzzle, pink bow on the top-knot.
+    const T = '#cc8c4c', T0 = '#9a6030', T1 = '#d8d0ca', B = '#2a2430';
     R(g, x - 2, y - 5, 2, 2, T0);
     R(g, x - 2, y + 4, 2, 2, T0);
+    R(g, x - 2, y - 5, 1, 1, B);
+    R(g, x - 2, y + 5, 1, 1, B);
     D.disc(g, x, y, 3, T);
     D.oval(g, x - 1, y, 2, 3, B);
     D.oval(g, x + 3, y, 2, 1, T1);
