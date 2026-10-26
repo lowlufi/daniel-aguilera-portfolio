@@ -1,7 +1,7 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
 import type { ModeloAvion } from './fisica-tipos';
-import { escribir } from './fondo';
+import { anchoLetrero, escribir } from './fondo';
 
 /*
  * Sprites and scenery for the plane game, in the same "dulce" look as the
@@ -31,6 +31,10 @@ function duiHead(g: Ctx, x: number, y: number) {
   R(g, x + 3, y - 9, 1, 1, P.o1);
   R(g, x + 2, y - 7, 1, 1, P.blush);
   D.disc(g, x, y - 3, 4, P.o2);
+  // Fat cheeks and a double chin.
+  D.oval(g, x, y - 1, 5, 2, P.o2);
+  R(g, x - 2, y + 1, 5, 1, P.o1);
+  R(g, x + 2, y, 3, 1, P.cream);
   R(g, x - 2, y - 6, 3, 1, P.o3);
   // Goggles: a leather strap and a round lens.
   R(g, x - 4, y - 4, 9, 1, P.k0);
@@ -60,22 +64,27 @@ function luluHead(g: Ctx, x: number, y: number) {
   R(g, x + 3, y - 1, 2, 1, '#9a90b8');
 }
 
-/** Almendrita: a Yorkshire terrier, tan face, steel-blue top and a pink bow. */
+/** Almendrita: a senior Yorkshire, warm brown face, black saddle, grey muzzle and a pink bow. */
 function almendritaHead(g: Ctx, x: number, y: number) {
-  const T = '#d8a060', T0 = '#b07838', T1 = '#f4cc90', B = '#7a8aa8';
-  // Pointy ears.
+  const T = '#cc8c4c', T0 = '#9a6030', GR = '#d8d0ca', N = '#2a2430';
+  // Pointy ears with dark tips.
   R(g, x - 4, y - 9, 2, 3, T0);
-  R(g, x - 3, y - 10, 1, 1, T0);
+  R(g, x - 3, y - 10, 1, 1, N);
+  R(g, x - 4, y - 9, 1, 1, N);
   R(g, x + 2, y - 9, 2, 3, T0);
-  R(g, x + 3, y - 10, 1, 1, T0);
+  R(g, x + 3, y - 10, 1, 1, N);
+  R(g, x + 3, y - 9, 1, 1, N);
   D.disc(g, x, y - 3, 4, T);
-  // Steel-blue hair over the head and a fluffy muzzle.
-  R(g, x - 4, y - 6, 6, 2, B);
-  R(g, x - 4, y - 4, 2, 3, B);
-  D.oval(g, x + 3, y - 2, 2, 2, T1);
+  // Black saddle down the back of the head, and a greying muzzle.
+  R(g, x - 4, y - 5, 3, 2, N);
+  R(g, x - 4, y - 3, 2, 3, N);
+  D.oval(g, x + 3, y - 2, 2, 2, GR);
   R(g, x + 5, y - 3, 1, 1, '#2a2030');
+  // A soft, droopy eye under a grey brow.
+  R(g, x + 1, y - 6, 2, 1, GR);
   R(g, x + 1, y - 5, 2, 2, P.eye);
-  R(g, x + 1, y - 5, 1, 1, P.white);
+  R(g, x + 1, y - 5, 2, 1, T0);
+  R(g, x + 1, y - 4, 1, 1, P.white);
   R(g, x + 3, y, 1, 1, P.p1);
   // A pink bow on the top-knot.
   R(g, x - 2, y - 9, 2, 2, P.r2);
@@ -127,6 +136,8 @@ function miniHead(g: Ctx, m: ModeloAvion, x: number, y: number) {
     R(g, x - 3, y - 7, 2, 2, P.o1);
     R(g, x + 1, y - 7, 2, 2, P.o1);
     D.disc(g, x, y - 3, 3, P.o2);
+    D.oval(g, x, y - 1, 4, 1, P.o2);
+    R(g, x - 1, y, 3, 1, P.o1);
     R(g, x - 2, y - 5, 2, 1, P.o3);
     R(g, x - 3, y - 4, 6, 1, P.k0);
     R(g, x + 1, y - 4, 2, 2, P.gl1);
@@ -142,13 +153,16 @@ function miniHead(g: Ctx, m: ModeloAvion, x: number, y: number) {
     R(g, x + 2, y - 3, 1, 1, '#1a1428');
     R(g, x + 3, y - 1, 1, 1, P.p1);
   } else {
-    R(g, x - 3, y - 7, 1, 2, '#b07838');
-    R(g, x + 2, y - 7, 1, 2, '#b07838');
-    D.disc(g, x, y - 3, 3, '#d8a060');
-    R(g, x - 3, y - 5, 4, 2, '#7a8aa8');
+    R(g, x - 3, y - 7, 1, 2, '#9a6030');
+    R(g, x + 2, y - 7, 1, 2, '#9a6030');
+    R(g, x - 3, y - 7, 1, 1, '#2a2430');
+    R(g, x + 2, y - 7, 1, 1, '#2a2430');
+    D.disc(g, x, y - 3, 3, '#cc8c4c');
+    R(g, x - 3, y - 5, 3, 2, '#2a2430');
     R(g, x - 1, y - 7, 3, 1, P.r2);
+    R(g, x + 1, y - 5, 1, 1, '#d8d0ca');
     R(g, x + 1, y - 4, 1, 1, P.eye);
-    D.oval(g, x + 2, y - 2, 1, 1, '#f4cc90');
+    D.oval(g, x + 2, y - 2, 1, 1, '#d8d0ca');
     R(g, x + 3, y - 2, 1, 1, '#2a2030');
   }
 }
@@ -1312,10 +1326,11 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   for (let x = 0; x < length; x++) {
     const h = Math.round(heightAt(x));
     const y0 = rowOf(h);
-    // Dirt with world-anchored polka dots, deeper rows rosier.
-    R(g, x, y0, 1, c.height - y0, P.d2);
-    R(g, x, rowOf(4), 1, c.height - rowOf(4), P.e1);
     const sec = sectorSA(x);
+    // Dirt with world-anchored polka dots, deeper rows rosier; concrete at the port, grey sand at the beach.
+    const [cuerpo, hondo] = sec === 3 ? ['#b8b4c4', '#9a96aa'] : sec === 4 ? ['#c9bfae', '#b0a690'] : [P.d2, P.e1];
+    R(g, x, y0, 1, c.height - y0, cuerpo);
+    R(g, x, rowOf(4), 1, c.height - rowOf(4), hondo);
     const hn = Math.round(heightAt(x + 1));
     let ink: string = P.g0;
     if (sec === 3) {
@@ -1347,6 +1362,12 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
       const surf = rowOf(Math.round(heightAt(gx))) + 8;
       if (gy < surf) continue;
       const deep = gy > rowOf(4);
+      const sec = sectorSA(gx);
+      if (sec >= 3) {
+        // Concrete joints at the port, darker grains in the beach sand.
+        R(g, gx, gy, sec === 3 ? 6 : 2, 1, sec === 3 ? '#a8a4b8' : '#b4aa94');
+        continue;
+      }
       R(g, gx + 1, gy, 2, 4, deep ? P.e2 : P.d3);
       R(g, gx, gy + 1, 4, 2, deep ? P.e2 : P.d3);
       if (!deep) R(g, gx + 1, gy + 1, 1, 1, P.white);
@@ -1367,7 +1388,10 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
     else garzaCerca(g, x, surfY(x));
   }
   // Barrancas: concrete stairs with railings, a corner store and lamp posts.
-  for (const x of [1160, 1290, 1560, 1650]) if (libre(x)) escalinata(g, x, surfY(x));
+  for (const x of [1160, 1290, 1560, 1630]) if (libre(x)) {
+    escalinata(g, x, surfY(x));
+    casasPareadas(g, x + 16, surfY(x) - 15, surfY, hash(x, 11));
+  }
   if (libre(1420)) almacen(g, 1420, surfY(1440));
   for (let x = 1120; x < 1700; x += 70) if (libre(x) && Math.abs(x - 1440) > 40) faro(g, x, surfY(x));
   // The port: containers, bollards, a fried-fish stall, sea lions and pelicans on posts.
@@ -1380,6 +1404,12 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
     R(g, x - 1, surfY(x) - 4, 5, 1, '#3e4a6b');
   }
   if (libre(2200)) fritura(g, 2180, surfY(2200));
+  if (libre(2120)) carrito(g, 2110, surfY(2120), 'EMPANADAS', '#f2cc8f');
+  if (libre(2330)) arcoLetrero(g, 2310, surfY(2330), 'PASEO BELLAMAR');
+  if (libre(2560)) {
+    cartel(g, 2556, surfY(2556), 'CALETA', '#3d85c6');
+    bote(g, 2580, surfY(2590));
+  }
   for (const x of [2380, 2410]) if (libre(x)) loboMarino(g, x, surfY(x), x === 2410);
   for (const x of [2300, 2470]) if (libre(x)) {
     R(g, x, surfY(x) - 10, 3, 10, P.k0);
@@ -1392,7 +1422,13 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
     R(g, x, y - 8, 1, 1, P.white);
     R(g, x, y - 7, 1, 1, '#c8c4d4');
   }
-  for (let x = 2760; x < length - 20; x += 46 + (hash(x, 8) % 40)) quitasol(g, x, surfY(x), hash(x, 9));
+  // A crowded Playa Grande (parasols elbow to elbow), quieter Playa Chica.
+  for (let x = 2860; x < length - 20; x += x < 3160 ? 12 + (hash(x, 8) % 5) : 46 + (hash(x, 8) % 40)) if (Math.abs(x - 3050) > 14 && Math.abs(x - 3200) > 20) quitasol(g, x, surfY(x), hash(x, 9));
+  if (libre(2760)) estacion(g, 2740, surfY(2760));
+  if (libre(2900)) cartel(g, 2836, surfY(2836), 'PLAYA GRANDE', '#3d85c6');
+  if (libre(3420)) cartel(g, 3420, surfY(3420), 'PLAYA CHICA', '#3d85c6');
+  if (libre(3050)) carrito(g, 3044, surfY(3050), 'HELADOS', '#8fd3c8');
+  if (libre(3200)) carritoSangre(g, 3192, surfY(3200));
 
   paintPantry(g, pantry.x0, rowOf(Math.round(heightAt(pantry.x0 + 30))) + 1);
   return { canvas: c, top };
@@ -1540,9 +1576,10 @@ function fritura(g: Ctx, x: number, y: number) {
   R(g, x - 2, y - 27, 44, 1, '#c05a7a');
   R(g, x, y - 10, 40, 10, P.k0);
   R(g, x + 1, y - 9, 38, 9, P.k2);
-  R(g, x + 6, y - 35, 28, 9, P.k0);
-  R(g, x + 7, y - 34, 26, 7, P.cream);
-  escribir(g, 'FRITURA', x + 8, y - 33, '#c05a7a');
+  const w = anchoLetrero('PESCADO FRITO');
+  R(g, x + 20 - Math.ceil(w / 2) - 3, y - 35, w + 6, 9, P.k0);
+  R(g, x + 20 - Math.ceil(w / 2) - 2, y - 34, w + 4, 7, P.cream);
+  escribir(g, 'PESCADO FRITO', x + 20 - Math.ceil(w / 2), y - 33, '#c05a7a');
   // Golden empanadas on the counter.
   for (let i = 0; i < 4; i++) {
     D.oval(g, x + 8 + i * 8, y - 11, 3, 1, P.gold0);
@@ -1579,6 +1616,110 @@ function quitasol(g: Ctx, x: number, y: number, seed: number) {
   D.oval(g, x, y - 17, 7, 2, c);
   for (let i = -6; i <= 6; i += 4) R(g, x + i, y - 18, 2, 2, P.white);
   R(g, x + 3, y - 1, 10, 1, ['#9ec5e8', '#f6b38e'][seed % 2]);
+}
+
+/** Paired two-storey houses on a stone terrace at the top of a stair; `y` is the terrace top. */
+function casasPareadas(g: Ctx, x: number, y: number, surfY: (x: number) => number, seed: number) {
+  for (let i = 0; i < 46; i++) {
+    const yb = surfY(x + i);
+    if (yb > y) {
+      R(g, x + i, y, 1, yb - y, '#b4a492');
+      if ((i + (seed % 3)) % 6 === 0) R(g, x + i, y + 2, 1, yb - y - 2, '#cdbfae');
+    }
+  }
+  R(g, x, y, 46, 1, '#7a7490');
+  const col = ['#f4a7b9', '#ffd27f', '#8fd3c8', '#9ec5e8', '#f6b38e', '#b5d99c'][seed % 6];
+  for (const dx of [1, 24]) {
+    R(g, x + dx - 1, y - 23, 23, 23, '#3e4a6b');
+    R(g, x + dx, y - 22, 21, 22, col);
+    for (let i = 0; i < 25; i++) R(g, x + dx - 2 + i, y - 25 - Math.round(Math.abs(i - 12) < 2 ? 1 : 0), 1, 3, '#e86a5c');
+    for (const [wx, wy] of [[3, 17], [13, 17], [3, 8], [13, 8]] as const) {
+      R(g, x + dx + wx, y - wy, 5, 5, P.white);
+      R(g, x + dx + wx + 1, y - wy + 1, 3, 3, P.gl1);
+    }
+    R(g, x + dx + 9, y - 6, 4, 6, P.k1);
+  }
+}
+
+/** A sign board on a post. */
+function cartel(g: Ctx, x: number, y: number, txt: string, fondo: string) {
+  const w = anchoLetrero(txt) + 6;
+  R(g, x + Math.floor(w / 2), y - 14, 2, 14, '#5a4a3a');
+  R(g, x - 1, y - 24, w + 2, 11, '#24427a');
+  R(g, x, y - 23, w, 9, fondo);
+  escribir(g, txt, x + 3, y - 21, P.white, '#24427a');
+}
+
+/** An arched entrance sign over a promenade. */
+function arcoLetrero(g: Ctx, x: number, y: number, txt: string) {
+  const w = anchoLetrero(txt) + 10;
+  R(g, x, y - 26, 2, 26, P.white);
+  R(g, x + w - 2, y - 26, 2, 26, P.white);
+  R(g, x - 1, y - 35, w + 2, 11, '#24427a');
+  R(g, x, y - 34, w, 9, '#8fd3c8');
+  escribir(g, txt, x + 5, y - 32, P.white, '#24427a');
+}
+
+/** A rowboat pulled up on the quay. */
+function bote(g: Ctx, x: number, y: number) {
+  R(g, x, y - 5, 16, 3, '#e05a5a');
+  R(g, x + 1, y - 2, 14, 2, '#a03a3a');
+  R(g, x, y - 5, 16, 1, P.white);
+  R(g, x + 6, y - 7, 1, 2, P.k0);
+}
+
+/** A little street cart with a parasol and a sign. */
+function carrito(g: Ctx, x: number, y: number, txt: string, toldo: string) {
+  const w = anchoLetrero(txt) + 6;
+  R(g, x, y - 12, w, 9, P.k0);
+  R(g, x + 1, y - 11, w - 2, 7, P.cream);
+  escribir(g, txt, x + 3, y - 10, '#c05a7a');
+  D.disc(g, x + 4, y - 2, 2, '#4a3a5a');
+  D.disc(g, x + w - 5, y - 2, 2, '#4a3a5a');
+  R(g, x + Math.floor(w / 2), y - 22, 1, 10, '#5a4a3a');
+  D.oval(g, x + Math.floor(w / 2), y - 23, Math.floor(w / 2) + 2, 2, D.tone(toldo, -0.3));
+  D.oval(g, x + Math.floor(w / 2), y - 23, Math.floor(w / 2) + 1, 1, toldo);
+}
+
+/** A «carrito de sangre»: a small cart pulled by a patient horse. */
+function carritoSangre(g: Ctx, x: number, y: number) {
+  // Horse.
+  R(g, x - 1, y - 7, 2, 7, '#6a4a3a');
+  R(g, x + 7, y - 7, 2, 7, '#6a4a3a');
+  R(g, x - 2, y - 13, 12, 6, '#6a4a3a');
+  R(g, x - 1, y - 12, 10, 4, '#a8785a');
+  R(g, x - 6, y - 18, 5, 7, '#6a4a3a');
+  R(g, x - 5, y - 17, 3, 5, '#a8785a');
+  R(g, x - 8, y - 16, 3, 3, '#a8785a');
+  R(g, x - 4, y - 19, 1, 2, '#6a4a3a');
+  R(g, x - 5, y - 16, 1, 1, P.eye);
+  R(g, x + 10, y - 12, 2, 5, '#4a3a2a');
+  // Cart with two big wheels and a striped canopy.
+  R(g, x + 9, y - 11, 10, 1, P.k0);
+  R(g, x + 16, y - 14, 18, 7, P.k0);
+  R(g, x + 17, y - 13, 16, 5, P.k2);
+  for (let i = 0; i < 18; i++) R(g, x + 16 + i, y - 22, 1, 3, Math.floor(i / 3) % 2 ? P.white : '#e86a5c');
+  R(g, x + 17, y - 19, 1, 5, P.k0);
+  R(g, x + 32, y - 19, 1, 5, P.k0);
+  D.disc(g, x + 25, y - 4, 4, '#4a3a5a');
+  D.disc(g, x + 25, y - 4, 2, P.k2);
+}
+
+/** The old railway platform with a wooden roof: «ESTACIÓN» and a «1912» plaque. */
+function estacion(g: Ctx, x: number, y: number) {
+  R(g, x, y - 4, 70, 4, '#a8a0b4');
+  R(g, x, y - 4, 70, 1, '#d8d4e4');
+  for (const px of [4, 34, 64]) R(g, x + px, y - 26, 2, 22, P.k0);
+  for (let i = 0; i < 6; i++) R(g, x - 2 + i, y - 28 - i, 74 - i * 2, 1, i % 2 ? P.k1 : P.k0);
+  const w = anchoLetrero('ESTACIÓN');
+  R(g, x + 35 - Math.ceil(w / 2) - 3, y - 24, w + 6, 9, P.k0);
+  R(g, x + 35 - Math.ceil(w / 2) - 2, y - 23, w + 4, 7, P.cream);
+  escribir(g, 'ESTACIÓN', x + 35 - Math.ceil(w / 2), y - 22, '#3a5ab0');
+  R(g, x + 10, y - 13, 15, 7, '#5a4a3a');
+  escribir(g, '1912', x + 11, y - 12, P.gold1);
+  R(g, x + 44, y - 9, 12, 2, P.k1);
+  R(g, x + 45, y - 7, 1, 3, P.k0);
+  R(g, x + 54, y - 7, 1, 3, P.k0);
 }
 
 /** The pantry's flag, flapping. (x, y) is the foot of the pole on screen. */

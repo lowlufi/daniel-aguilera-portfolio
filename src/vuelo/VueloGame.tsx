@@ -3,6 +3,7 @@ import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusic
 import { cargarSonidos } from './sonido';
 import { PLANES, createVuelo, dibujo, readSave, type Hud, type Result, type SavedGame, type Vuelo } from './motor';
 import type { ModeloAvion } from './fisica-tipos';
+import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
 
 /*
  * "Escuadrón Dui": the plane game around the canvas engine in motor.ts. This
@@ -95,6 +96,42 @@ function Slots({ icon, n, max }: { icon: Icono; n: number; max: number }) {
       ))}
     </span>
   );
+}
+
+/** A big pilot portrait, animated at the pose's own pace (pixel art scaled with CSS). */
+function Retrato({ m, pose, className }: { m: ModeloAvion; pose: Pose; className?: string }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const g = c.getContext('2d')!;
+    const quieto = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    let raf = 0;
+    const t0 = performance.now();
+    const pinta = (now: number) => {
+      const n = FRAMES[pose];
+      let f = Math.floor(((now - t0) / 1000) * FPS[pose]);
+      // «listo» plays once and holds its last frames; the others loop.
+      f = pose === 'listo' ? Math.min(n - 1, f) : quieto ? 0 : f % n;
+      const img = retrato(m, pose, f);
+      if (c.width !== img.width) {
+        c.width = img.width;
+        c.height = img.height;
+      }
+      g.clearRect(0, 0, c.width, c.height);
+      g.drawImage(img, 0, 0);
+      raf = requestAnimationFrame(pinta);
+    };
+    raf = requestAnimationFrame(pinta);
+    return () => cancelAnimationFrame(raf);
+  }, [m, pose]);
+  return <canvas ref={ref} className={className} style={{ imageRendering: 'pixelated' }} aria-hidden />;
+}
+
+/** The card's pixel backdrop in the pilot's colours. */
+function FondoTarjeta({ m }: { m: ModeloAvion }) {
+  const src = useMemo(() => fondoTarjeta(m, 120, 160).toDataURL(), [m]);
+  return <img src={src} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ imageRendering: 'pixelated' }} />;
 }
 
 function Stars({ n }: { n: number }) {
@@ -217,6 +254,33 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setSaved(null);
     setPhase('play');
   }, [muted, plane]);
+
+  // Character select: who is confirmed (playing their pose) before take-off.
+  const [confirmado, setConfirmado] = useState<ModeloAvion | null>(null);
+  const elegir = useCallback((m: ModeloAvion) => {
+    setPlane(m);
+    sfx.select();
+  }, []);
+  const confirmar = useCallback(() => {
+    if (confirmado) return;
+    setConfirmado(plane);
+    jingleStart();
+    window.setTimeout(() => {
+      setConfirmado(null);
+      play();
+    }, 1300);
+  }, [confirmado, plane, play]);
+  useEffect(() => {
+    if (phase !== 'menu') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (confirmado) return;
+      const i = PLANES.findIndex((p) => p.id === plane);
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') elegir(PLANES[(i + PLANES.length - 1) % PLANES.length].id);
+      else if (e.code === 'ArrowRight' || e.code === 'KeyD') elegir(PLANES[(i + 1) % PLANES.length].id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [phase, plane, confirmado, elegir]);
 
   // «Menos movimiento», remembered on this device.
   const [calma, setCalma] = useState(() => {
@@ -637,7 +701,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
 
       {/* Keyboard controls, always on screen (can be folded away). */}
-      {phase === 'play' && !touchUi && !paused && (
+      {phase === 'play' && !touchUi && !paused && !hud?.enTierra && (
         <div className="absolute bottom-10 left-3 z-10 origin-bottom-left [@media(max-height:500px)]:scale-[0.7] [@media(max-height:500px)]:opacity-80">
           {showKeys && !keysFolded ? (
             <div className="rounded-2xl bg-[#fff8e7]/90 p-2.5 text-[11px] font-bold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-2 ring-[#ead6b3]">
@@ -785,75 +849,67 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
 
-      {/* Menu: the story, the hangar and the controls. */}
+      {/* Character select, arcade style: three framed pilots, the chosen one big and animated; confirm and they strike a pose. */}
       {phase === 'menu' && (
-        <div role="dialog" aria-modal="true" aria-label="Hangar" className="absolute inset-0 z-30 grid place-items-center overflow-y-auto p-4 pt-20 [@media(max-height:500px)]:pt-14 [@media(max-height:500px)]:pb-2">
-          <div className="w-full max-w-2xl rounded-[2rem] bg-[#fff8e7]/95 p-5 md:p-7 [@media(max-height:500px)]:p-3 shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
-            <div className="flex items-center justify-between gap-2">
-              <button type="button" onClick={() => setPhase('titulo')} className={`${BTN} h-9`}>← Volver</button>
-              <h1 className="text-center text-3xl md:text-4xl font-black text-[#e8742a] [@media(max-height:500px)]:text-2xl">Escuadrón Dui</h1>
-              <span className="w-20" />
-            </div>
-            <p className="mx-auto mt-2 max-w-lg text-center text-[15px] font-bold leading-snug [@media(max-height:500px)]:hidden">
-              Los ratones quieren llevarse el pescado de la despensa. Dui, Lulu y Almendrita despegan para detenerlos: esquiva sus misiles y frena sus vehículos antes de que lleguen.
-            </p>
-            <h2 className="mt-5 text-sm font-black uppercase tracking-wide text-[#a08060]">Elige piloto</h2>
-            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {PLANES.map((p) => (
+        <div role="dialog" aria-modal="true" aria-label="Elige tu piloto" className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 overflow-y-auto bg-[#120c24]/70 p-3 pt-16 [@media(max-height:500px)]:gap-1.5 [@media(max-height:500px)]:pt-12">
+          <div className="flex w-full max-w-4xl items-center justify-between gap-2">
+            <button type="button" onClick={() => setPhase('titulo')} className={`${BTN} h-9`} disabled={!!confirmado}>← Volver</button>
+            <h1 className="logo-dui text-3xl font-black sm:text-5xl [@media(max-height:500px)]:text-2xl">ELIGE TU PILOTO</h1>
+            <span className="w-20" />
+          </div>
+          <div className="grid w-full max-w-4xl grid-cols-3 gap-2 sm:gap-4">
+            {PLANES.map((p) => {
+              const sel = plane === p.id;
+              const pose: Pose = confirmado === p.id ? 'listo' : sel ? 'elegido' : 'quieto';
+              return (
                 <button
                   key={p.id}
                   type="button"
-                  onClick={() => {
-                    setPlane(p.id);
-                    sfx.select();
-                  }}
-                  aria-pressed={plane === p.id}
-                  className={`flex items-center gap-3 rounded-2xl p-3 [@media(max-height:500px)]:p-1.5 text-left transition-colors sm:flex-col sm:text-center ${
-                    plane === p.id ? 'bg-[#ffe3a3] ring-4 ring-[#f0a45d]' : 'bg-white/70 ring-2 ring-[#ead6b3] hover:bg-white'
-                  }`}
+                  disabled={!!confirmado}
+                  onClick={() => (sel ? confirmar() : elegir(p.id))}
+                  aria-pressed={sel}
+                  aria-label={`${p.pilot}, ${p.name}`}
+                  className={`tarjeta-piloto relative overflow-hidden rounded-xl text-center transition-transform duration-200 ${
+                    sel ? 'z-10 scale-[1.04] ring-4 ring-[#ffd84a] shadow-[0_0_24px_rgba(255,216,74,0.6)]' : 'opacity-70 ring-2 ring-[#3a2a6a] hover:opacity-90'
+                  } ${confirmado === p.id ? 'tarjeta-confirmada' : ''}`}
                 >
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <img
-                      src={thumbs[p.id].pilot}
-                      alt=""
-                      className="h-10 w-10 rounded-full bg-[#fff8e7] p-0.5 ring-2 ring-[#ead6b3] sm:h-12 sm:w-12 [@media(max-height:500px)]:h-8 [@media(max-height:500px)]:w-8"
-                      style={{ imageRendering: 'pixelated' }}
-                    />
-                    <img src={thumbs[p.id].plane} alt="" className="h-10 w-auto sm:h-12 [@media(max-height:500px)]:h-8" style={{ imageRendering: 'pixelated' }} />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block font-black">{p.pilot}</span>
-                    <span className="block text-xs font-black text-[#e8742a]">{p.name}</span>
-                    <span className="block text-xs font-bold leading-snug text-[#8a6e55] [@media(max-height:500px)]:hidden">{p.blurb}</span>
-                  </span>
+                  <FondoTarjeta m={p.id} />
+                  {sel && !confirmado && <span className="absolute left-1.5 top-1.5 z-10 rounded bg-[#ff4a5a] px-1.5 text-[10px] font-black text-white">P1</span>}
+                  <div className="relative z-10 flex flex-col items-center px-1 pb-2 pt-2">
+                    <Retrato m={p.id} pose={pose} className="h-24 w-24 sm:h-48 sm:w-48 [@media(max-height:500px)]:h-20 [@media(max-height:500px)]:w-20" />
+                    <span className="mt-1 text-lg font-black text-white drop-shadow-[0_2px_0_#3a2a6a] sm:text-2xl [@media(max-height:500px)]:text-sm">{p.pilot.toUpperCase()}</span>
+                    <span className="text-[11px] font-black text-[#ffe3a3] drop-shadow sm:text-sm [@media(max-height:500px)]:text-[10px]">{p.name}</span>
+                    <img src={thumbs[p.id].plane} alt="" className="mt-1 h-6 w-auto sm:h-10 [@media(max-height:500px)]:hidden" style={{ imageRendering: 'pixelated' }} />
+                  </div>
+                  {confirmado === p.id && <span className="sello-listo absolute inset-x-0 top-1/3 z-20 text-3xl font-black text-[#ffd84a] sm:text-5xl">¡LISTO!</span>}
                 </button>
-              ))}
-            </div>
-            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm font-bold sm:grid-cols-4">
-              <div><dt className="text-xs text-[#a08060]">Velocidad</dt><dd><Stars n={spec.stats.velocidad} /></dd></div>
-              <div><dt className="text-xs text-[#a08060]">Blindaje</dt><dd><Stars n={spec.stats.blindaje} /></dd></div>
-              <div><dt className="text-xs text-[#a08060]">Misiles</dt><dd><Stars n={spec.stats.misiles} /></dd></div>
-              <div><dt className="text-xs text-[#a08060]">Bombas</dt><dd><Stars n={spec.stats.bombas} /></dd></div>
-            </dl>
-            <div className="sticky bottom-0 -mx-2 mt-5 flex flex-col items-center gap-3 rounded-2xl bg-[#fff8e7]/95 px-2 pt-2 [@media(max-height:500px)]:mt-2">
-              {saved && (
-                <button type="button" autoFocus onClick={() => play(true)} className={GO}>
-                  Continuar partida · {PLANES.find((p) => p.id === saved.pilot)?.pilot}, oleada {saved.wave}, ⭐ {saved.score}
-                </button>
-              )}
-              <button type="button" autoFocus={!saved} onClick={() => play()} className={saved ? `${BTN} h-12` : GO}>
-                {saved ? 'Nueva partida' : '¡A volar!'}
-              </button>
-              {touchUi ? (
-                <p className="text-center text-xs font-bold text-[#8a6e55]">Mantén apretada la mitad izquierda o derecha de la pantalla para girar el avión; doble toque para el super nitro. A la derecha: acelerar, frenar, misil, bomba, bengalas y metralla.</p>
-              ) : (
-                <p className="text-center text-xs font-bold text-[#8a6e55]">
-                  Flechas o WASD: pilotear · E: acelerar · Q: frenar · Espacio: misil · K: bomba · L: bengalas · Z: zoom · Esc: pausa
-                </p>
-              )}
-              {portrait && <p className="text-center text-xs font-black text-[#e8742a]">📱 Gira el teléfono para jugar más cómodo.</p>}
-            </div>
+              );
+            })}
           </div>
+          {/* The chosen pilot's story and numbers. */}
+          <div className="w-full max-w-4xl rounded-2xl bg-[#fff8e7]/95 p-3 text-center ring-4 ring-[#ead6b3] [@media(max-height:500px)]:p-1.5">
+            <p className="text-sm font-bold text-[#6b4f3a] [@media(max-height:500px)]:hidden">{spec.blurb}</p>
+            <dl className="mt-1 grid grid-cols-4 gap-1 text-xs font-bold sm:text-sm">
+              <div><dt className="text-[10px] text-[#a08060]">Velocidad</dt><dd><Stars n={spec.stats.velocidad} /></dd></div>
+              <div><dt className="text-[10px] text-[#a08060]">Blindaje</dt><dd><Stars n={spec.stats.blindaje} /></dd></div>
+              <div><dt className="text-[10px] text-[#a08060]">Misiles</dt><dd><Stars n={spec.stats.misiles} /></dd></div>
+              <div><dt className="text-[10px] text-[#a08060]">Bombas</dt><dd><Stars n={spec.stats.bombas} /></dd></div>
+            </dl>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {saved && (
+              <button type="button" disabled={!!confirmado} onClick={() => play(true)} className={`${BTN} h-12`}>
+                ▶ Continuar · {PLANES.find((p) => p.id === saved.pilot)?.pilot}, oleada {saved.wave}
+              </button>
+            )}
+            <button type="button" autoFocus disabled={!!confirmado} onClick={confirmar} className={GO}>
+              ✈️ ¡A volar con {spec.pilot}!
+            </button>
+          </div>
+          <p className="text-center text-[11px] font-bold text-white/80 [@media(max-height:500px)]:hidden">
+            {touchUi ? 'Toca un piloto para elegirlo y otra vez para confirmar.' : '← → elige · Enter confirma · Esc vuelve'}
+          </p>
+          {portrait && <p className="text-center text-xs font-black text-[#ffe3a3]">📱 Gira el teléfono para jugar más cómodo.</p>}
         </div>
       )}
 

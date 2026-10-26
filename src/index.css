@@ -331,3 +331,27 @@ html.lite .liquid-glass-strong::before {
     padding-top: 4rem;
   }
 }
+
+/* Character select: the confirmed card flashes and the «¡LISTO!» stamp slams on. */
+.tarjeta-confirmada {
+  animation: tarjeta-flash 0.5s ease-out;
+}
+@keyframes tarjeta-flash {
+  0% {
+    filter: brightness(2.6);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+.sello-listo {
+  text-shadow: -3px 0 0 #3a2a6a, 3px 0 0 #3a2a6a, 0 -3px 0 #3a2a6a, 0 3px 0 #3a2a6a, 0 6px 0 #e8742a;
+  animation: intro-golpe 0.45s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  transform: rotate(-8deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tarjeta-confirmada,
+  .sello-listo {
+    animation: none;
+  }
+}

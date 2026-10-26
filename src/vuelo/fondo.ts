@@ -1159,9 +1159,25 @@ const LETRAS: Record<string, string[]> = {
   S: ['.##', '#..', '.#.', '..#', '##.'],
   T: ['###', '.#.', '.#.', '.#.', '.#.'],
   U: ['#.#', '#.#', '#.#', '#.#', '###'],
-  V: ['#.#', '#.#', '#.#', '#.#', '.#.'],
+  V: ['#.#', '#.#', '#.#', '.#.', '.#.'],
+  Ó: ['.#.', '#.#', '#.#', '#.#', '.#.'],
+  É: ['###', '#..', '##.', '#..', '###'],
+  Á: ['.#.', '#.#', '###', '#.#', '#.#'],
+  '0': ['###', '#.#', '#.#', '#.#', '###'],
+  '1': ['.#', '##', '.#', '.#', '.#'],
+  '2': ['##.', '..#', '.#.', '#..', '###'],
+  '3': ['##.', '..#', '.#.', '..#', '##.'],
+  '4': ['#.#', '#.#', '###', '..#', '..#'],
+  '5': ['###', '#..', '##.', '..#', '##.'],
+  '6': ['.##', '#..', '###', '#.#', '###'],
+  '7': ['###', '..#', '.#.', '.#.', '.#.'],
+  '8': ['###', '#.#', '###', '#.#', '###'],
+  '9': ['###', '#.#', '###', '..#', '##.'],
+  '→': ['....', '..#.', '####', '..#.', '....'],
   ' ': ['..', '..', '..', '..', '..'],
 };
+/** Letters that carry an acute accent above them. */
+const ACENTO = 'ÍÓÉÁ';
 const anchoTexto = (s: string) => [...s].reduce((w, ch) => w + (LETRAS[ch] ?? LETRAS[' '])[0].length + 1, -1);
 
 /** Writes `s` with its top-left at (x, y), with a 1 px drop shadow. */
@@ -1172,9 +1188,10 @@ function letrero(b: Buf, s: string, x: number, y: number, col: number, sombra: n
       gl.forEach((row, j) => {
         for (let i = 0; i < row.length; i++) if (row[i] === '#') b.px(x + i + dx, y + j + dx, c);
       });
-    if (ch === 'Í') {
-      b.px(x, y - 2, col);
-      b.px(x + 1, y - 3, col);
+    if (ACENTO.includes(ch)) {
+      const ax = x + Math.floor(gl[0].length / 2);
+      b.px(ax, y - 2, col);
+      b.px(ax + 1, y - 3, col);
     }
     x += gl[0].length + 1;
   }
@@ -1190,9 +1207,10 @@ export function escribir(g: Ctx, s: string, x: number, y: number, col: string, s
       gl.forEach((row, j) => {
         for (let i = 0; i < row.length; i++) if (row[i] === '#') g.fillRect(x + i + dx, y + j + dx, 1, 1);
       });
-      if (ch === 'Í') {
-        g.fillRect(x + dx, y - 2 + dx, 1, 1);
-        g.fillRect(x + 1 + dx, y - 3 + dx, 1, 1);
+      if (ACENTO.includes(ch)) {
+        const ax = x + Math.floor(gl[0].length / 2);
+        g.fillRect(ax + dx, y - 2 + dx, 1, 1);
+        g.fillRect(ax + 1 + dx, y - 3 + dx, 1, 1);
       }
     }
     x += gl[0].length + 1;
@@ -1362,7 +1380,9 @@ function capaSanAntonio(a: Ambiente) {
   }
   const [lx, ly] = faro(b, m, FARO_SA[0], H - 4, 14);
   FARO_SA[1] = ly;
-  void lx;
+  // A small «FARO» plate on the breakwater.
+  b.rect(lx - 26, H - 13, anchoTexto('FARO') + 4, 7, m('#24427a'));
+  letrero(b, 'FARO', lx - 24, H - 12, m('#ffffff', 0.15), m('#24427a'));
   // Fishing boats and a wooden jetty with pelicans.
   const COLS = ['#e05a5a', '#4a8ad8', '#f4c040', '#4cc4a0', '#ff8ac0'];
   for (let i = 0; i < 5; i++) bote(b, m, 1380 + i * 36 + Math.floor(r() * 10), H, COLS[i]);
@@ -1456,6 +1476,16 @@ function capaCosta(a: Ambiente) {
     const x = cx - 30 + i * 14;
     b.rect(x, H - 4, 8, 2, m(COLS[i]));
     b.rect(x, H - 4, 8, 1, m('#ffffff'));
+  }
+  // San Pedro's boat for the fishermen's feast: a mast strung with pennants.
+  {
+    const x = cx + 46;
+    bote(b, m, x, H, '#4a8ad8');
+    const banderas = ['#f4c040', '#ffffff', '#e05a5a', '#4cc4a0', '#4a8ad8'];
+    for (let i = 0; i < 9; i++) {
+      b.px(x - 4 + i, H - 11 + Math.round(Math.abs(i - 4) * 0.4) + 1, m(banderas[i % 5]));
+      b.px(x + 4 + i, H - 11 + Math.round(i * 0.7) + 1, m(banderas[(i + 2) % 5]));
+    }
   }
   return b;
 }
@@ -1554,13 +1584,16 @@ function pintarCerros(b: Buf, a: Ambiente, k: number, prof: (x: number) => numbe
   }
   // The name on a hillside, white letters on a green patch.
   if (opt.letrero) {
+    // Twice along the strip, so it's on screen whenever the city is.
     const txt = 'VALPARAÍSO';
     const w = anchoTexto(txt);
-    let best = Math.round(W * 0.4);
-    for (let x = Math.round(W * 0.3); x < W * 0.6; x += 4) if (prof(x + w / 2) > prof(best + w / 2)) best = x;
-    const y = Math.round(H - Math.min(prof(best), prof(best + w))) + 6;
-    b.rect(best - 3, y - 4, w + 6, 11, m('#9cc888'));
-    letrero(b, txt, best, y, m('#ffffff', 0.1), m('#5a8a5a'));
+    for (const [f0, f1] of [[0.08, 0.3], [0.55, 0.8]]) {
+      let best = Math.round(W * f0);
+      for (let x = Math.round(W * f0); x < W * f1; x += 4) if (prof(x + w / 2) > prof(best + w / 2)) best = x;
+      const y = Math.round(H - Math.min(prof(best), prof(best + w))) + 6;
+      b.rect(best - 3, y - 4, w + 6, 11, m('#9cc888'));
+      letrero(b, txt, best, y, m('#ffffff', 0.1), m('#5a8a5a'));
+    }
   }
 }
 
@@ -1694,13 +1727,19 @@ const tareasMar = (a: Ambiente): Tarea<Mar>[] => [
  * is one wide canvas, so a sector shows up while the camera is over it.
  */
 const SA_MID = 300;
-/** Canvas x in a layer of parallax `k` for world x (centred on screen). */
-const enCapa = (X: number, k: number) => Math.round((X - SA_MID) * k + SA_MID);
-const delCapa = (x: number, k: number) => (x - SA_MID) / k + SA_MID;
+/** Spare canvas on the left so wide screens never see the layer's edge. */
+const SA_PAD = 640;
+/** Canvas x in a layer of parallax `k` for world x. */
+const enCapa = (X: number, k: number) => Math.round((X - SA_MID) * k + SA_MID + SA_PAD);
+const delCapa = (x: number, k: number) => (x - SA_MID - SA_PAD) / k + SA_MID;
 const SECTOR_FIN = [400, 1100, 1700, 2700, 3600];
-const sectorDe = (X: number) => SECTOR_FIN.findIndex((f) => X < f) < 0 ? 4 : SECTOR_FIN.findIndex((f) => X < f);
+const sectorDe = (X: number) => {
+  const i = SECTOR_FIN.findIndex((f) => X < f);
+  return i < 0 ? 4 : i;
+};
 const SA_LEVEL = 3600;
-const anchoCapa = (k: number) => enCapa(SA_LEVEL, k) + 700;
+/** Wide enough for screens up to ~1700 px at any camera position. */
+const anchoCapa = (k: number) => enCapa(SA_LEVEL, k) + 1800;
 
 /** A tall, thin eucalyptus: pale trunk and a long blue-green crown. */
 function eucalipto(b: Buf, m: Pinta, x: number, yb: number, alto: number) {
@@ -1739,7 +1778,7 @@ function garza(b: Buf, m: Pinta, x: number, yb: number) {
 /** A giant gantry crane (the port's), boom over the water to the left. (x, yb) is its left foot. */
 function gruaGrande(b: Buf, m: Pinta, x: number, yb: number, alto: number, celeste: boolean, ventana: Ventana) {
   const col = m(celeste ? '#7ac0e8' : '#f07a8a');
-  const blanco = m('#fff4f4');
+  const blanco = m('#f4f0f4');
   const tinta = m(celeste ? '#3a6a9a' : '#8a4a6a');
   const top = yb - alto;
   const ancho = 22;
@@ -1750,7 +1789,6 @@ function gruaGrande(b: Buf, m: Pinta, x: number, yb: number, alto: number, celes
     }
   for (const yy of [yb - 26, yb - 60]) b.rect(x, yy, ancho + 2, 3, col);
   for (let i = 0; i < ancho; i++) b.px(x + i, yb - 26 - Math.round(i * 1.5), tinta);
-  // The boom reaching far over the berth, and the back arm.
   b.rect(x - 64, top - 2, 100, 6, tinta);
   b.rect(x - 63, top - 1, 98, 4, col);
   for (let xx = x - 63; xx < x + 35; xx += 8) b.rect(xx, top - 1, 4, 4, blanco);
@@ -1763,7 +1801,7 @@ function gruaGrande(b: Buf, m: Pinta, x: number, yb: number, alto: number, celes
   b.rect(x - 30, top + 4, 8, 6, blanco);
   b.rect(x - 29, top + 5, 6, 2, ventana());
   for (let y = top + 4; y < top + 34; y++) b.px(x - 46, y, tinta);
-  b.rect(x - 51, top + 34, 11, 3, m('#f4c040'));
+  b.rect(x - 51, top + 34, 11, 3, m('#c8a860'));
 }
 
 /** Far: the coastal range, with the river valley at Llolleo and the sea past the port. */
@@ -1781,7 +1819,6 @@ function capaSALejos(a: Ambiente) {
     return base(x) * rio * costa;
   };
   loma(b, prof, m('#a8b8d0'), m('#c8d4e8'), m('#8494b8'));
-  // A sliver of sea at the foot of the hills from the port onwards.
   const mar = m('#6fa8c9', 0.45);
   const brillo = m('#cfe3ea', 0.4);
   for (let x = 0; x < W; x++) {
@@ -1796,27 +1833,30 @@ function capaSALejos(a: Ambiente) {
 /** The ground line of the mid layer (height above its bottom) at world x. */
 function sueloMedio(X: number) {
   const barr = 30 * ss(1050, 1500, X) * (1 - ss(1650, 1800, X));
-  const cart = 72 * Math.exp(-(((X - 3150) / 330) ** 2));
+  const cristo = 22 * Math.exp(-(((X - 870) / 70) ** 2));
+  const centinela = 52 * Math.exp(-(((X - 1790) / 120) ** 2));
+  const cart = 76 * Math.exp(-(((X - 3150) / 340) ** 2));
   const ondula = 4 * Math.sin(X / 90) + 3 * Math.sin(X / 37 + 1);
-  return 16 + barr + cart + ondula * (1 - ss(1750, 1850, X) * (1 - ss(2650, 2750, X)));
+  return 30 + barr + cristo + centinela + cart + ondula * (1 - ss(1850, 1950, X) * (1 - ss(2650, 2750, X)));
 }
 
 /** Mid: the sectors themselves, from the eucalyptus to Cartagena's hill. */
 function capaSAMedio(a: Ambiente) {
   const k = 0.35;
   const W = anchoCapa(k);
-  const H = 150;
+  const H = 160;
   const b = new Buf(W, H);
-  const kk = 0.26;
+  const kk = 0.3;
   const m: Pinta = (h, q = kk) => pack(mat(a, h, q));
+  // Cranes further into the haze, so they never compete with the action.
+  const mGrua: Pinta = (h) => pack(mat(a, h, 0.42));
   const r = rng(2101);
   const ventana = ventanas(a, m, r, 0.1);
   const at = (X: number) => enCapa(X, k);
   const prof = (x: number) => sueloMedio(delCapa(x, k));
   const surf = (X: number) => Math.round(H - prof(at(X)));
-  // Ground: fields, wetland greens, the paved port and grey sand at Cartagena.
-  const verdes = [m('#b5d99c'), m('#c4dc9a'), m('#a8d0a0'), m('#c8c4cc'), m('#d8d0c0')];
-  const tintas = [m('#7aa070'), m('#8aa064'), m('#6a9a78'), m('#9a94a8'), m('#a8a090')];
+  const verdes = [m('#b5d99c'), m('#c4dc9a'), m('#a8d0a0'), m('#a8c898'), m('#c8d0a0')];
+  const tintas = [m('#7aa070'), m('#8aa064'), m('#6a9a78'), m('#7a9a70'), m('#8a9a70')];
   for (let x = 0; x < W; x++) {
     const X = delCapa(x, k);
     const s = sectorDe(X);
@@ -1827,39 +1867,43 @@ function capaSAMedio(a: Ambiente) {
     for (let y = Math.min(top, nx); y <= Math.max(top, nx); y++) b.px(x, y, tintas[s]);
   }
   // San Juan: eucalyptus groves, two ponds and scattered farmhouses.
-  for (let X = 0; X < 420; X += 18 + Math.floor(r() * 20)) eucalipto(b, m, at(X), surf(X) + 2, 36 + Math.floor(r() * 26));
+  for (let X = -400; X < 420; X += 18 + Math.floor(r() * 20)) eucalipto(b, m, at(X), surf(X) + 2, 36 + Math.floor(r() * 26));
   for (const X of [140, 300]) {
     const x = at(X);
     b.oval(x, surf(X) + 4, 9, 2, m('#7aa8c8'));
     b.oval(x, surf(X) + 4, 8, 1, m('#a8d8f0'));
   }
   for (const X of [60, 230, 370]) casa(b, m, at(X), surf(X) + 3, 9, 6, '#f2cc8f', '#9a8aa8', ventana);
-  // Llolleo: lagoons, reeds, herons, the river mouth with its sandbar, wooden houses.
+  // Llolleo: lagoons, reeds, herons, wooden houses; the Cristo del Maipo on its little hill.
   for (let X = 430; X < 1100; X += 6 + Math.floor(r() * 10)) {
     const x = at(X);
     const y = surf(X) + 2;
-    if ((X > 560 && X < 680) || (X > 860 && X < 960)) {
+    if (Math.abs(X - 870) < 60) continue;
+    if ((X > 560 && X < 680) || (X > 960 && X < 1040)) {
       b.rect(x - 3, y - 1, 7, 3, m('#7aa8c8'));
       b.rect(x - 2, y - 1, 5, 1, m('#a8d8f0'));
     } else if (r() < 0.7) totora(b, m, x, y, r);
   }
-  for (const X of [600, 640, 900]) garza(b, m, at(X), surf(X) + 2);
-  {
-    const x0 = at(730);
-    const x1 = at(800);
-    for (let x = x0; x < x1; x++) {
-      const y = surf(delCapa(x, k));
-      b.rect(x, y, 1, H - y, m('#6fa8c9'));
-      if ((x * 3) % 7 === 0) b.px(x, y + 2, m('#cfe3ea'));
-    }
-    b.rect(x0 - 4, H - 3, x1 - x0 + 8, 3, m('#e8dcb0'));
-  }
-  for (const X of [470, 1000, 1060]) {
+  for (const X of [600, 640, 990]) garza(b, m, at(X), surf(X) + 2);
+  for (const X of [470, 1060]) {
     casa(b, m, at(X), surf(X) + 3, 10, 9, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], '#c0605a', ventana);
     for (let i = -2; i < 12; i += 2) b.rect(at(X) + i, surf(X), 1, 3, m('#ffffff'));
   }
+  {
+    const x = at(870);
+    const y = surf(870) + 1;
+    const bl = m('#f4f2ee');
+    b.rect(x - 2, y - 4, 5, 4, m('#c8c0b0'));
+    b.rect(x, y - 13, 2, 9, bl);
+    b.rect(x - 4, y - 11, 10, 2, bl);
+    b.disc(x + 1, y - 15, 1, bl);
+    const txt = 'CRISTO DEL MAIPO';
+    const w = anchoTexto(txt);
+    b.rect(x - w / 2 - 2, y + 3, w + 4, 8, m('#5a7a6a'));
+    letrero(b, txt, Math.round(x - w / 2), y + 4, m('#ffffff', 0.1), m('#3a5a4a'));
+  }
   // Barrancas: paired houses in terraces up the slope, with stairs between.
-  for (let X = 1120; X < 1700; X += 16 + Math.floor(r() * 8)) {
+  for (let X = 1120; X < 1660; X += 16 + Math.floor(r() * 8)) {
     const x = at(X);
     const top = surf(X) + 3;
     for (let row = 0; row < 3; row++) {
@@ -1872,25 +1916,34 @@ function capaSAMedio(a: Ambiente) {
     }
     if (r() < 0.4) for (let y = top - 6; y < H; y += 2) b.rect(x + 14, y, 2, 1, m('#ffffff'));
   }
-  // The port: giant cranes, container stacks, warehouses and a ship at the berth.
+  // Cerro Centinela behind the port, with its name on the slope.
   {
-    const q0 = at(1760);
-    const q1 = at(2680);
+    const X = 1790;
+    const txt = 'CERRO CENTINELA';
+    const w = anchoTexto(txt);
+    const x = at(X) - Math.round(w / 2);
+    const y = surf(X) + 10;
+    b.rect(x - 3, y - 3, w + 6, 10, m('#9cc888'));
+    letrero(b, txt, x, y - 1, m('#ffffff', 0.1), m('#5a8a5a'));
+    for (let X2 = 1700; X2 < 1880; X2 += 9) if (Math.abs(X2 - X) > 34) casa(b, m, at(X2), surf(X2) + 5, 7, 6, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], '#e86a5c', ventana);
+  }
+  // The port: giant cranes, containers, warehouses and a ship at the berth (raised to be seen).
+  {
     const qy = surf(2200);
-    for (let x = q0; x < q1; x += 9) {
+    for (let x = at(1900); x < at(2680); x += 9) {
       if (r() < 0.15) continue;
-      contenedores(b, a, kk, r, x, qy + 1, 1 + Math.floor(r() * 6));
+      contenedores(b, a, kk, r, x, qy + 1, 1 + Math.floor(r() * 5));
     }
-    for (const [X, cel] of [[1900, false], [2080, true], [2260, false], [2440, true]] as const) gruaGrande(b, m, at(X), qy + 1, 104, cel, ventana);
+    for (const [X, cel] of [[1960, false], [2120, true], [2280, false], [2440, true]] as const) gruaGrande(b, mGrua, at(X), qy + 1, 104, cel, ventana);
     const s0 = at(2470);
     const s1 = at(2660);
-    for (let y = H - 8; y < H; y++) b.rect(s0 + (y > H - 3 ? 2 : 0), y, s1 - s0, 1, y >= H - 2 ? m('#e06a7a') : m('#3d85c6'));
-    for (let x = s0 + 6; x < s1 - 22; x += 8) contenedores(b, a, kk, r, x, H - 8, 1 + Math.floor(r() * 3));
-    b.rect(s1 - 18, H - 24, 12, 16, m('#fff4f4'));
-    b.rect(s1 - 17, H - 21, 10, 1, ventana());
-    b.rect(s1 - 13, H - 29, 4, 5, m('#e07a5f'));
-    // Warehouses with arched roofs.
-    for (const X of [1780, 1830]) {
+    const sb = qy - 2;
+    for (let y = sb - 9; y < sb; y++) b.rect(s0 + (y > sb - 3 ? 2 : 0), y, s1 - s0, 1, y >= sb - 2 ? m('#e06a7a') : m('#3d85c6'));
+    for (let x = s0 + 6; x < s1 - 22; x += 8) contenedores(b, a, kk, r, x, sb - 9, 1 + Math.floor(r() * 3));
+    b.rect(s1 - 18, sb - 25, 12, 16, m('#fff4f4'));
+    b.rect(s1 - 17, sb - 22, 10, 1, ventana());
+    b.rect(s1 - 13, sb - 30, 4, 5, m('#e07a5f'));
+    for (const X of [1880, 1925]) {
       const x = at(X);
       const yb = qy + 1;
       b.rect(x, yb - 12, 14, 12, m('#d8d0e4'));
@@ -1898,63 +1951,73 @@ function capaSAMedio(a: Ambiente) {
       b.rect(x + 4, yb - 7, 6, 7, m('#7a8ab0'));
     }
   }
-  // Cartagena: houses climbing the hill, a chalet with a turret, Huidobro's house on top.
+  // Cartagena: rows of houses following the hill like an amphitheatre, with streets.
   {
-    for (let X = 2760; X < 3560; X += 6 + Math.floor(r() * 5)) {
-      const x = at(X);
-      const top = surf(X) + 3;
-      for (let yb = top + 5; yb < H - 10; yb += 6 + Math.floor(r() * 3))
-        if (r() < 0.75) casa(b, m, x, yb, 5 + Math.floor(r() * 3), 5, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], TECHOS_CASA[Math.floor(r() * TECHOS_CASA.length)], ventana);
+    for (let row = 0; row < 6; row++) {
+      for (let X = 2760 + (row % 2) * 12; X < 3540; X += 24 + Math.floor(r() * 10)) {
+        if (Math.abs(X - 3150) < 30 && row < 2) continue;
+        const x = at(X);
+        const yb = surf(X) + 10 + row * 11;
+        if (yb > H - 4) continue;
+        casa(b, m, x, yb, 8 + Math.floor(r() * 3), 8, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], TECHOS_CASA[Math.floor(r() * TECHOS_CASA.length)], ventana);
+      }
+      // The street along this row of the amphitheatre.
+      for (let x = at(2740); x < at(3560); x++) {
+        const y = Math.round(H - prof(x)) + 11 + row * 11;
+        if (y < H - 3) b.px(x, y, m('#d8d4c8'));
+      }
     }
     {
       const x = at(2950);
-      const yb = surf(2950) + 12;
+      const yb = surf(2950) + 21;
       casa(b, m, x, yb, 14, 10, '#fff6e5', '#7a8ab0', ventana);
       b.rect(x + 10, yb - 18, 5, 8, m('#fff6e5'));
       for (let i = 0; i < 4; i++) b.rect(x + 9 + Math.floor(i / 2), yb - 19 - i, 7 - Math.floor(i / 2) * 2, 1, m('#7a8ab0'));
       b.px(x + 12, yb - 15, ventana());
     }
     {
-      // Huidobro's house-museum on the hilltop, a small headstone and a tree with a bird.
+      // Huidobro's house-museum on the hilltop, highlighted, with its plaque.
       const X = 3150;
       const x = at(X);
       const yb = surf(X) + 2;
-      casa(b, m, x - 6, yb, 12, 8, '#f6b38e', '#c0605a', ventana);
-      b.rect(x + 9, yb - 3, 3, 3, m('#c8c4d4'));
-      b.px(x + 10, yb - 4, m('#c8c4d4'));
-      b.rect(x + 16, yb - 9, 1, 9, m('#8a5232'));
-      b.disc(x + 16, yb - 12, 4, m('#5a9a6a'));
-      b.disc(x + 15, yb - 13, 2, m('#8ac88a'));
-      b.rect(x + 18, yb - 17, 2, 1, m('#3e4a6b'));
-      b.px(x + 20, yb - 17, m('#ffc040'));
-    }
-    // Grey beach with the white railing and a few parasols.
-    const x0 = at(2720);
-    const x1 = W;
-    b.rect(x0, H - 5, x1 - x0, 5, m('#c9bfae'));
-    b.rect(x0, H - 7, x1 - x0, 1, m('#ffffff'));
-    for (let x = x0; x < x1; x += 3) b.px(x, H - 6, m('#ffffff'));
-    for (let x = x0 + 6; x < x1; x += 22 + Math.floor(r() * 18)) {
-      b.rect(x, H - 9, 1, 5, m('#8a7a9a'));
-      b.oval(x, H - 10, 3, 1, m(['#f4a7b9', '#ffd27f', '#8fd3c8'][Math.floor(r() * 3)]));
+      b.rect(x - 10, yb - 14, 20, 14, m('#5a4a6a', 0.15));
+      b.rect(x - 9, yb - 13, 18, 13, m('#f6b38e', 0.12));
+      for (let i = 0; i < 6; i++) b.rect(x - 11 + i, yb - 15 - i, 22 - i * 2, 1, m('#c0605a', 0.12));
+      b.rect(x - 6, yb - 10, 4, 4, m('#fff6e5', 0.1));
+      b.rect(x + 2, yb - 10, 4, 4, m('#fff6e5', 0.1));
+      b.rect(x - 1, yb - 6, 3, 6, m('#8a5232', 0.12));
+      b.rect(x + 13, yb - 3, 3, 3, m('#c8c4d4'));
+      b.px(x + 14, yb - 4, m('#c8c4d4'));
+      b.rect(x + 20, yb - 9, 1, 9, m('#8a5232'));
+      b.disc(x + 20, yb - 12, 4, m('#5a9a6a'));
+      b.disc(x + 19, yb - 13, 2, m('#8ac88a'));
+      b.rect(x + 22, yb - 17, 2, 1, m('#3e4a6b'));
+      b.px(x + 24, yb - 17, m('#ffc040'));
+      const w = anchoTexto('HUIDOBRO');
+      b.rect(x - Math.round(w / 2) - 2, yb - 27, w + 4, 8, m('#3e4a6b'));
+      letrero(b, 'HUIDOBRO', x - Math.round(w / 2), yb - 26, m('#ffffff', 0.1), m('#3e4a6b'));
     }
   }
   return { cv: b.canvas(), fondo: css(mat(a, '#b5d99c', kk)) };
 }
 
-/** Near: a lower band — rows of eucalyptus, reeds, houses, the old railway station, containers, Cartagena's houses. */
+/** Near: a lower band — eucalyptus, reeds and the river, houses, the station, and the sea from the port on. */
 function capaSACerca(a: Ambiente) {
   const k = 0.55;
   const W = anchoCapa(k);
-  const H = 76;
+  const H = 90;
   const b = new Buf(W, H);
   const kk = 0.1;
   const m: Pinta = (h, q = kk) => pack(mat(a, h, q));
   const r = rng(2201);
   const ventana = ventanas(a, m, r, 0);
   const at = (X: number) => enCapa(X, k);
-  const base = ondas(W, 22, [[5, 9, 0.4], [3, 23, 1.2]]);
-  const prof = (x: number) => base(x) + 8 * ss(1100, 1300, delCapa(x, k)) * (1 - ss(1600, 1750, delCapa(x, k))) + 16 * Math.exp(-(((delCapa(x, k) - 3100) / 260) ** 2));
+  const base = ondas(W, 26, [[5, 9, 0.4], [3, 23, 1.2]]);
+  // The near band dips by the sea (port and Cartagena) so the water shows.
+  const prof = (x: number) => {
+    const X = delCapa(x, k);
+    return base(x) * (1 - 0.45 * ss(1700, 1800, X)) + 8 * ss(1100, 1300, X) * (1 - ss(1600, 1750, X)) + 22 * Math.exp(-(((X - 3150) / 260) ** 2));
+  };
   const verdes = [m('#8ccc84'), m('#a0c47c'), m('#90c890'), m('#b8b4c4'), m('#c9bfae')];
   for (let x = 0; x < W; x++) {
     const s = sectorDe(delCapa(x, k));
@@ -1963,32 +2026,67 @@ function capaSACerca(a: Ambiente) {
     b.px(x, top, m('#5a8a6a'));
   }
   const surf = (X: number) => Math.round(H - prof(at(X)));
-  for (let X = 0; X < 420; X += 10 + Math.floor(r() * 14)) eucalipto(b, m, at(X), surf(X) + 1, 46 + Math.floor(r() * 22));
+  for (let X = -500; X < 420; X += 10 + Math.floor(r() * 14)) eucalipto(b, m, at(X), surf(X) + 1, 46 + Math.floor(r() * 22));
   for (let X = 420; X < 1100; X += 4 + Math.floor(r() * 8)) {
+    if (Math.abs(X - 765) < 40) continue;
     if (r() < 0.75) totora(b, m, at(X), surf(X) + 1, r);
     else if (r() < 0.3) garza(b, m, at(X), surf(X) + 1);
   }
-  for (let X = 1110; X < 1680; X += 22 + Math.floor(r() * 14)) {
+  // The Maipo's mouth: water cutting through the reeds, and its sandbar.
+  for (let x = at(725); x < at(805); x++) {
+    const y = Math.round(H - prof(x)) + 1;
+    b.rect(x, y, 1, H - y, m('#6fa8c9'));
+    if ((x * 3) % 7 === 0) b.px(x, y + 3, m('#cfe3ea'));
+  }
+  b.rect(at(735), H - 22, at(795) - at(735), 3, m('#e8dcb0'));
+  for (let X = 1110; X < 1640; X += 22 + Math.floor(r() * 14)) {
     const c = MUROS_CASA[Math.floor(r() * MUROS_CASA.length)];
     casa(b, m, at(X), surf(X) + 2, 9, 9, c, '#e86a5c', ventana);
     casa(b, m, at(X) + 10, surf(X) + 2, 9, 9, c, '#e86a5c', ventana);
   }
-  // The old railway station with its wooden roof, at the edge of the port.
+  // The sea from the port to Cartagena, with the pile pier and colourful boats.
+  const marY = H - 26;
+  for (let x = at(1760); x < W; x++) {
+    b.rect(x, marY, 1, H - marY, m('#6fa8c9'));
+    if ((x * 7) % 11 === 0) b.px(x, marY + 2 + (x % 5), m('#cfe3ea'));
+    b.px(x, marY, m('#a8d4ea'));
+  }
   {
-    const x = at(1720);
-    const yb = surf(1720) + 1;
+    const p0 = at(2280);
+    const p1 = at(2420);
+    b.rect(p0, marY - 4, p1 - p0, 3, m('#c48250'));
+    b.rect(p0, marY - 4, p1 - p0, 1, m('#e0a870'));
+    for (let x = p0 + 2; x < p1; x += 8) b.rect(x, marY - 1, 2, 12, m('#8a5232'));
+  }
+  const COLS = ['#e05a5a', '#4a8ad8', '#f4c040', '#4cc4a0', '#ffffff'];
+  for (let X = 2440; X < 2690; X += 26 + Math.floor(r() * 14)) {
+    const x = at(X);
+    b.rect(x, marY + 2, 12, 3, m(COLS[Math.floor(r() * COLS.length)]));
+    b.rect(x + 1, marY + 5, 10, 1, m('#3e4a6b'));
+    b.rect(x, marY + 2, 12, 1, m('#ffffff'));
+  }
+  // The quay and its containers, above the water line.
+  for (let X = 1800; X < 2270; X += 9) if (r() < 0.6) contenedores(b, a, kk, r, at(X), marY, 1 + Math.floor(r() * 3));
+  b.rect(at(1780), marY - 1, at(2270) - at(1780), 2, m('#c8c4d4'));
+  // The old railway station on the way out of town: «1912».
+  {
+    const x = at(1690);
+    const yb = surf(1690) + 1;
     b.rect(x - 20, yb - 2, 60, 2, m('#8a7a6a'));
     b.rect(x, yb - 14, 24, 12, m('#f2cc8f'));
     b.rect(x - 3, yb - 17, 30, 3, m('#8a5232'));
     for (let i = 2; i < 24; i += 6) b.rect(x + i, yb - 10, 3, 4, ventana());
     for (let xx = x - 20; xx < x + 40; xx += 3) b.px(xx, yb - 1, m('#5a4a3a'));
+    b.rect(x + 3, yb - 25, anchoTexto('1912') + 4, 8, m('#5a4a3a'));
+    letrero(b, '1912', x + 5, yb - 24, m('#fff6e5'), m('#5a4a3a'));
   }
-  for (let X = 1800; X < 2680; X += 9) if (r() < 0.6) contenedores(b, a, kk, r, at(X), surf(X) + 1, 1 + Math.floor(r() * 3));
-  for (let X = 2720; X < 3600; X += 9 + Math.floor(r() * 6)) {
-    if (r() < 0.3) continue;
-    casa(b, m, at(X), surf(X) + 2, 7 + Math.floor(r() * 3), 7, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], TECHOS_CASA[Math.floor(r() * TECHOS_CASA.length)], ventana);
+  // Cartagena's houses on the hill above the beach.
+  for (let X = 2760; X < 3600; X += 14 + Math.floor(r() * 8)) {
+    const yb = Math.min(marY - 4, surf(X) + 8);
+    casa(b, m, at(X), yb, 8 + Math.floor(r() * 3), 8, MUROS_CASA[Math.floor(r() * MUROS_CASA.length)], TECHOS_CASA[Math.floor(r() * TECHOS_CASA.length)], ventana);
   }
-  return { cv: b.canvas(), fondo: css(mat(a, '#8ccc84', kk)) };
+  b.rect(at(2720), marY - 3, W - at(2720), 3, m('#c9bfae'));
+  return { cv: b.canvas(), fondo: css(mat(a, '#6fa8c9', kk)) };
 }
 
 type SA = { lejos: { cv: Cv; fondo: string }; medio: { cv: Cv; fondo: string }; cerca: { cv: Cv; fondo: string } };
@@ -2785,12 +2883,6 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
     // Estrellas, aurora y estrellas que titilan.
     const yEst = ys(0.2);
     if (C.estrellas) tira(g, C.estrellas, camX * 0.02, yEst, vw);
-    if (C.aurora) {
-      const ya = ys(0.15) - 196;
-      g.globalAlpha = 0.4 + 0.1 * Math.sin(t * 0.5);
-      tira(g, C.aurora, camX * 0.03 + t * 3, ya, vw);
-      g.globalAlpha = 1;
-    }
     if (a === 'noche') {
       g.fillStyle = '#fffbe8';
       for (let i = 0; i < TITILA.length; i++) {
@@ -3157,10 +3249,13 @@ function dibujarOceano(g: Ctx, o: OpcionesFondo, C: Capas, M: Mar, t: number, ys
   {
     const c2 = costa * 2;
     const i = Math.min(1, Math.floor(c2));
-    const u = ss(0, 1, c2 - i);
+    // The next coast rises first, then the old one sinks: there's always land.
+    const u = ss(0.2, 0.8, c2 - i);
     const H = COSTA_H;
-    if (u < 1) tiraHundida(g, M.costas[i], offI, yH, vw, u * H);
-    if (u > 0) tiraHundida(g, M.costas[i + 1], offI + 600 * (1 - u), yH, vw, (1 - u) * H);
+    const hundeA = ss(0.5, 1, u);
+    const subeB = ss(0, 0.5, u);
+    if (hundeA < 1) tiraHundida(g, M.costas[i], offI, yH, vw, hundeA * H);
+    if (subeB > 0) tiraHundida(g, M.costas[i + 1], offI + 600 * (1 - u), yH, vw, (1 - subeB) * H);
   }
   g.fillStyle = M.bandas[0].lejos;
   g.fillRect(0, yH, vw, vh - yH);
@@ -3177,6 +3272,31 @@ function dibujarOceano(g: Ctx, o: OpcionesFondo, C: Capas, M: Mar, t: number, ys
       g.fillRect(0, yf, vw, vh - yf);
     }
   }
+  // A floating «VALPO →» sign on the way, when Valparaíso is getting close.
+  {
+    const k = ss(0.6, 0.65, costa) * (1 - ss(0.82, 0.88, costa));
+    if (k > 0.02) {
+      const sx = Math.round(mod(vw * 0.75 - (o.quieto ? 0 : (o.viaje ?? 0) * 9) - camX * 0.3, vw + 300) - 150);
+      const sy = Math.round(yH + (ys(0.5) - yH) * 0.7);
+      if (sy < vh && sy > 0) {
+        g.globalAlpha = k;
+        const bob = o.quieto ? 0 : Math.round(Math.sin(t * 1.6));
+        g.fillStyle = '#6a5a4a';
+        g.fillRect(sx + 13, sy - 10 + bob, 2, 10);
+        g.fillStyle = '#e86a5c';
+        g.fillRect(sx + 6, sy - 1 + bob, 16, 3);
+        g.fillStyle = '#ffffff';
+        g.fillRect(sx + 6, sy - 1 + bob, 16, 1);
+        g.fillStyle = '#24427a';
+        g.fillRect(sx - 1, sy - 19 + bob, 31, 9);
+        g.fillStyle = '#fff6e5';
+        g.fillRect(sx, sy - 18 + bob, 29, 7);
+        escribir(g, 'VALPO →', sx + 2, sy - 17 + bob, '#24427a');
+        g.globalAlpha = 1;
+      }
+    }
+  }
+
   // A bright line where the sea meets the sky.
   g.fillStyle = a === 'noche' ? '#a890d8' : a === 'tarde' ? '#ffe8c4' : '#eefaff';
   g.fillRect(0, yH, vw, 1);
@@ -3299,7 +3419,8 @@ function dibujarCampo(g: Ctx, o: OpcionesFondo, C: Capas, S: SA, t: number, ys: 
   const { vw, vh, camX, ambiente: a } = o;
   const capa = (c: { cv: Cv; fondo: string }, k: number, y: number) => {
     // Wide canvases indexed by world x: no tiling, the sector shows up where it belongs.
-    const x = -Math.round(camX * k);
+    // The sector under the screen centre is the one under the camera.
+    const x = -Math.round(camX * k + (SA_MID - vw / 2) * (1 - k) + SA_PAD);
     const top = y - c.cv.height;
     if (top < vh && y > 0) g.drawImage(c.cv, x, top);
     if (y < vh) {

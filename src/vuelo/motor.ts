@@ -125,6 +125,8 @@ export type Hud = {
   stall: boolean;
   /** Nuclear bombs in the hold. */
   nukes: number;
+  /** Boarding or rolling on the home runway (the bottom-left must stay clear). */
+  enTierra: boolean;
   /** Ice 0…1 near the ceiling, and whether the controls are frozen. */
   hielo: number;
   congelado: boolean;
@@ -158,6 +160,9 @@ const PART_EFFECT: Record<Parte, Partial<FV.Dano>> = {
 };
 const PART_NAME: Record<Parte, string> = { cola: 'la cola', ala: 'un ala', motor: 'el motor', cabina: 'la cabina', bodega: 'la bodega' };
 const LIVES = 3;
+/** The home runway on the San Antonio map (world x). */
+const PISTA0 = 110;
+const PISTA1 = 420;
 
 function danoDe(lost: readonly Parte[]): FV.Dano {
   const d = { ...FV.SANO };
@@ -685,6 +690,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
     hielo: 0,
+    /** A new game starts at home: the pilot walks out and climbs in, then the player takes off from the runway. */
+    despegue: '' as '' | 'subiendo' | 'pista',
+    despT: 0,
+    vrAvisado: false,
     gritoT: 0,
     /** Storm: seconds to the next strike, the bolt in progress, the sky flash. */
     rayoT: 6,
@@ -972,6 +981,47 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     nextWave();
     save();
+    // At home in San Antonio the game opens on the ground: boarding, then a manual take-off.
+    if (!autopiloto && s.mapa === 'valle') {
+      const P = FV.PARAMS[id];
+      s.despegue = 'subiendo';
+      s.despT = 0;
+      const p = s.plane;
+      p.x = PISTA0 + 30;
+      p.y = ground(p.x) + P.panza;
+      p.vx = 0;
+      p.vy = 0;
+      p.rumbo = 0;
+      p.alabeo = 1;
+      s.camX = 0;
+    } else s.despegue = '';
+  }
+
+  /** The take-off run on the home runway: roll, gather speed, pull up to lift off. */
+  function rodarPista(mando: Mando, dt: number) {
+    const p = s.plane;
+    const PA = FV.PARAMS[s.spec.id];
+    const vRot = PA.velCrucero * 0.7;
+    const acc = mando.gas > 0 ? 70 * mando.gas + 25 : mando.gas < 0 ? -100 : -14;
+    p.vx = clamp(p.vx + acc * dt, 0, PA.velCrucero * 1.05);
+    p.x += p.vx * dt;
+    p.y = ground(p.x) + PA.panza;
+    p.vy = 0;
+    p.rumbo = Math.atan2(ground(p.x + 4) - ground(p.x - 4), 8);
+    p.alabeo = 1;
+    p.gas = mando.gas;
+    // Rotate: fast enough and the nose pulled up (or the runway runs out).
+    if ((p.vx >= vRot && mando.y > 0.3) || p.x > PISTA1 + 240) {
+      s.despegue = '';
+      p.vy = 45;
+      p.rumbo = 0.28;
+      s.inv = Math.max(s.inv, 1.5);
+      pop(p.x, p.y + 20, '🛫 ¡Despegue!', P.gold);
+      sfx.achievement();
+    } else if (p.vx >= vRot && Math.floor(s.t * 3) % 2 === 0 && !s.vrAvisado) {
+      s.vrAvisado = true;
+      pop(p.x, p.y + 20, '¡Ya! ¡Tira hacia arriba!', P.gold);
+    }
   }
 
   function save() {
@@ -2192,7 +2242,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (p.x < 90 && Math.cos(p.rumbo) < 0.3) mando.x = 1;
       if (p.x > LEVEL - 90 && Math.cos(p.rumbo) > -0.3) mando.x = -1;
       if (p.x < 90 || p.x > LEVEL - 90) mando.y = Math.max(mando.y, 0);
-      for (const ev of FV.pasoAvion(p, s.spec.id, mando, dt, ground, top)) {
+      if (s.despegue === 'subiendo') {
+        s.despT += dt;
+        s.inv = Math.max(s.inv, 0.5);
+        if (s.despT >= 2.4) {
+          s.despegue = 'pista';
+          s.vrAvisado = false;
+        }
+      } else if (s.despegue === 'pista') rodarPista(mando, dt);
+      const vuela = !s.despegue;
+      for (const ev of vuela ? FV.pasoAvion(p, s.spec.id, mando, dt, ground, top) : []) {
         if (ev.tipo === 'toqueSuelo' && ev.velocidad > 35 && s.mode === 'play') {
           // A hard crash into the ground blows the plane up at once; a scrape costs a part.
           if (ev.velocidad > 60) {
@@ -2216,7 +2275,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         s.shake = Math.max(s.shake, 1.5);
       }
       // Stuck on the ground (too slow, too broken to take off): it's a crash.
-      if (s.mode === 'play' && p.y - ground(p.x) < 14 && Math.hypot(p.vx, p.vy) < 30) {
+      if (s.mode === 'play' && !s.despegue && p.y - ground(p.x) < 14 && Math.hypot(p.vx, p.vy) < 30) {
         s.stuckT += dt;
         if (s.stuckT > 2.5) {
           s.stuckT = 0;
@@ -2300,8 +2359,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       stepPistas(dt);
     }
 
-    // Waves.
-    if (s.mode === 'play') {
+    // Waves (they wait until the plane is off the ground).
+    if (s.mode === 'play' && !s.despegue) {
       if (s.phase === 'break') {
         s.breakT -= dt;
         if (s.breakT <= 0) {
@@ -3136,12 +3195,22 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     if (s.mapa === 'oceano') {
-      OC.dibujarOlas(g, cam, sy(OC.NIVEL_MAR), vw, s.t, still);
+      OC.dibujarOlas(g, cam, sy(OC.NIVEL_MAR), vw, s.t, still, theme);
       for (const w of splashes) OC.dibujarSalpicadura(g, sx(w.x), sy(OC.NIVEL_MAR), 1 - w.t / 0.9);
     }
     const below = sy(-A.DIRT);
     if (below < vh) A.R(g, 0, below, vw, vh - below, s.mapa === 'oceano' ? OC.COLOR_LECHO : P.e1);
     A.drawFlag(g, sx(PANTRY.x0 + 70), sy(ground(PANTRY.x0 + 70)), s.t);
+    // The home runway: asphalt with a dashed centre line, at the start of San Antonio.
+    if (s.mapa === 'valle') {
+      for (let wx = PISTA0; wx < PISTA1; wx += 2) {
+        const x = sx(wx);
+        if (x < -2 || x > vw) continue;
+        const y = sy(ground(wx));
+        A.R(g, x, y - 1, 2, 3, '#5a5868');
+        if (Math.floor(wx / 10) % 2 === 0) A.R(g, x, y, 2, 1, '#fff8e7');
+      }
+    }
 
     const p = s.plane;
 
@@ -3246,6 +3315,22 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     VFX.dibujar(g, s.fx, (x, y) => [sx(x), sy(y)], s.t);
     L.dibujarLuces(g, s.luces, toScreen, s.t);
     const blink = s.inv > 0 && Math.floor(s.t * 14) % 2 === 0;
+    // Boarding: the pilot walks out of the house to the plane and hops in.
+    if (s.despegue === 'subiendo') {
+      const k = Math.min(1, s.despT / 2);
+      const x0 = PANTRY.x0 + 34, x1 = p.x - 4;
+      const wx = x0 + (x1 - x0) * k;
+      const hop = s.despT > 2 ? Math.sin(Math.min(1, (s.despT - 2) / 0.4) * Math.PI) * 12 : 0;
+      if (s.despT < 2.35) {
+        const gy = sy(ground(wx)) - Math.round(hop);
+        const paso = Math.floor(s.t * 8) % 2;
+        A.R(g, sx(wx) - 3, gy - 7, 6, 5, '#6b4f3a');
+        A.R(g, sx(wx) - 2, gy - 2, 1, 2 + paso, '#3a2a3a');
+        A.R(g, sx(wx) + 1, gy - 2, 1, 3 - paso, '#3a2a3a');
+        const head = A.pilotPortrait(s.spec.id);
+        g.drawImage(head, sx(wx) - 8, gy - 22 + paso);
+      }
+    }
     // Banked and top-view frames as it rolls or pulls hard (g smoothed so they don't flicker).
     if (!s.dead) drawPlaneGiro(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, p.alabeo, s.cargaSuave, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
     // Bubble shield from the special upgrade: a shimmering ring around the plane.
@@ -3611,6 +3696,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       stall: s.mode === 'play' && !s.dead && s.stallT > 0 && s.inv <= 0 && !s.congelado,
       hielo: Math.round(s.hielo * 20) / 20,
       nukes: s.nukes,
+      enTierra: !!s.despegue,
       congelado: s.congelado,
       zoom: [view.levels.length, view.zi],
       throttle: Math.sign(input.gas),
@@ -3621,7 +3707,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       banner: s.mode === 'play' ? s.banner : '',
       resumen: s.mode === 'play' && s.phase === 'break' && s.breakT > 1 ? s.resumen : null,
       viaje: s.transT > 0,
-      pista: s.mode === 'play' && !s.dead && s.pista ? textoPista(s.pista) : '',
+      pista: s.mode !== 'play' || s.dead ? '' : s.despegue === 'subiendo' ? `${s.spec.pilot} sube al avión…` : s.despegue === 'pista'
+        ? (view.touch ? 'Mantén ⏩ Acelerar y, con velocidad, mantén la mitad izquierda para despegar' : 'Mantén E para acelerar y, con velocidad, ↑ para despegar')
+        : s.pista ? textoPista(s.pista) : '',
       mision: s.mode === 'play' && s.mision ? { texto: s.mision.texto, prog: s.mision.prog, meta: s.mision.meta, hecha: s.mision.hecha, fallida: s.mision.fallida } : null,
     };
     const key = JSON.stringify(h);

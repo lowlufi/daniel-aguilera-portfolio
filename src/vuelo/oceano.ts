@@ -1,6 +1,7 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
 import { DECO_H, DIRT, R, paintPantry } from './dibujo';
+import { escribir } from './fondo';
 
 /*
  * The ocean map's foreground: the sea strip (island, water body, seabed),
@@ -162,6 +163,9 @@ export function aguaStrip(length: number, heightAt: (x: number) => number, pantr
     }
   }
 
+  // Buoys out at sea: one says «BOYA», a gull rests on the other.
+  for (const [x, gaviota] of [[700, false], [2300, true]] as const) if (x + 20 < length) boya(g, x, sea, gaviota);
+
   // Island: the pantry, a palm tree and a crab.
   if (orillaX > 0) {
     paintPantry(g, pantry.x0, rowOf(Math.round(heightAt(pantry.x0 + 30))) + 1);
@@ -171,6 +175,25 @@ export function aguaStrip(length: number, heightAt: (x: number) => number, pantr
     if (cx > px + 6) crab(g, cx, rowOf(hs[cx]) + 1);
   }
   return { canvas: c, top };
+}
+
+/** A red-and-white buoy floating at the surface row `y`, maybe with a gull on top. */
+function boya(g: Ctx, x: number, y: number, gaviota: boolean) {
+  R(g, x - 1, y - 9, 20, 11, INK);
+  R(g, x, y - 8, 18, 9, '#e05a5a');
+  R(g, x, y - 8, 18, 1, '#ff8a8a');
+  R(g, x, y + 1, 18, 1, '#a03a3a');
+  escribir(g, 'BOYA', x + 2, y - 6, P.white);
+  R(g, x + 7, y - 15, 4, 6, INK);
+  R(g, x + 8, y - 14, 2, 4, P.metal);
+  R(g, x + 8, y - 17, 2, 2, P.gold);
+  if (gaviota) {
+    R(g, x + 12, y - 12, 5, 3, P.white);
+    R(g, x + 12, y - 12, 4, 1, '#9aa6c8');
+    R(g, x + 15, y - 14, 2, 2, P.white);
+    R(g, x + 17, y - 13, 1, 1, '#ffb43a');
+    R(g, x + 13, y - 9, 1, 1, '#ffb43a');
+  }
 }
 
 /** A palm tree leaning right; (x, y) is the foot of the trunk. */
@@ -218,12 +241,20 @@ function crab(g: Ctx, x: number, y: number) {
 const INK = '#3a6ab8';
 const CREST_P = 28;
 
+/** Wave colours per ambiente: [body, curl, ink, glint]. Night water never glows cyan. */
+const OLAS: Record<'dia' | 'tarde' | 'noche', [string, string, string, string]> = {
+  dia: ['#9ee2ff', '#ffffff', INK, '#bdf0ff'],
+  tarde: ['#b8c8ea', '#fff4e8', '#5a6aa8', '#ffe8c8'],
+  noche: ['#4a5a98', '#a8b0d8', '#2a3270', '#7080b8'],
+};
+
 /**
  * Wave crests and foam along the sea surface (screen row `ySuperficie`),
  * scrolling with the camera and rolling slowly left. Skips the island.
  */
-export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: number, t: number, quieto: boolean) {
+export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: number, t: number, quieto: boolean, ambiente: 'dia' | 'tarde' | 'noche' = 'dia') {
   const tt = quieto ? 0 : t;
+  const [cuerpo, rizo, tinta, brillo] = OLAS[ambiente];
   const y = Math.round(ySuperficie);
   const roll = tt * 7;
   const i0 = Math.floor((camX + roll - 20) / CREST_P);
@@ -238,17 +269,17 @@ export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: numbe
     const top = y - (big ? 3 : 2) + bob;
     // A rounded hump with a white curl on top and an ink line on its back.
     const w = big ? 7 : 5;
-    R(g, x - w, y - 1 + bob, w * 2 + 1, 1 - bob + 1, AGUA[0]);
-    R(g, x - w + 2, top + 1, w * 2 - 3, y - top - 1, AGUA[0]);
-    R(g, x - w + 3, top, w, 1, P.white);
-    R(g, x - w + 2, top + 1, 2, 1, P.white);
-    R(g, x + 2, top, w - 4, 1, INK);
-    R(g, x + w - 2, top + 1, 2, 1, INK);
-    R(g, x + w, y - 1 + bob, 1, 1, INK);
-    if (big) R(g, x - w + 4, top - 1, 2, 1, P.white);
+    R(g, x - w, y - 1 + bob, w * 2 + 1, 1 - bob + 1, cuerpo);
+    R(g, x - w + 2, top + 1, w * 2 - 3, y - top - 1, cuerpo);
+    R(g, x - w + 3, top, w, 1, rizo);
+    R(g, x - w + 2, top + 1, 2, 1, rizo);
+    R(g, x + 2, top, w - 4, 1, tinta);
+    R(g, x + w - 2, top + 1, 2, 1, tinta);
+    R(g, x + w, y - 1 + bob, 1, 1, tinta);
+    if (big) R(g, x - w + 4, top - 1, 2, 1, rizo);
   }
   // Glints just under the surface, drifting the other way.
-  g.fillStyle = P.w3;
+  g.fillStyle = brillo;
   const j0 = Math.floor((camX - tt * 4) / 23);
   for (let j = j0; j <= j0 + Math.ceil(vw / 23) + 1; j++) {
     const h = hash(j, 31);
@@ -261,9 +292,9 @@ export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: numbe
   const sx = Math.round(orillaX - camX);
   if (orillaX > 0 && sx > -10 && sx < vw + 10) {
     const k = Math.round(Math.sin(tt * 2.5) * 2);
-    R(g, sx - 3 + k, y - 1, 6, 1, P.white);
-    R(g, sx + 1 + k, y - 2, 3, 1, P.w3);
-    R(g, sx + 4 + k, y - 1, 1, 1, INK);
+    R(g, sx - 3 + k, y - 1, 6, 1, rizo);
+    R(g, sx + 1 + k, y - 2, 3, 1, brillo);
+    R(g, sx + 4 + k, y - 1, 1, 1, tinta);
   }
 }
 
