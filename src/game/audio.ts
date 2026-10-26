@@ -23,6 +23,11 @@ let muted = false;
 let musicVolume = 0.5;
 let mood: MusicMood = 'alegre';
 let scheduler = 0;
+// End of the music's first fade-in: a volume change before it keeps the fade.
+let fadeEnd = 0;
+// Level multiplier applied by blip()/crunch(): the plane game's effects and
+// the title jingles run louder than the island's (see sfxVuelo, menu).
+let volMul = 1;
 let noise: AudioBuffer | null = null;
 const pulses: Partial<Record<number, PeriodicWave>> = {};
 
@@ -64,6 +69,7 @@ export function initAudio(startMuted: boolean) {
   // The music fades in instead of starting at full volume.
   musicBus.gain.setValueAtTime(0, ctx.currentTime);
   musicBus.gain.linearRampToValueAtTime(musicLevel(), ctx.currentTime + 2);
+  fadeEnd = ctx.currentTime + 2;
   musicBus.connect(out);
 
   noise = makeChipNoise(1.5);
@@ -86,9 +92,11 @@ function newSongOutput() {
       oldEcho.disconnect();
     }, 1500);
   }
-  songOut = gain(1);
+  // The title march sits a little under its jingles (they are its climax).
+  const lvl = ARRANGEMENT[mood].tune === TITULO ? 0.75 : 1;
+  songOut = gain(lvl);
   songOut.connect(musicBus!);
-  songEcho = gain(1);
+  songEcho = gain(lvl);
   songEcho.connect(echoIn!);
 }
 
@@ -125,7 +133,18 @@ const musicLevel = () => musicVolume * musicVolume * 0.9;
 
 export function setMusicVolume(v: number) {
   musicVolume = Math.min(1, Math.max(0, v));
-  if (ctx && musicBus) musicBus.gain.setTargetAtTime(musicLevel(), ctx.currentTime, 0.1);
+  if (!ctx || !musicBus) return;
+  // Drop whatever was scheduled: a pending fade-in ramp would otherwise pull
+  // the level back to the old volume when it ends (the title music used to
+  // stay 12 dB down on the first visit). During the fade-in, aim the same ramp
+  // at the new level; afterwards glide there.
+  const t = ctx.currentTime;
+  const g = musicBus.gain;
+  const v0 = g.value;
+  g.cancelScheduledValues(t);
+  g.setValueAtTime(v0, t);
+  if (t < fadeEnd) g.linearRampToValueAtTime(musicLevel(), fadeEnd);
+  else g.setTargetAtTime(musicLevel(), t, 0.1);
 }
 
 /**
@@ -245,7 +264,9 @@ function hiss(dest: AudioNode, t: number, dur: number, type: BiquadFilterType, f
   const s = ctx!.createBufferSource();
   s.buffer = noise!;
   const g = ctx!.createGain();
-  g.gain.setValueAtTime(vol, t);
+  // A 1 ms attack: noise starting at full level clicks.
+  g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(vol, t + 0.001);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   s.connect(filter(type, freq, q)).connect(g).connect(dest);
   s.start(t, Math.random() * (noise!.duration - dur - 0.05), dur + 0.03);
@@ -592,12 +613,23 @@ function ready() {
 
 function blip(freq: number, dur: number, wave: Wave, vol: number, delay = 0, o: NoteOpts = {}) {
   if (!ready()) return;
-  note(sfxBus!, ctx!.currentTime + delay, freq, dur, wave, vol, { attack: 0.003, ...o });
+  note(sfxBus!, ctx!.currentTime + delay, freq, dur, wave, vol * volMul, { attack: 0.003, ...o });
 }
 
 function crunch(dur: number, freq: number, vol: number, delay = 0, type: BiquadFilterType = 'bandpass') {
   if (!ready()) return;
-  hiss(sfxBus!, ctx!.currentTime + delay, dur, type, freq, vol, 0.7);
+  hiss(sfxBus!, ctx!.currentTime + delay, dur, type, freq, vol * volMul, 0.7);
+}
+
+/** Runs f with every blip/crunch scaled by k. */
+function conNivel(k: number, f: () => void) {
+  const prev = volMul;
+  volMul = prev * k;
+  try {
+    f();
+  } finally {
+    volMul = prev;
+  }
 }
 
 /* ---------------- title jingles ---------------- */
@@ -626,6 +658,11 @@ function kick(delay: number, vol = 0.3) {
 export function jingleIntro(): void {
   holdMusic(3.1);
   if (!ready()) return;
+  conNivel(JINGLE, jingleIntroNotas);
+}
+// The title jingles were 6–8 dB under the march they introduce.
+const JINGLE = 1.6;
+function jingleIntroNotas() {
   // Two and a half octaves up, speeding up as it climbs.
   const arp = [55, 59, 62, 67, 71, 74, 79, 83, 86, 91];
   arp.forEach((m, i) => {
@@ -656,6 +693,9 @@ export function jingleIntro(): void {
 export function jingleStart(): void {
   holdMusic(0.85);
   if (!ready()) return;
+  conNivel(JINGLE, jingleStartNotas);
+}
+function jingleStartNotas() {
   [74, 79, 83].forEach((m, i) => blip(hz(m), 0.07, 0.125, 0.05, i * 0.05));
   blip(hz(67), 0.15, 0.5, 0.03, 0, { slideTo: hz(79) });
   chordHit([79, 83, 86], 0.16, 0.6, 0.045, 0.25);
@@ -790,5 +830,98 @@ export const sfx = {
   meow() {
     blip(700, 0.1, 0.25, 0.055, 0, { slideTo: 1050 });
     blip(1050, 0.2, 0.25, 0.055, 0.1, { slideTo: 620, vibrato: 30 });
+  },
+};
+
+/* ---------------- the plane game's levels ---------------- */
+
+type Sfx = typeof sfx;
+/*
+ * In the plane game the chip effects play next to the synthesized battle
+ * sound (explosions, missiles, engines at -15 to -25 LUFS), where at the
+ * island's levels they were 20–30 dB under and simply inaudible (the freeze
+ * warning, a vehicle reaching the pantry, Margarita's voice). These gains
+ * bring each one to where it belongs in that mix; the island keeps its own.
+ */
+const NIVEL_VUELO: Partial<Record<keyof Sfx, number>> = {
+  warn: 12, lose: 7, star: 4, reveal: 3, talk: 6, jump: 5, select: 8, open: 4,
+  achievement: 2, gameOver: 2,
+  // Fallbacks for the recorded samples while they load: matched to the samples.
+  launch: 6, bomb: 14, enemyLaunch: 8, boom: 1.6, hurt: 6, flare: 6, pop: 8, dig: 6,
+};
+let callado: () => boolean = () => false;
+
+/**
+ * The plane game's sounds stay quiet while `pred` is true (the self-playing
+ * game behind the title menu): sfxVuelo, the battle synth and the samples
+ * all ask juegoCallado(). Menus, jingles and music are not affected.
+ */
+export function callarJuegoSi(pred: (() => boolean) | null) {
+  callado = pred ?? (() => false);
+}
+export const juegoCallado = () => callado();
+
+/** The same effects as `sfx`, at the plane game's levels and silent behind the title. */
+export const sfxVuelo = Object.fromEntries(
+  (Object.keys(sfx) as (keyof Sfx)[]).map((k) => [
+    k,
+    (...a: unknown[]) => {
+      if (callado()) return;
+      conNivel(NIVEL_VUELO[k] ?? 1, () => (sfx[k] as (...x: unknown[]) => void)(...a));
+    },
+  ]),
+) as Sfx;
+
+/*
+ * Menu sounds for the plane game. They play over the title march (about
+ * -19 LUFS), so they are much louder than the island's UI blips, and short
+ * and dry so repeated navigation never tires.
+ */
+let ultimoMover = -1;
+export const menu = {
+  /** Focus moved to another button (keyboard or hover): a tiny tick, at most one every 60 ms. */
+  mover() {
+    if (!ready()) return;
+    const t = ctx!.currentTime;
+    if (t - ultimoMover < 0.06) return;
+    ultimoMover = t;
+    conNivel(8, () => blip(rand(1560, 1600), 0.03, 0.125, 0.04));
+  },
+  /** A button pressed: a bright two-note «ti-ding». */
+  aceptar() {
+    conNivel(10, () => {
+      blip(1175, 0.05, 0.25, 0.05);
+      blip(1760, 0.09, 0.25, 0.05, 0.045);
+    });
+  },
+  /** Back / close: the same two notes falling. */
+  volver() {
+    conNivel(10, () => {
+      blip(1319, 0.05, 0.25, 0.045);
+      blip(880, 0.08, 0.25, 0.045, 0.045);
+    });
+  },
+  /** Take off from the hangar: a quick upward swoosh and a chord. */
+  despegar() {
+    conNivel(5, () => {
+      crunch(0.25, 2400, 0.12, 0, 'highpass');
+      blip(392, 0.18, 0.25, 0.05, 0, { slideTo: 1175 });
+      blip(784, 0.22, 0.5, 0.035, 0.12, { sustain: 0.6 });
+      blip(1175, 0.22, 0.25, 0.03, 0.12, { sustain: 0.6 });
+    });
+  },
+  /** Pause (true) or resume (false): a soft falling or rising pair. */
+  pausa(on: boolean) {
+    conNivel(8, () => {
+      blip(on ? 988 : 659, 0.06, 0.5, 0.04);
+      blip(on ? 659 : 988, 0.09, 0.5, 0.04, 0.07);
+    });
+  },
+  /** One beat of the intro sequence (pilots, logo, «press start»). */
+  paso() {
+    conNivel(5, () => {
+      blip(150, 0.12, 'sine', 0.22, 0, { slideTo: 50, attack: 0.002 });
+      crunch(0.05, 2200, 0.08);
+    });
   },
 };

@@ -1,4 +1,4 @@
-import { sampleOut } from '../game/audio';
+import { juegoCallado, sampleOut } from '../game/audio';
 
 /*
  * Recorded sound effects for the plane game: CC0 field recordings from
@@ -48,6 +48,18 @@ const TOPE: Partial<Record<Muestra, number>> = {
   misil: 3, 'explosion-chica': 3, 'explosion-grande': 3, bomba: 3, impacto: 2, antiaereo: 3, bengalas: 2, recoger: 2,
 };
 const ultima = new Map<Muestra, number>();
+/*
+ * Per-file trims, measured against the battle synth: the metallic hit came
+ * in 20 dB under everything else (the plane's own damage was the quietest
+ * sound in the game), and the coin drop has 98 % of its energy above 10 kHz,
+ * which the master low-pass removes, so it is played lower (a coin «clink»
+ * instead of a near-ultrasonic tick). The rest already sit where they belong.
+ */
+const AJUSTE: Partial<Record<Muestra, { vol?: number; rate?: number }>> = {
+  impacto: { vol: 2 },
+  recoger: { vol: 1, rate: 0.55 },
+  misil: { vol: 1.25 },
+};
 
 function apaga(v: Voz, ctx: BaseAudioContext, tc = 0.03) {
   const t = ctx.currentTime;
@@ -77,6 +89,9 @@ export function suena(n: Muestra, o: { vol?: number; rate?: number; pan?: number
   const out = sampleOut();
   const buf = buffers.get(n);
   if (!out || !buf || out.ctx.state !== 'running') return !!buf;
+  if (juegoCallado()) return true; // the title's self-playing game is silent
+  const aj = AJUSTE[n];
+  if (aj) o = { ...o, vol: (o.vol ?? 1) * (aj.vol ?? 1), rate: (o.rate ?? 1) * (aj.rate ?? 1) };
   const { ctx } = out;
   const now = ctx.currentTime;
   // Copies closer than 40 ms blur into one: skip them.

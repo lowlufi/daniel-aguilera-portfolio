@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, sfx } from '../game/audio';
+import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, menu } from '../game/audio';
 import { cargarSonidos } from './sonido';
 import { PLANES, createVuelo, dibujo, readSave, type Hud, type Result, type SavedGame, type Vuelo } from './motor';
 import type { ModeloAvion } from './fisica-tipos';
@@ -225,7 +225,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   }, [introStep, tituloMusica]);
   useEffect(() => {
     if (phase !== 'intro' || introStep === 0 || introStep >= 3) return;
-    const id = window.setTimeout(() => setIntroStep((n) => Math.min(3, n + 1)), introStep === 1 ? 2300 : 1300);
+    const id = window.setTimeout(() => {
+      menu.paso();
+      setIntroStep((n) => Math.min(3, n + 1));
+    }, introStep === 1 ? 2300 : 1300);
     return () => window.clearTimeout(id);
   }, [phase, introStep]);
   useEffect(() => {
@@ -245,7 +248,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setMusicVolume(0);
     initAudio(muted);
     cargarSonidos();
-    sfx.open();
+    menu.despegar();
     setResult(null);
     setPaused(false);
     game.current?.setPaused(false);
@@ -260,7 +263,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const [confirmado, setConfirmado] = useState<ModeloAvion | null>(null);
   const elegir = useCallback((m: ModeloAvion) => {
     setPlane(m);
-    sfx.select();
+    menu.aceptar();
   }, []);
   const confirmTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(confirmTimer.current), []);
@@ -313,6 +316,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     if (phase !== 'play') return;
     setPaused((p) => {
       game.current?.setPaused(!p);
+      menu.pausa(!p);
       return !p;
     });
   }, [phase]);
@@ -797,10 +801,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 ▶ Continuar · oleada {saved.wave}
               </button>
             )}
-            <button type="button" autoFocus={!saved} onClick={() => { sfx.select(); setPhase('menu'); }} className={saved ? `${BTN} h-12 w-full text-base` : `${GO} w-full`}>
+            <button type="button" autoFocus={!saved} onClick={() => { menu.aceptar(); setPhase('menu'); }} className={saved ? `${BTN} h-12 w-full text-base` : `${GO} w-full`}>
               ✈️ {saved ? 'Nueva partida' : 'Jugar'}
             </button>
-            <button type="button" onClick={() => { sfx.select(); setPhase('creditos'); }} className={`${BTN} h-12 w-full text-base`}>
+            <button type="button" onClick={() => { menu.aceptar(); setPhase('creditos'); }} className={`${BTN} h-12 w-full text-base`}>
               🎬 Créditos
             </button>
             <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} h-12 w-full text-base`}>
@@ -846,7 +850,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <p className="mt-16 text-2xl font-black">¡Gracias por jugar!</p>
             <p className="mt-2 text-sm text-white/70">© 2026 {AUTOR} · danieleduardo.cl</p>
           </div>
-          <button type="button" autoFocus onClick={() => setPhase('titulo')} className={`${BTN} absolute bottom-5 left-1/2 h-12 -translate-x-1/2`}>
+          <button type="button" autoFocus onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${BTN} absolute bottom-5 left-1/2 h-12 -translate-x-1/2`}>
             ← Volver
           </button>
         </div>
@@ -856,7 +860,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {phase === 'menu' && (
         <div role="dialog" aria-modal="true" aria-label="Elige tu piloto" className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 overflow-y-auto bg-[#120c24]/70 p-3 pt-16 [@media(max-height:500px)]:gap-1.5 [@media(max-height:500px)]:pt-12">
           <div className="flex w-full max-w-4xl items-center justify-between gap-2">
-            <button type="button" onClick={() => setPhase('titulo')} className={`${BTN} h-9`} disabled={!!confirmado}>← Volver</button>
+            <button type="button" onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${BTN} h-9`} disabled={!!confirmado}>← Volver</button>
             <h1 className="logo-dui text-3xl font-black sm:text-5xl [@media(max-height:500px)]:text-2xl">ELIGE TU PILOTO</h1>
             <span className="w-20" />
           </div>

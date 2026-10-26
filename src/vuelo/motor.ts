@@ -1,6 +1,6 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
-import { sfx } from '../game/audio';
+import { callarJuegoSi, sfxVuelo as sfx } from '../game/audio';
 import * as S from './sonido';
 import * as AB from './audio-batalla';
 import * as IA from './ia';
@@ -776,6 +776,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     hudKey: '',
     hudT: 0,
   };
+  // The self-playing game behind the title menu makes no sound.
+  callarJuegoSi(() => s.attract);
 
   /* ── Sizing ── */
 
@@ -854,6 +856,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     AB.viento(v, p.carga);
     AB.altitud(p.y, v);
     AB.zonaNueva(zonaAltitud(p.y));
+    AB.tormenta(s.mapa === 'tormenta' ? 1 : 0);
+    AB.hielo(s.hielo);
     for (const a of s.aereos) {
       if (a.tipo !== 'ovni') continue;
       AB.ovni(a.x - p.x, a.y - p.y, a.hp > 0, a.id);
@@ -1385,7 +1389,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.flashMap = 1;
     s.shake = 12;
     pop(s.plane.x, s.plane.y + 30, '☢️ ¡BOMBA NUCLEAR!', P.gold);
-    if (!s.attract) AB.explosion(40, 60, 0);
+    if (!s.attract) AB.nuclear();
   }
 
   /** Damages a mouse fighter; at 0 it blows apart (scored only if the player did it). */
@@ -1775,11 +1779,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (kind === 'vida') {
       s.lives = Math.min(MAX_VIDAS, s.lives + 1);
       pop(x, y + 16, '✈️ ¡Avión extra!', P.gold);
-      AB.mejora();
+      AB.vidaExtra();
     } else if (kind === 'nuclear') {
       s.nukes = Math.min(3, s.nukes + 1);
       pop(x, y + 16, `☢️ ¡Bomba nuclear! (${view.touch ? 'botón ☢️' : 'tecla N'})`, P.gold);
-      AB.mejora();
+      AB.nuclearRecogida();
     } else if (kind === 'especial') {
       // A special upgrade at random (or a full nitro).
       const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'chorrillana', 'nitro'];
@@ -2076,7 +2080,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     m.prog = m.meta;
     s.score += 300;
     pop(s.plane.x, s.plane.y + 26, '🏅 ¡Misión cumplida! +300', P.gold);
-    sfx.achievement();
+    AB.misionCumplida();
   }
   /** Any balloon, even when every slot is full (the guaranteed one per wave). */
   function maybePrizeAny(): Premio {
@@ -2123,6 +2127,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     else if (!learned('nitro') && s.wave >= 2 && learned('bengala')) k = 'nitro';
     // The first time a guided missile comes, half a second of slow motion to read it.
     if (k === 'bengala' && s.pista !== 'bengala' && !s.calma && !still) s.slowT = Math.max(s.slowT, 0.5);
+    if (k && k !== s.pista && !s.attract) AB.pista();
     s.pista = k;
   }
 
@@ -2212,12 +2217,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (!s.congelado && s.hielo >= 1) {
           s.congelado = true;
           s.shake = Math.max(s.shake, 4);
-          sfx.warn();
+          AB.congelado();
           pop(p.x, p.y + 20, '🧊 ¡Congelado!', '#bfe8ff');
         }
         if (s.congelado && s.hielo < 0.35) {
           s.congelado = false;
           pop(p.x, p.y + 20, '¡Descongelado!', P.gold);
+          AB.deshielo();
         }
         if (s.congelado) {
           mando.x = Math.cos(p.rumbo) >= 0 ? 0.25 : -0.25;
@@ -2237,7 +2243,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (before > TRANS_T - 1 && s.transT <= TRANS_T - 1) {
           s.nitroCd = 0;
           startNitro();
-          if (!s.attract && (s.toMapa === 'oceano' || s.toMapa === 'tormenta')) AB.rumboAlMar();
+          if (!s.attract && (s.toMapa === 'oceano' || s.toMapa === 'tormenta')) AB.rumboAlMar(s.toMapa);
         }
         if (s.transT <= 0) {
           s.transT = 0;
@@ -2392,6 +2398,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.breakT <= 0) {
           s.phase = 'wave';
           s.banner = '';
+          if (!s.attract) AB.oleadaInicio();
         }
       } else {
         s.spawnT -= dt;
@@ -2819,6 +2826,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
               sh.pasada = false;
               em.guiado = true;
               pop(em.x, em.y + 10, '¡Vuelve!', P.r3);
+              if (!s.attract) AB.bumeranVuelve(panOf(em.x));
             }
           }
         }
@@ -2847,6 +2855,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           sh.uf = true;
           s.score += 25;
           pop(p.x, p.y + 20, '¡Uf! +25', '#7ad8ff');
+          if (!s.attract) AB.uf();
         }
       } else {
         // The player's rockets fly straight where the nose pointed.
@@ -3112,11 +3121,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const p = s.plane;
       if (!s.rayo && s.rayoT <= 0) {
         // A strike near the plane, with a glowing warning first; or a far flash.
-        if (Math.random() < 0.6) s.rayo = { x: p.x + rand(-140, 140), t: 0, tope: p.y + rand(120, 220) };
+        if (Math.random() < 0.6) {
+          s.rayo = { x: p.x + rand(-140, 140), t: 0, tope: p.y + rand(120, 220) };
+          if (!s.attract) AB.rayoAviso(panOf(s.rayo.x));
+        }
         else {
           s.relampago = 0.35;
           const pan = rand(-1, 1);
-          if (!s.attract) later(() => AB.explosion(10, 1400, pan), rand(400, 1400));
+          if (!s.attract) AB.trueno(rand(1100, 1800), pan);
         }
         s.rayoT = rand(3.5, 7);
       }
@@ -3126,7 +3138,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         r.t += dt;
         if (before < 0.8 && r.t >= 0.8) {
           s.relampago = 0.9;
-          if (!s.attract) AB.explosion(18, Math.abs(p.x - r.x) + 200, panOf(r.x));
+          if (!s.attract) AB.trueno(Math.abs(p.x - r.x), panOf(r.x));
           if (Math.abs(p.x - r.x) < 16 && p.y < r.tope && !s.dead) {
             s.lastHit = 'choque';
             hurtPlane(1, p.x, p.y);
@@ -3910,6 +3922,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       save();
       S.pararMotores();
       AB.detener();
+      callarJuegoSi(null);
       document.removeEventListener('visibilitychange', onHide);
       window.removeEventListener('pagehide', save);
       ro.disconnect();
