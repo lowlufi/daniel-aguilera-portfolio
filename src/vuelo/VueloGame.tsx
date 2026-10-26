@@ -201,25 +201,42 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     };
   }, [togglePause, play, phase, paused]);
 
-  /* Touch: hold a finger anywhere on the sky and the plane flies toward it; buttons on the right. */
-  const finger = useRef<number | null>(null);
-  const [flying, setFlying] = useState(false);
-  const onSkyDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (finger.current !== null) return;
-    finger.current = e.pointerId;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    game.current?.aim({ x: e.clientX, y: e.clientY });
-    setFlying(true);
+  /*
+   * Touch: no sliding. Hold the left half of the screen to turn the nose
+   * counterclockwise, the right half clockwise (flying left: left dives,
+   * right climbs). A quick double tap fires the super nitro.
+   */
+  const fingers = useRef(new Map<number, 1 | -1>());
+  const lastTap = useRef({ t: -1e9, side: 0 });
+  const [turning, setTurning] = useState(0);
+  // The hint goes away once the player has turned a couple of times.
+  const [turns, setTurns] = useState(0);
+  const applyTurn = () => {
+    let l = false, r = false;
+    for (const side of fingers.current.values()) {
+      if (side === 1) l = true;
+      else r = true;
+    }
+    const dir = l === r ? 0 : l ? 1 : -1;
+    game.current?.steer(dir);
+    setTurning(dir);
+    if (dir) setTurns((n) => n + 1);
   };
-  const onSkyMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (finger.current !== e.pointerId) return;
-    game.current?.aim({ x: e.clientX, y: e.clientY });
+  const onSkyDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const side: 1 | -1 = e.clientX - box.left < box.width / 2 ? 1 : -1;
+    const now = performance.now();
+    if (now - lastTap.current.t < 320 && lastTap.current.side === side) {
+      game.current?.nitro();
+      lastTap.current = { t: -1e9, side: 0 };
+    } else lastTap.current = { t: now, side };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    fingers.current.set(e.pointerId, side);
+    applyTurn();
   };
   const onSkyUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (finger.current !== e.pointerId) return;
-    finger.current = null;
-    game.current?.aim(null);
-    setFlying(false);
+    if (!fingers.current.delete(e.pointerId)) return;
+    applyTurn();
   };
   const throttle = (v: number) => ({
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
@@ -525,7 +542,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 {saved ? 'Nueva partida' : '¡A volar!'}
               </button>
               {touchUi ? (
-                <p className="text-center text-xs font-bold text-[#8a6e55]">Mantén el dedo en el cielo donde quieras volar y el avión irá hacia allá. A la derecha: acelerar, frenar, misil, bomba y bengalas.</p>
+                <p className="text-center text-xs font-bold text-[#8a6e55]">Mantén apretada la mitad izquierda o derecha de la pantalla para girar el avión; doble toque para el super nitro. A la derecha: acelerar, frenar, misil, bomba, bengalas y metralla.</p>
               ) : (
                 <p className="text-center text-xs font-bold text-[#8a6e55]">
                   Flechas o WASD: pilotear · E: acelerar · Q: frenar · Espacio: misil · K: bomba · L: bengalas · Z: zoom · Esc: pausa
@@ -582,11 +599,18 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {phase === 'play' && touchUi && !paused && (
         <>
-          <div className="absolute inset-x-0 bottom-0 top-16 z-10 touch-none" onPointerDown={onSkyDown} onPointerMove={onSkyMove} onPointerUp={onSkyUp} onPointerCancel={onSkyUp}>
-            {!flying && (
-              <div className="pointer-events-none absolute bottom-8 left-6 rounded-full bg-[#3a2a6a]/50 px-3 py-1.5 pb-[env(safe-area-inset-bottom)]">
-                <span className="text-[11px] font-black text-white drop-shadow">👆 Toca el cielo donde quieras volar</span>
-              </div>
+          <div className="absolute inset-x-0 bottom-0 top-16 z-10 flex touch-none" onPointerDown={onSkyDown} onPointerUp={onSkyUp} onPointerCancel={onSkyUp}>
+            {/* Each half lights up while held; big round arrows say which way the nose turns. */}
+            <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === 1 ? 'bg-white/10' : ''}`}>
+              <span className={`absolute bottom-10 left-5 grid h-16 w-16 place-items-center rounded-full text-3xl font-black text-white ring-2 ring-white/60 drop-shadow ${turning === 1 ? 'bg-white/40' : 'bg-white/15'}`}>⟲</span>
+            </div>
+            <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === -1 ? 'bg-white/10' : ''}`}>
+              <span className={`absolute bottom-28 right-5 grid h-16 w-16 place-items-center rounded-full text-3xl font-black text-white ring-2 ring-white/60 drop-shadow [@media(max-height:420px)]:bottom-24 ${turning === -1 ? 'bg-white/40' : 'bg-white/15'}`}>⟳</span>
+            </div>
+            {turns < 3 && (
+              <span className="pointer-events-none absolute bottom-28 left-5 rounded-full bg-[#3a2a6a]/50 px-3 py-1 text-[11px] font-black text-white [@media(max-height:420px)]:bottom-[6.5rem]">
+                Mantén izquierda o derecha para girar · doble toque: 🔥 nitro
+              </span>
             )}
           </div>
           <div className="absolute bottom-5 right-3 z-10 flex items-end gap-2 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">

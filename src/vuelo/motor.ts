@@ -1475,13 +1475,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const wind = FV.viento(s.t, p.x, p.y);
     const top = ceiling();
 
-    // Touch flying: the plane turns toward the finger (screen point) while it's held.
-    if (aimAt && s.mode === 'play' && !s.dead) {
-      const dx = aimAt.x - (p.x - s.camX);
-      const dy = toS(p.y) - aimAt.y;
-      const d = Math.hypot(dx, dy);
-      touch.x = d > 6 ? dx / d : 0;
-      touch.y = d > 6 ? dy / d : 0;
+    // Touch turning: holding the left half turns the nose counterclockwise, the
+    // right half clockwise (commanding 90° off the nose: the tightest turn).
+    if (turn && s.mode === 'play' && !s.dead) {
+      touch.x = Math.cos(p.rumbo + turn * 1.45);
+      touch.y = Math.sin(p.rumbo + turn * 1.45);
       syncInput();
     }
 
@@ -2317,19 +2315,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw);
-    // Where the finger is: a small ring the plane is heading for.
-    if (aimAt && s.mode === 'play' && !s.dead) {
-      const ax = Math.round(aimAt.x);
-      const ay = Math.round(aimAt.y);
-      const r = 5 + (Math.floor(s.t * 6) % 2);
-      g.globalAlpha = 0.85;
-      for (let a = 0; a < 16; a++) {
-        const t = (a / 16) * Math.PI * 2;
-        A.R(g, ax + Math.round(Math.cos(t) * r), ay + Math.round(Math.sin(t) * r), 1, 1, a % 2 ? P.white : '#3a2a6a');
-      }
-      A.R(g, ax, ay, 1, 1, P.white);
-      g.globalAlpha = 1;
-    }
 
     // A red flash when the plane is hit.
     if (s.hurtFlash > 0) {
@@ -2571,8 +2556,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
   };
   const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false };
-  /** The held finger in canvas pixels (touch flying), or null. */
-  let aimAt: { x: number; y: number } | null = null;
+  /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none. */
+  let turn = 0;
   function syncInput() {
     const kx = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
     const ky = (keys.has('u') ? 1 : 0) - (keys.has('d') ? 1 : 0);
@@ -2603,15 +2588,20 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   let lastAcc = -1e9;
   function tapAccel() {
     const now = performance.now();
-    if (now - lastAcc < 350 && s.nitroT <= 0 && s.nitroCd <= 0 && s.mode === 'play' && !s.dead) {
-      s.nitroT = NITRO_T;
-      s.nitroCd = NITRO_CD;
-      pop(s.plane.x, s.plane.y + 18, '¡SUPER NITRO!', '#7ad8ff');
-      fx('misil', sfx.launch, { vol: 0.6, rate: 0.6, dur: 0.9 });
+    if (now - lastAcc < 350 && startNitro()) {
       lastAcc = -1e9;
       return;
     }
     lastAcc = now;
+  }
+  /** Fires the super nitro if it's charged; false if it isn't. */
+  function startNitro() {
+    if (s.nitroT > 0 || s.nitroCd > 0 || s.mode !== 'play' || s.dead) return false;
+    s.nitroT = NITRO_T;
+    s.nitroCd = NITRO_CD;
+    pop(s.plane.x, s.plane.y + 18, '¡SUPER NITRO!', '#7ad8ff');
+    fx('misil', sfx.launch, { vol: 0.6, rate: 0.6, dur: 0.9 });
+    return true;
   }
   const onHide = () => {
     if (document.visibilityState === 'hidden') save();
@@ -2682,6 +2672,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     start,
     demo,
     /** Touch controls write here; the keyboard is merged in. */
+    /** Super nitro from a double tap on the sky (phones). */
+    nitro() {
+      return startNitro();
+    },
     touch(t: Partial<typeof touch>) {
       if (t.gas === 1 && touch.gas !== 1) tapAccel();
       Object.assign(touch, t);
@@ -2714,16 +2708,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.hudKey = '';
     },
     /** Touch screens lift the ground above the on-screen buttons. */
-    /** Touch flying: a finger at client (x, y) steers the plane toward it; null lets go. */
-    aim(pt: { x: number; y: number } | null) {
-      if (!pt) {
-        aimAt = null;
+    /** Touch turning: +1 turns the nose counterclockwise, -1 clockwise, 0 lets go. */
+    steer(dir: number) {
+      turn = Math.sign(dir);
+      if (!turn) {
         touch.x = touch.y = 0;
         syncInput();
-        return;
       }
-      const r = canvas.getBoundingClientRect();
-      aimAt = { x: ((pt.x - r.left) / r.width) * view.vw, y: ((pt.y - r.top) / r.height) * view.vh };
     },
     setTouch(t: boolean) {
       view.touch = t;

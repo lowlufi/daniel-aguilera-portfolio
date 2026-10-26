@@ -108,7 +108,7 @@ public/
 - **Super nitro:** apretar acelerar dos veces seguidas da un empujón de 2,5 s por sobre la velocidad máxima (se recarga en 9 s). Volando rápido y alejándote, los misiles se quedan atrás.
 - **Choques:** estrellarse fuerte contra el suelo destruye el avión al instante; un roce cuesta una pieza.
 - **Sonido:** sin música de fondo; efectos grabados reales con licencia CC0 (motores en loop, misiles, explosiones, antiaéreo, alarma), en estéreo según la posición.
-- **Controles (siempre en pantalla):** flechas o WASD pilotear, E/Shift acelerar (dos veces: super nitro), Q/Ctrl frenar (aerofrenos), Espacio/J misil, K bomba, L bengalas, H/F metralla, Z o rueda zoom, Esc pausa. En celular, se mantiene el dedo en el cielo y el avión vuela hacia ese punto; botones con nombre a la derecha.
+- **Controles (siempre en pantalla):** flechas o WASD pilotear, E/Shift acelerar (dos veces: super nitro), Q/Ctrl frenar (aerofrenos), Espacio/J misil, K bomba, L bengalas, H/F metralla, Z o rueda zoom, Esc pausa. En celular, sin deslizar: mantener la mitad izquierda gira la nariz en sentido antihorario y la derecha en sentido horario (volando a la izquierda, izquierda baja y derecha sube); doble toque para el super nitro; botones con nombre a la derecha.
 
 ## Features del sitio clásico
 
