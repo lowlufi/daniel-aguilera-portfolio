@@ -5,12 +5,15 @@ import { tone } from '../game/dulce';
  * sin anti-aliasing (1 unidad = 1 px virtual) y con alfa en pasos de 1/4.
  *
  * Una explosión se arma en capas, todas escaladas con W = E^(1/3) (Hopkinson):
+ *   · núcleo blanco de un solo cuadro (grande, con contorno dorado)
  *   · destello blanco de 1–3 cuadros (con rayos en cruz si es grande)
- *   · anillo de onda expansiva que se abre rápido (y otro plano si toca suelo)
+ *   · anillo de onda expansiva que se abre rápido (y otro plano si toca suelo),
+ *     con contorno naranja para leerse también contra cielos claros
  *   · bola de fuego: bolitas que nacen blancas y se enfrían
  *     blanco → amarillo → naranja → rosa → humo tibio → humo, crecen, suben y
  *     derivan con el viento; las grandes tienen «estallidos» secundarios
- *   · chispas brillantes con cola, que caen con gravedad
+ *   · chispas brillantes con cola larga, que caen con gravedad
+ *   · brasas que flotan, brillan con un halo de píxeles y titilan al apagarse
  *   · escombros que salen girando con estelita de humo y rebotan en el suelo
  *   · humo que queda flotando; hongo / columna si es grande; polvo si `suelo`
  *
@@ -22,6 +25,10 @@ import { tone } from '../game/dulce';
  * fijo (sin objetos por cuadro), sprites cacheados por color/tipo/radio, y
  * límite duro: si la reserva se llena, se recortan primero chispas y estelitas,
  * y las bolitas importantes pueden reciclar una chispa.
+ *
+ * Además: `chispazo` (bala contra metal) y `salpicar` (gotas en el mar).
+ * Movimiento reducido: `quieto` quita el núcleo, la sacudida y el destello y
+ * recorta las partículas a la mitad.
  *
  * Coordenadas del mundo: x a la derecha, y = altitud hacia arriba.
  */
@@ -40,7 +47,9 @@ const G_ESCOMBRO = 170;
 const G_PIEZA = 140;
 
 // Tipos de partícula.
-const T_BOLA = 0, T_CHISPA = 1, T_ESCOMBRO = 2;
+const T_BOLA = 0, T_CHISPA = 1, T_ESCOMBRO = 2, T_BRASA = 3;
+const G_BRASA = 38;
+const LARGO_CHISPA = 8; // largos de cola 0–7
 // Paletas calientes (secuencia de enfriamiento).
 const F_FUEGO = 0, F_CHISPA = 1, F_AGUA = 2, F_NADA = 3;
 
@@ -93,7 +102,12 @@ const TIERRA: [string, string][] = [
   ['#c8706e', '#7a3a4a'],
 ];
 
-export type OpcionesExplosion = { suelo?: boolean; color?: 'fuego' | 'humo' | 'chispa' | 'agua' };
+export type OpcionesExplosion = {
+  suelo?: boolean;
+  color?: 'fuego' | 'humo' | 'chispa' | 'agua';
+  /** prefers-reduced-motion: sin núcleo, sacudida ni destello; la mitad de partículas. */
+  quieto?: boolean;
+};
 
 type Pieza = {
   activa: boolean;
@@ -138,7 +152,7 @@ export type Efectos = {
   /** @internal */ ovida: Float32Array;
   /** @internal */ or0: Float32Array;
   /** @internal */ or1: Float32Array;
-  /** @internal */ otipo: Uint8Array; // 0/1 anillo fino/grueso, 2 destello, 3 con rayos, 4 plano, 5/6 cúpula fina/gruesa
+  /** @internal */ otipo: Uint8Array; // 0/1 anillo fino/grueso, 2 destello, 3 con rayos, 4 plano, 5/6 cúpula fina/gruesa, 7 núcleo de 1 cuadro
   /** @internal */ piezas: Pieza[];
   /** @internal */ restos: Resto[];
   /** @internal */ sacudida: number;
@@ -216,18 +230,21 @@ function bola(col: number, k: number, r: number): Spr {
 }
 
 // Chispas: cola + cabeza en un solo sprite, por paleta, edad (0 joven, 1
-// madura), dirección (16) y largo (0–5).
+// madura), dirección (16) y largo (0–7). La cola joven es de dos tonos (clara
+// junto a la cabeza, honda al final) para que se lea en cielos claros.
 const sprChispa: (Spr | undefined)[] = [];
 function chispaSpr(pal: number, edad: number, dir: number, largo: number): Spr {
-  const i = ((pal * 2 + edad) * 16 + dir) * 6 + largo;
+  const i = ((pal * 2 + edad) * 16 + dir) * LARGO_CHISPA + largo;
   let s = sprChispa[i];
   if (!s) {
     const cs = CHISPAS[pal];
     const a = (dir / 16) * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
-    s = reservar(13, 13, (g, x, y) => {
-      const c = x + 6, d = y + 6;
-      g.fillStyle = edad === 0 ? cs[1] : cs[2];
-      for (let k = 1; k <= largo; k++) g.fillRect(c + Math.round(dx * k), d + Math.round(dy * k), 1, 1);
+    s = reservar(17, 17, (g, x, y) => {
+      const c = x + 8, d = y + 8;
+      for (let k = 1; k <= largo; k++) {
+        g.fillStyle = edad === 0 && k <= (largo + 1) >> 1 ? cs[1] : cs[2];
+        g.fillRect(c + Math.round(dx * k), d + Math.round(dy * k), 1, 1);
+      }
       g.fillStyle = cs[0];
       if (edad === 0) g.fillRect(c - 1, d - 1, 2, 2);
       else g.fillRect(c, d, 1, 1);
@@ -244,7 +261,7 @@ function precalentar() {
   for (let col = 0; col < COLORES.length; col++)
     for (let k = 0; k < 4; k++) for (let r = 0; r <= MAX_R; r++) bola(col, k, r);
   for (let p = 0; p < CHISPAS.length; p++)
-    for (let e = 0; e < 2; e++) for (let d = 0; d < 16; d++) for (let l = 0; l < 6; l++) chispaSpr(p, e, d, l);
+    for (let e = 0; e < 2; e++) for (let d = 0; d < 16; d++) for (let l = 0; l < LARGO_CHISPA; l++) chispaSpr(p, e, d, l);
 }
 
 const sprAnillo: (HTMLCanvasElement | undefined)[] = [];
@@ -259,10 +276,10 @@ function anillo(tipo: number, r: number, grueso: number): HTMLCanvasElement {
     const ancho = (rx: number, ryy: number, dy: number) =>
       Math.abs(dy) > ryy ? -1 : Math.round(rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / (ryy * ryy + ryy * 0.6))));
     const cx = r + 1, cy = ry + 1;
-    // Contorno exterior pálido, cuerpo blanco.
+    // Contorno naranja (se ve sobre cielo claro y nubes), cuerpo blanco.
     for (let pasada = 0; pasada < 2; pasada++) {
       const e = pasada === 0 ? 1 : 0;
-      g.fillStyle = pasada === 0 ? '#fff0b8' : '#ffffff';
+      g.fillStyle = pasada === 0 ? '#f59048' : '#ffffff';
       const rxo = r + e, ryo = ry + e;
       const rxi = r - grueso - e, ryi = Math.max(0, ry - grueso - e);
       for (let dy = -ryo; dy <= (tipo === 2 ? 0 : ryo); dy++) {
@@ -391,7 +408,7 @@ function nueva(e: Efectos, prio: number): number {
   const ini = (azar() * MAX_P) | 0;
   for (let k = 0; k < 96; k++) {
     const i = (ini + k * 7) % MAX_P;
-    if (e.tipo[i] === T_CHISPA || (e.tipo[i] === T_BOLA && e.r1[i] <= 2)) return i;
+    if (e.tipo[i] === T_CHISPA || e.tipo[i] === T_BRASA || (e.tipo[i] === T_BOLA && e.r1[i] <= 2)) return i;
   }
   return -1;
 }
@@ -430,9 +447,9 @@ function bolita(
   return i;
 }
 
-function chispa(e: Efectos, x: number, y: number, vx: number, vy: number, vida: number, pal: number, retraso: number) {
+function chispa(e: Efectos, x: number, y: number, vx: number, vy: number, vida: number, pal: number, retraso: number): number {
   const i = nueva(e, 0);
-  if (i < 0) return;
+  if (i < 0) return -1;
   e.tipo[i] = T_CHISPA;
   e.x[i] = x;
   e.y[i] = y;
@@ -444,6 +461,35 @@ function chispa(e: Efectos, x: number, y: number, vx: number, vy: number, vida: 
   e.pal[i] = pal;
   e.sem[i] = (azar() * 256) | 0;
   e.r0[i] = e.r1[i] = 0;
+  e.reb[i] = 0;
+  return i;
+}
+
+/** Gota de agua: chispa que desaparece al volver a caer bajo `piso`. */
+function gota(e: Efectos, x: number, y: number, vx: number, vy: number, vida: number, piso: number, retraso: number) {
+  const i = chispa(e, x, y, vx, vy, vida, F_AGUA, retraso);
+  if (i < 0) return;
+  e.r0[i] = piso;
+  e.reb[i] = 1;
+  e.arr[i] = 0.5;
+}
+
+/** Brasa: flota, cae despacio y brilla con halo de píxeles. */
+function brasa(e: Efectos, x: number, y: number, vx: number, vy: number, vida: number, retraso: number) {
+  const i = nueva(e, 0);
+  if (i < 0) return;
+  e.tipo[i] = T_BRASA;
+  e.x[i] = x;
+  e.y[i] = y;
+  e.vx[i] = vx;
+  e.vy[i] = vy;
+  e.edad[i] = -retraso;
+  e.vida[i] = vida;
+  e.arr[i] = 1.8;
+  e.pal[i] = F_FUEGO;
+  e.sem[i] = (azar() * 256) | 0;
+  e.r0[i] = e.r1[i] = 0;
+  e.reb[i] = 0;
 }
 
 function escombro(e: Efectos, x: number, y: number, vx: number, vy: number, vida: number, color: number, ardiendo: boolean, tierra: boolean, estela: boolean) {
@@ -500,8 +546,9 @@ export function explosion(e: Efectos, x: number, y: number, energia: number, opt
   const R = 7 * W; // radio visual de la bola de fuego
   const suelo = !!opts?.suelo;
   const modo = opts?.color ?? 'fuego';
+  const quieto = !!opts?.quieto;
   const pal = modo === 'chispa' ? F_CHISPA : modo === 'agua' ? F_AGUA : modo === 'humo' ? F_NADA : F_FUEGO;
-  const h = holgura(e);
+  const h = holgura(e) * (quieto ? 0.5 : 1);
   const agua = pal === F_AGUA;
   const soloHumo = pal === F_NADA;
   // Humo: grande y de fuego → humo oscuro con algo de negro; chico → claro.
@@ -509,9 +556,10 @@ export function explosion(e: Efectos, x: number, y: number, energia: number, opt
   const cy = suelo ? y + R * 0.15 : y;
   const sube = 6 + 5 * W;
 
-  // Destello y ondas.
+  // Núcleo de un cuadro, destello y ondas.
   if (!soloHumo) {
-    onda(e, W > 1.4 ? 3 : 2, x, cy, Math.round(R * 1.15), Math.round(R * 1.35), W > 1.4 ? 0.06 : 0.045, 0);
+    if (!quieto) onda(e, 7, x, cy, Math.round(R * 1.7), Math.round(R * 1.7), 1, 0.0001);
+    onda(e, W > 0.9 && !quieto ? 3 : 2, x, cy, Math.round(R * 1.15), Math.round(R * 1.35), W > 1.4 ? 0.06 : 0.045, 0);
     const grueso = W > 1.2 ? 1 : 0;
     onda(e, suelo ? 5 + grueso : grueso, x, suelo ? y : cy, R * 0.6, R * entre(2.6, 3.1), 0.16 + 0.07 * W, 0.01);
     if (W > 1.5) onda(e, suelo ? 5 : 0, x, suelo ? y : cy, R * 0.4, R * entre(1.8, 2.1), 0.22 + 0.06 * W, 0.06);
@@ -595,13 +643,21 @@ export function explosion(e: Efectos, x: number, y: number, energia: number, opt
   }
 
   // Chispas.
-  const nC = Math.round((6 + 10 * W) * (pal === F_CHISPA ? 2 : 1) * (soloHumo ? 0.3 : 1) * h);
+  const nC = Math.round((10 + 14 * W) * (pal === F_CHISPA ? 2 : 1) * (soloHumo ? 0.3 : 1) * h);
   const vC = 60 * Math.pow(W, 0.6);
   for (let k = 0; k < nC; k++) {
     const a = azar() * 6.283;
     const v = vC * entre(1, 3);
     const sy = suelo ? Math.abs(Math.sin(a)) * 1.2 + 0.2 : Math.sin(a);
     chispa(e, x + Math.cos(a) * R * 0.3, cy + sy * R * 0.3, Math.cos(a) * v, sy * v + 20, entre(0.25, 0.65), pal, azar() * 0.04);
+  }
+  // Brasas que flotan y brillan.
+  if (!soloHumo && !agua) {
+    const nE = Math.round((3 + 4 * W) * h);
+    for (let k = 0; k < nE; k++) {
+      const a = azar() * 6.283, v = entre(20, 65) * Math.sqrt(W);
+      brasa(e, x + Math.cos(a) * R * 0.4, cy + Math.sin(a) * R * 0.4, Math.cos(a) * v, Math.abs(Math.sin(a)) * v + 15, entre(0.8, 1.6), entre(0.04, 0.2));
+    }
   }
   // Gotas: el agua salpica una columna de chispas azules hacia arriba.
   if (agua) {
@@ -642,8 +698,46 @@ export function explosion(e: Efectos, x: number, y: number, energia: number, opt
   }
 
   // Cámara.
+  if (quieto) return;
   e.sacudida = Math.min(10, e.sacudida + 1.1 * Math.pow(W, 1.6) * (suelo ? 1.25 : 1));
   if (E >= 3 && !soloHumo) e.destello = Math.min(0.65, Math.max(e.destello, 0.075 * W * W));
+}
+
+/**
+ * Bala que pega en metal: chispas cortas que rebotan hacia atrás y a los lados
+ * de la velocidad (vx, vy) de la bala, más un puntito blanco de un cuadro.
+ */
+export function chispazo(e: Efectos, x: number, y: number, vx: number, vy: number, quieto = false): void {
+  const base = Math.atan2(-vy, -vx);
+  const n = quieto ? 3 : 5 + ((azar() * 3) | 0);
+  for (let k = 0; k < n; k++) {
+    const a = base + entre(-1.2, 1.2), v = entre(70, 170);
+    chispa(e, x, y, Math.cos(a) * v, Math.sin(a) * v + 20, entre(0.1, 0.28), F_FUEGO, 0);
+  }
+  onda(e, 2, x, y, 1, 3, 0.035, 0);
+  if (!quieto && azar() < 0.5) brasa(e, x, y, entre(-20, 20), entre(10, 40), entre(0.3, 0.6), 0);
+}
+
+/**
+ * Salpicadura en el mar en (x, y = nivel del agua): gotas blancas y celestes
+ * que saltan y vuelven a caer al agua, espuma y un anillo plano. `fuerza`
+ * ~0,3 (bala) … 1 (misil, avión) … 3 (jefe hundiéndose).
+ */
+export function salpicar(e: Efectos, x: number, y: number, fuerza: number, quieto = false): void {
+  const f = Math.max(0.2, Math.min(4, fuerza || 1));
+  const sf = Math.sqrt(f);
+  const h = holgura(e) * (quieto ? 0.5 : 1);
+  const nG = Math.min(48, Math.round((6 + 12 * f) * h));
+  for (let k = 0; k < nG; k++) {
+    const lado = entre(-1, 1);
+    gota(e, x + lado * 3 * sf, y + 1, lado * entre(15, 55) * sf, entre(60, 165) * sf, entre(0.7, 1.3), y - 1, azar() * 0.05);
+  }
+  // Espuma que sube un poco y cae (sube negativo = cae con el arrastre).
+  const nE = Math.round((2 + 2 * f) * (quieto ? 0.5 : 1));
+  for (let k = 0; k < nE; k++)
+    bolita(e, 1, x + entre(-3, 3) * sf, y + 1, entre(-14, 14) * sf, entre(25, 55) * sf, entre(0.45, 0.8), 1 + sf, Math.min(MAX_R, 2 + 2.5 * sf), 1.6, -40, F_AGUA, 0.45, 0.15, C_ESPUMA, k * 0.025);
+  onda(e, 4, x, y, 2, Math.round(5 + 6 * sf), 0.3 + 0.1 * sf, 0);
+  if (f > 1.5) onda(e, 4, x, y, 3, Math.round(8 + 9 * sf), 0.45 + 0.1 * sf, 0.08);
 }
 
 /**
@@ -774,9 +868,14 @@ export function actualizar(e: Efectos, dt: number, viento: number, suelo: (x: nu
       VY[i] *= k;
       X[i] += VX[i] * dt;
       Y[i] += VY[i] * dt;
+      // Gota de agua: se va al volver a caer al mar.
+      if (e.reb[i] & 1 && VY[i] < 0 && Y[i] < e.r0[i]) {
+        quitar(e, i);
+        continue;
+      }
       if (Y[i] < suelo(X[i])) {
         // Chispa que pega en el suelo: rebota bajito una vez.
-        if (e.sem[i] & 1) {
+        if (e.sem[i] & 1 || e.reb[i] & 1) {
           quitar(e, i);
           continue;
         }
@@ -784,6 +883,17 @@ export function actualizar(e: Efectos, dt: number, viento: number, suelo: (x: nu
         Y[i] = suelo(X[i]);
         VY[i] = -VY[i] * 0.35;
         VX[i] *= 0.6;
+      }
+    } else if (tipo === T_BRASA) {
+      // Cae despacio, frenada por el aire y llevada por el viento.
+      const k = Math.min(1, e.arr[i] * dt);
+      VX[i] += (viento - VX[i]) * k;
+      VY[i] += (-G_BRASA - VY[i]) * k * 0.5;
+      X[i] += VX[i] * dt;
+      Y[i] += VY[i] * dt;
+      if (Y[i] < suelo(X[i])) {
+        quitar(e, i);
+        continue;
       }
     } else {
       // Escombro.
@@ -826,10 +936,11 @@ export function actualizar(e: Efectos, dt: number, viento: number, suelo: (x: nu
     i++;
   }
 
-  // Ondas.
+  // Ondas (el núcleo, tipo 7, vive exactamente un cuadro dibujado).
   for (let i = 0; i < e.on; ) {
+    const antes = e.oedad[i];
     e.oedad[i] += dt;
-    if (e.oedad[i] >= e.ovida[i]) {
+    if (e.oedad[i] >= e.ovida[i] || (e.otipo[i] === 7 && antes >= 0)) {
       const u = --e.on;
       e.ox[i] = e.ox[u];
       e.oy[i] = e.oy[u];
@@ -1098,6 +1209,14 @@ export function dibujar(
     const tipo = e.otipo[i];
     const q = aPantalla(e.ox[i], e.oy[i]);
     const x = Math.round(q[0]), y = Math.round(q[1]);
+    if (tipo === 7) {
+      // Núcleo: disco blanco grande con contorno dorado, un solo cuadro.
+      const r = Math.min(MAX_R, Math.round(e.or0[i]));
+      g.globalAlpha = alfa0;
+      pon(g, bola(C_AMARILLO, K_LINEA, r), x, y);
+      pon(g, bola(C_BLANCO, K_CUERPO, r), x, y);
+      continue;
+    }
     if (tipo === 2 || tipo === 3) {
       const r = Math.min(MAX_R, Math.round(e.or0[i] + (e.or1[i] - e.or0[i]) * u));
       g.globalAlpha = alfa0;
@@ -1120,7 +1239,7 @@ export function dibujar(
     }
     const ease = 1 - (1 - u) * (1 - u);
     const r = Math.min(MAX_RA, Math.max(2, Math.round(e.or0[i] + (e.or1[i] - e.or0[i]) * ease)));
-    const a = u < 0.45 ? 4 : u < 0.65 ? 3 : u < 0.85 ? 2 : 1;
+    const a = u < 0.55 ? 4 : u < 0.75 ? 3 : u < 0.9 ? 2 : 1;
     g.globalAlpha = alfa0 * a * 0.25;
     const s = anillo(tipo === 4 ? 1 : tipo >= 5 ? 2 : 0, r, (tipo === 1 || tipo === 6) && u < 0.5 ? 2 : 1);
     g.drawImage(s, x - ((s.width - 1) >> 1), y - ((s.height - 1) >> 1));
@@ -1138,13 +1257,35 @@ export function dibujar(
         // Cola: hacia atrás según la velocidad (y de pantalla invertida).
     const vx = e.vx[i], vy = e.vy[i];
     const vm = Math.abs(vx) + Math.abs(vy);
-    const largo = Math.min(5, Math.round(vm * 0.022));
+    const largo = Math.min(LARGO_CHISPA - 1, Math.round(vm * 0.03));
     if (u >= 0.75 && (cuadro + i) & 1) continue; // parpadea al apagarse
     // Dirección de la cola en pantalla: opuesta a la velocidad (y invertida).
     let dir = Math.round((Math.atan2(vy, -vx) / (Math.PI * 2)) * 16) % 16;
     if (dir < 0) dir += 16;
     pon(g, chispaSpr(e.pal[i], u < 0.3 ? 0 : 1, dir, largo), x, y);
   }
+
+  // 9) Brasas: halo de píxeles a media luz y un centro que titila.
+  for (let j = 0; j < nc; j++) {
+    const i = cI[j];
+    if (e.tipo[i] !== T_BRASA) continue;
+    const q = aPantalla(X[i], Y[i]);
+    const x = Math.round(q[0]), y = Math.round(q[1]);
+    if (x < -MARGEN || y < -MARGEN || x > Wc || y > Hc) continue;
+    const u = ED[i] / VI[i];
+    const fase = (cuadro + e.sem[i]) & 7;
+    if (u > 0.7 && fase & 1) continue;
+    if (u < 0.6) {
+      g.globalAlpha = alfa0 * (fase < 4 ? 0.5 : 0.25);
+      g.fillStyle = u < 0.3 ? '#ffc47a' : '#ff9a3c';
+      g.fillRect(x - 1, y, 3, 1);
+      g.fillRect(x, y - 1, 1, 3);
+      g.globalAlpha = alfa0;
+    }
+    g.fillStyle = u < 0.25 ? '#ffffff' : u < 0.55 ? (fase < 6 ? '#fff6b0' : '#ffe048') : fase < 4 ? '#ffe048' : '#ff9a3c';
+    g.fillRect(x, y, 1, 1);
+  }
+  g.globalAlpha = alfa0;
 }
 
 const ORDEN_FUEGO = [C_TIBIO, C_AGUA, C_ROSA, C_LILA, C_NARANJA, C_CIAN, C_ESPUMA, C_AMARILLO, C_BLANCO, C_CLARO];

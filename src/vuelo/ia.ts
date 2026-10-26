@@ -54,6 +54,11 @@ const FICHAS: Record<string, Ficha> = {
   tanque: { vel: 13, medio: 15, alcance: 280, velBala: 230, canon: 14 },
   sam: { vel: 11, medio: 17, alcance: 360, velBala: 135, canon: 18 },
   margarita: { vel: 9, medio: 28, alcance: 240, velBala: 140, canon: 50 },
+  lancha: { vel: 34, medio: 13, alcance: 250, velBala: 150, canon: 10 },
+  fragata: { vel: 12, medio: 22, alcance: 360, velBala: 135, canon: 16 },
+  portaaviones: { vel: 8, medio: 75, alcance: 420, velBala: 140, canon: 30 },
+  trolebus: { vel: 16, medio: 20, alcance: 300, velBala: 130, canon: 14 },
+  bici: { vel: 52, medio: 8, alcance: 220, velBala: 150, canon: 8 },
 };
 const ficha = (k: string) => FICHAS[k] ?? FICHAS.jeep;
 
@@ -207,7 +212,7 @@ export function pensar(v: VehiculoIA, vista: Vista, memoria: Record<string, numb
   const k = nivelIA(vista.ola);
   const t = vista.t;
   const a = vista.avion;
-  const boss = v.kind === 'margarita';
+  const boss = v.kind === 'margarita' || v.kind === 'portaaviones';
   const base = F.vel * Math.min(1.5, 1 + (vista.ola - 1) * 0.05);
 
   // 1. Cruise: drive to the pantry; sprint when the plane is far or behind us.
@@ -299,7 +304,7 @@ export function coordinarSalva(vehiculos: VehiculoIA[], vista: Vista, t: number,
   const k = nivelIA(vista.ola);
   if (mem && t - mem.ultima < lerp(6, 2.4, k)) return out;
   const a = vista.avion;
-  const listos = vehiculos.filter((v) => v.kind !== 'margarita' && v.fireT <= 1.2 && tiro(v, vista, k).ok);
+  const listos = vehiculos.filter((v) => v.kind !== 'margarita' && v.kind !== 'portaaviones' && v.fireT <= 1.2 && tiro(v, vista, k).ok);
   if (listos.length < 2) return out;
   const cerca = (v: VehiculoIA) => Math.hypot(v.x - a.x, v.y - a.y);
   listos.sort((p, q) => cerca(p) - cerca(q));

@@ -15,6 +15,12 @@ import { tone } from '../game/dulce';
  *   4. Fogonazo del motor que parpadea (con destello en cruz).
  * Con el motor apagado (o tras `soltar`) solo queda el humo.
  *
+ * Legibilidad: el humo va teñido del `brillo` de cada tipo (el jugador, dorado
+ * tibio; cada enemigo, su color) y lleva un contorno de tono bien hondo para
+ * leerse igual contra cielo de día, atardecer, noche, nubes, espacio o mar. Un
+ * grosor mínimo evita estelas de 1–2 px que se pierden; MAX_R sigue tapando el
+ * tamaño para no ocultar al avión.
+ *
  * Coordenadas del mundo: x a la derecha, y = altitud hacia arriba.
  * Rendimiento: el estado vive en Float32Array de tamaño fijo por estela y no se
  * crean objetos por cuadro (salvo las tuplas que devuelva `aPantalla`). Cada
@@ -38,11 +44,11 @@ export type EstiloEstela = {
   ondula?: number;
 };
 
-/** Misil del jugador: fuego blanco-dorado, humo rosado. */
+/** Misil del jugador: fuego blanco-dorado, humo dorado tibio. */
 export const ESTELA_JUGADOR: EstiloEstela = {
   nucleo: '#fff6b0',
-  brillo: '#ffa040',
-  humo: '#ffd6e6',
+  brillo: '#ffb030',
+  humo: '#ffe6a6',
   ancho: 10,
   largo: 32,
   chispas: 40,
@@ -63,9 +69,11 @@ export const ESTELA_ENEMIGA: EstiloEstela = {
 /* ── Constantes ─────────────────────────────────────────────────────────── */
 
 const INTERVALO = 0.045; // s entre muestras de humo
-const MAX_PUNTOS = 48;
+const MAX_PUNTOS = 60;
+const VIDA_EXTRA = 1.3; // la estela dura un poco más que su `largo` nominal
+const R_MIN = 2.5; // radio base mínimo del humo (las estelas finas se perdían)
 const MAX_CHISPAS = 12;
-const VIDA_FUEGO = 0.16; // s que un punto sigue siendo parte de la cinta de fuego
+const VIDA_FUEGO = 0.18; // s que un punto sigue siendo parte de la cinta de fuego
 const COLA = 5; // px detrás del centro del misil donde está la tobera
 const SUBE = 9; // px/s a los que tiende a subir el humo
 const GRAVEDAD = 110; // px/s² de las chispas
@@ -153,6 +161,8 @@ function construir(pal: Paleta, tipo: number, v: number, r: number): HTMLCanvasE
       disco(g, R, R, r, pal.brillo);
       if (v <= 1 && r >= 1) disco(g, R, R, r - 1, pal.nucleo);
       if (v === 0 && r >= 2) disco(g, R, R, r - 2, '#ffffff');
+      // Junto a la tobera: núcleo blanco ancho, solo un aro de brillo afuera.
+      if (v === 3) disco(g, R, R, Math.max(0, r - 1), '#ffffff');
       break;
     case CHISPA:
       if (v === 0) {
@@ -208,13 +218,19 @@ const paletas = new WeakMap<EstiloEstela, Paleta>();
 function paleta(e: EstiloEstela): Paleta {
   let p = paletas.get(e);
   if (!p) {
-    // Humo tibio (recién salido): el humo teñido del brillo. Pálido: al final.
-    const etapas = [mezcla(e.humo, e.brillo, 0.6), e.humo, mezcla(e.humo, '#ffffff', 0.45)];
+    // Humo tibio (recién salido): bien teñido del brillo. Luego el humo con un
+    // tinte del tipo (para reconocerlo) y al final pálido, pero nunca blanco.
+    const etapas = [
+      mezcla(e.humo, e.brillo, 0.7),
+      mezcla(e.humo, e.brillo, 0.32),
+      mezcla(mezcla(e.humo, '#ffffff', 0.3), e.brillo, 0.16),
+    ];
     p = {
-      linea: etapas.map((c, i) => tone(c, i === 2 ? -0.32 : -0.42)),
+      // Contorno hondo: es lo que separa la estela de un cielo claro o de nubes.
+      linea: etapas.map((c, i) => tone(c, i === 2 ? -0.46 : -0.58)),
       relleno: etapas,
-      luz: etapas.map((c) => tone(c, 0.55)),
-      fuegoLinea: tone(e.brillo, -0.35),
+      luz: etapas.map((c) => tone(c, 0.6)),
+      fuegoLinea: tone(e.brillo, -0.55),
       brillo: e.brillo,
       nucleo: e.nucleo,
       spr: [],
@@ -243,7 +259,7 @@ function azar(e: Estela) {
 /* ── API ────────────────────────────────────────────────────────────────── */
 
 export function crearEstela(estilo: EstiloEstela): Estela {
-  const cap = Math.max(4, Math.min(MAX_PUNTOS, Math.floor(estilo.largo)));
+  const cap = Math.max(4, Math.min(MAX_PUNTOS, Math.floor(estilo.largo * VIDA_EXTRA)));
   semillaGlobal = (Math.imul(semillaGlobal, 69069) + 1) >>> 0;
   return {
     estilo,
@@ -301,7 +317,9 @@ export function empujarPunto(e: Estela, x: number, y: number, rumbo: number, mot
     if (e.n < e.cap) e.n++;
   }
   // Chispas.
-  e.cAcum += e.estilo.chispas * dt;
+  // misiles.ts da «chispas por frame» (0–3); aquí son por segundo.
+  const ritmo = e.estilo.chispas < 6 ? e.estilo.chispas * 12 : e.estilo.chispas;
+  e.cAcum += ritmo * dt;
   while (e.cAcum >= 1) {
     e.cAcum -= 1;
     if (e.cn >= MAX_CHISPAS) continue;
@@ -378,7 +396,7 @@ export function dibujarEstela(
   t: number,
 ): void {
   const p = e.p, pal = e.pal;
-  const rb = e.estilo.ancho / 2;
+  const rb = Math.min(MAX_R - 2, Math.max(R_MIN, e.estilo.ancho * 0.62));
   const amp = e.estilo.ondula ?? 0;
   const alfa0 = g.globalAlpha;
   const W = g.canvas.width + MARGEN, H = g.canvas.height + MARGEN;
@@ -492,7 +510,7 @@ export function dibujarEstela(
       fX[j] = q[0];
       fY[j] = q[1];
     }
-    const r0 = Math.max(2, rb * 0.62);
+    const r0 = Math.max(3, rb * 0.72);
     for (let pasada = 0; pasada < 2; pasada++) {
       let rec = 0;
       for (let j = 1; j < fn && rec < largoMax; j++) {
@@ -505,7 +523,7 @@ export function dibujarEstela(
           const r = Math.round(r0 * (1 - u * 0.8) + (u < 0.2 ? parpadeo * 0.4 : 0));
           const x = Math.round(ax + (dx * s) / d), y = Math.round(ay + (dy * s) / d);
           if (pasada === 0) pon(g, pal, FUEGO_LINEA, 0, r, x, y);
-          else pon(g, pal, FUEGO_CUERPO, u < 0.45 ? 0 : u < 0.7 ? 1 : 2, r, x, y);
+          else pon(g, pal, FUEGO_CUERPO, u < 0.22 ? 3 : u < 0.5 ? 0 : u < 0.72 ? 1 : 2, r, x, y);
           const paso = Math.max(2, r * 1.25);
           s += paso;
           rec += paso;
@@ -533,7 +551,7 @@ export function dibujarEstela(
   if (motor) {
     const q = aPantalla(e.mx - cs * (COLA + 2), e.my - sn * (COLA + 2));
     const f = (Math.floor(t * 24) + e.fase) % 4;
-    const r = 2 + (f === 0 ? 1 : 0) + Math.round(rb / 6);
+    const r = 3 + (f === 0 ? 1 : 0) + Math.round(rb / 5);
     pon(g, pal, FOGONAZO, f === 0 || f === 2 ? 1 : 0, r, Math.round(q[0]), Math.round(q[1]));
   }
 }

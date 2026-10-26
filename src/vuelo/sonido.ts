@@ -43,7 +43,10 @@ export function cargarSonidos() {
 type Voz = { n: Muestra; src: AudioBufferSourceNode; g: GainNode; t: number };
 const voces = new Set<Voz>();
 // At most this many copies of a sample at once; the oldest fades out to make room.
-const TOPE: Partial<Record<Muestra, number>> = { misil: 3, 'explosion-chica': 3, 'explosion-grande': 3, bomba: 3, impacto: 2 };
+// Rapid-fire samples (flak, flares) get tight caps so a burst never stacks into a wall.
+const TOPE: Partial<Record<Muestra, number>> = {
+  misil: 3, 'explosion-chica': 3, 'explosion-grande': 3, bomba: 3, impacto: 2, antiaereo: 3, bengalas: 2, recoger: 2,
+};
 const ultima = new Map<Muestra, number>();
 
 function apaga(v: Voz, ctx: BaseAudioContext, tc = 0.03) {
@@ -92,7 +95,6 @@ export function suena(n: Muestra, o: { vol?: number; rate?: number; pan?: number
   if (o.dur) {
     g.gain.setValueAtTime(o.vol ?? 1, now + Math.max(0, o.dur - 0.08));
     g.gain.linearRampToValueAtTime(0, now + o.dur);
-    src.stop(now + o.dur + 0.02);
   }
   const v: Voz = { n, src, g, t: now };
   voces.add(v);
@@ -105,6 +107,8 @@ export function suena(n: Muestra, o: { vol?: number; rate?: number; pan?: number
   }
   node.connect(out.dest);
   src.start();
+  // Cut short with a fade (the stop must come after start).
+  if (o.dur) src.stop(now + o.dur + 0.02);
   return true;
 }
 

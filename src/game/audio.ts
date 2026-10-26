@@ -6,14 +6,19 @@
 /**
  * 'alegre' is the bouncy daytime arrangement of the island song, 'calma' a
  * slower, softer one. 'vuelo' is a second, faster song for the plane game.
+ * 'titulo' is the title-screen march of the plane game.
  */
-export type MusicMood = 'alegre' | 'calma' | 'vuelo';
+export type MusicMood = 'alegre' | 'calma' | 'vuelo' | 'titulo';
 
 let ctx: AudioContext | null = null;
 let out: GainNode | null = null;
 let sfxBus: GainNode | null = null;
 let musicBus: GainNode | null = null;
 let echoIn: GainNode | null = null;
+// Every run of a song plays through its own pair of gains (dry and echo send),
+// so switching songs can fade out whatever is still sounding from the old one.
+let songOut: GainNode | null = null;
+let songEcho: GainNode | null = null;
 let muted = false;
 let musicVolume = 0.5;
 let mood: MusicMood = 'alegre';
@@ -63,7 +68,38 @@ export function initAudio(startMuted: boolean) {
 
   noise = makeChipNoise(1.5);
   song.next = 0;
+  song.step = 0;
+  newSongOutput();
   startScheduler();
+}
+
+// Fades out the current song's gains (cutting any held notes) and opens a
+// fresh pair for the next one.
+function newSongOutput() {
+  const c = ctx!;
+  if (songOut && songEcho) {
+    const oldOut = songOut, oldEcho = songEcho;
+    oldOut.gain.setTargetAtTime(0, c.currentTime, 0.015);
+    oldEcho.gain.setTargetAtTime(0, c.currentTime, 0.015);
+    window.setTimeout(() => {
+      oldOut.disconnect();
+      oldEcho.disconnect();
+    }, 1500);
+  }
+  songOut = gain(1);
+  songOut.connect(musicBus!);
+  songEcho = gain(1);
+  songEcho.connect(echoIn!);
+}
+
+// Starts the current mood's song from its first bar after `delay` seconds,
+// silencing what was playing.
+function restartSong(delay: number) {
+  if (!ctx || !musicBus) return;
+  newSongOutput();
+  song.arr = ARRANGEMENT[mood];
+  song.step = 0;
+  song.next = ctx.currentTime + delay;
 }
 
 export function pauseAudio() {
@@ -92,9 +128,15 @@ export function setMusicVolume(v: number) {
   if (ctx && musicBus) musicBus.gain.setTargetAtTime(musicLevel(), ctx.currentTime, 0.1);
 }
 
-/** Switches the arrangement; it takes effect at the start of the next bar. */
+/**
+ * Switches the arrangement. Another arrangement of the same song takes effect
+ * at the start of the next bar; a different song cuts the old one off and
+ * starts from its first bar right away (or when a pending jingle ends).
+ */
 export function setMusicMood(m: MusicMood) {
   mood = m;
+  if (!ctx || ARRANGEMENT[m].tune === song.arr.tune) return;
+  restartSong(Math.max(0.06, song.next - ctx.currentTime));
 }
 
 /**
@@ -156,6 +198,7 @@ type NoteOpts = {
   vibrato?: number; // depth in cents
   echo?: number; // send level to the echo
   sustain?: number; // level kept until the release, as a fraction of vol
+  echoTo?: AudioNode; // where the echo send goes (the shared echo by default)
 };
 
 function note(dest: AudioNode, t: number, freq: number, dur: number, wave: Wave, vol: number, o: NoteOpts = {}) {
@@ -177,9 +220,10 @@ function note(dest: AudioNode, t: number, freq: number, dur: number, wave: Wave,
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   }
   osc.connect(g).connect(dest);
-  if (o.echo && echoIn) {
+  const echoDest = o.echoTo ?? echoIn;
+  if (o.echo && echoDest) {
     const send = gain(o.echo);
-    g.connect(send).connect(echoIn);
+    g.connect(send).connect(echoDest);
   }
   let lfo: OscillatorNode | null = null;
   if (o.vibrato && dur > 0.18) {
@@ -263,7 +307,7 @@ const parseBar = (bar: string) => {
   return events;
 };
 
-type Tune = { lead: [number, number, number][][]; chords: number[][][] };
+type Tune = { lead: [number, number, number][][]; chords: number[][][]; counter?: [number, number, number][][] };
 const ISLA: Tune = { lead: MELODY.map(parseBar), chords: CHORDS };
 
 /* ---------------- the second song: "Escuadrón Dui" ---------------- */
@@ -293,18 +337,113 @@ const VUELO: Tune = {
   chords: [[Dm], [Bb], [C], [Dm], [Dm], [Bb], [Gm], [A], [F], [C], [Bb], [A], [Dm], [Gm], [A], [A7]],
 };
 
+/* ---------------- the title march: "¡Despegue, Escuadrón!" ---------------- */
+
+// Original as well: a 32-bar march in G major for the title screen. A (bars
+// 1–8) states the 4-bar hook – G, then the same figure a step down on F (the
+// bright flat seventh) – and an answer that ends on D. A' repeats the hook
+// and lands home on G. B (17–24) is the contrast: long, soaring lead notes in
+// E minor over a busy broken-chord counter line. A'' brings the hook back in
+// thirds and turns around to the top. Drum fills close every 8 bars.
+const G = [43, 47, 50], Em = [40, 43, 47], D = [38, 42, 45];
+const TITULO: Tune = {
+  lead: [
+    // A
+    'D5 . D5 G5 - - B5 -',
+    'A5 G5 F#5 G5 D5 - - .',
+    'C5 . C5 F5 - - A5 -',
+    'G5 F5 E5 G5 F#5 - A5 .',
+    'B5 . B5 D6 - B5 G5 B5',
+    'E5 - G5 B5 - A5 G5 E5',
+    'C6 - B5 A5 G5 - E5 G5',
+    'A5 - - - . . . .',
+    // A'
+    'D5 . D5 G5 - - B5 -',
+    'A5 G5 F#5 G5 D5 - - .',
+    'C5 . C5 F5 - - A5 -',
+    'G5 F5 E5 G5 F#5 - A5 .',
+    'B5 . B5 D6 - G6 F#6 E6',
+    'E6 - D6 C6 G5 - E5 G5',
+    'F#5 - A5 - D6 - C6 A5',
+    'G5 - - D5 G5 . . .',
+    // B
+    'E5 - - - G5 - B5 -',
+    'C6 - - - B5 - G5 -',
+    'D6 - - - B5 - G5 -',
+    'A5 - - - F#5 G5 A5 -',
+    'B5 - - - E6 - D6 -',
+    'C6 - B5 - C6 - E6 -',
+    'C6 - B5 A5 E5 - A5 C6',
+    'D6 - - - . . . .',
+    // A''
+    'D5 . D5 G5 - - B5 -',
+    'A5 G5 F#5 G5 D5 - - .',
+    'C5 . C5 F5 - - A5 -',
+    'G5 F5 E5 G5 F#5 - A5 .',
+    'B5 . B5 D6 - B5 G5 B5',
+    'E5 - G5 B5 - A5 G5 E5',
+    'E6 - D6 C6 A5 - B5 C6',
+    'A5 - - - F#5 - . .',
+  ].map(parseBar),
+  // The counter-melody: answers in the hook's held notes, sustained thirds
+  // under the answer, a rolling broken chord in B, and harmony in A''.
+  counter: [
+    '. . . . B4 - D5 -',
+    '. . . . G4 A4 B4 D5',
+    '. . . . A4 - C5 -',
+    'E4 - G4 - F#4 - A4 -',
+    'D5 - - - G4 - - -',
+    'B4 - - - E5 - - -',
+    'E5 - - - C5 - - -',
+    '. . . . A4 B4 C5 C#5',
+    '. . . . B4 - D5 -',
+    '. . . . G4 A4 B4 D5',
+    '. . . . A4 - C5 -',
+    'E4 - G4 - F#4 - A4 -',
+    'G4 - - - B4 - - -',
+    'G4 - - - E4 - - -',
+    'A4 - - - F#4 - - -',
+    '. . . . . G4 A4 B4',
+    'E4 B4 G4 B4 E4 B4 G4 B4',
+    'E4 C5 G4 C5 E4 C5 G4 C5',
+    'D4 B4 G4 B4 D4 B4 G4 B4',
+    'D4 A4 F#4 A4 D4 A4 F#4 A4',
+    'G4 B4 E5 B4 G4 B4 E5 B4',
+    'G4 C5 E5 C5 G4 C5 E5 C5',
+    'A4 C5 E5 C5 A4 C5 E5 C5',
+    'D5 C5 A4 F#4 D4 . . .',
+    'B4 . B4 D5 - - G5 -',
+    'F#5 E5 D5 E5 B4 - - .',
+    'A4 . A4 C5 - - F5 -',
+    'E5 D5 C5 E5 D5 - F#5 .',
+    'D5 - - - G4 - - -',
+    'B4 - - - E5 - - -',
+    'G4 - - - A4 - - -',
+    'D5 - - - A4 B4 C5 C#5',
+  ].map(parseBar),
+  chords: [
+    [G], [G], [F], [C, D], [G], [Em], [C], [D],
+    [G], [G], [F], [C, D], [G], [C], [D], [G],
+    [Em], [C], [G], [D], [Em], [C], [Am], [D],
+    [G], [G], [F], [C, D], [G], [Em], [C, D], [D],
+  ],
+};
+
 const ARRANGEMENT = {
   alegre: { bpm: 140, lead: 0.25, leadVol: 0.075, bass: 0.13, drums: 1, tune: ISLA },
   calma: { bpm: 96, lead: 0.5, leadVol: 0.05, bass: 0.1, drums: 0.45, tune: ISLA },
   vuelo: { bpm: 160, lead: 0.25, leadVol: 0.07, bass: 0.14, drums: 1.1, tune: VUELO },
+  titulo: { bpm: 158, lead: 0.5, leadVol: 0.058, bass: 0.13, drums: 0.9, tune: TITULO },
 } as const;
 
 const song = { next: 0, step: 0, arr: ARRANGEMENT.alegre as (typeof ARRANGEMENT)[MusicMood] };
 
 // Schedules one sixteenth-note step of the song at time t.
 function playStep(t: number, step: number, sixteenth: number) {
-  const bus = musicBus!;
   const a = song.arr;
+  if (a.tune === TITULO) return playMarch(t, step, sixteenth);
+  const bus = songOut!;
+  const echoTo = songEcho!;
   const calm = a === ARRANGEMENT.calma;
   const bar = Math.floor(step / 16) % a.tune.lead.length;
   const s = step % 16;
@@ -316,7 +455,7 @@ function playStep(t: number, step: number, sixteenth: number) {
   if (s % 2 === 0) {
     for (const [i, midi, len] of a.tune.lead[bar]) {
       if (i * 2 !== s) continue;
-      note(bus, t, hz(midi), len * eighth * 0.92, a.lead, a.leadVol, { vibrato: 18, echo: 0.5, sustain: 0.7, attack: 0.004 });
+      note(bus, t, hz(midi), len * eighth * 0.92, a.lead, a.leadVol, { vibrato: 18, echo: 0.5, echoTo, sustain: 0.7, attack: 0.004 });
     }
   }
 
@@ -333,11 +472,11 @@ function playStep(t: number, step: number, sixteenth: number) {
   if (calm) {
     if (s % 4 === 2) {
       const tone = chord[[0, 1, 2, 1][(s / 4) | 0]] + 12;
-      note(bus, t, hz(tone), eighth * 2.5, 0.125, 0.03, { echo: 0.6 });
+      note(bus, t, hz(tone), eighth * 2.5, 0.125, 0.03, { echo: 0.6, echoTo });
     }
   } else if (s % 4 === 2) {
-    note(bus, t, hz(chord[1] + 12), eighth * 0.45, 0.125, 0.032, { echo: 0.35 });
-    note(bus, t, hz(chord[2] + 12), eighth * 0.45, 0.125, 0.032, { echo: 0.35 });
+    note(bus, t, hz(chord[1] + 12), eighth * 0.45, 0.125, 0.032, { echo: 0.35, echoTo });
+    note(bus, t, hz(chord[2] + 12), eighth * 0.45, 0.125, 0.032, { echo: 0.35, echoTo });
   }
 
   // Drums: soft kick, noise snare and hats.
@@ -355,8 +494,78 @@ function playStep(t: number, step: number, sixteenth: number) {
   if (!calm && bar === a.tune.lead.length - 1 && s >= 13) hiss(bus, t, 0.07, 'bandpass', 1500 + s * 120, 0.1, 0.8);
 }
 
+// Moves a MIDI note by octaves into [lo, lo + 12).
+const inOctave = (m: number, lo: number) => lo + ((((m - lo) % 12) + 12) % 12);
+
+// One sixteenth of the title march: square lead, pulse counter-melody,
+// octave-jumping triangle bass, off-beat stabs and a fuller drum kit.
+function playMarch(t: number, step: number, sixteenth: number) {
+  const bus = songOut!;
+  const echoTo = songEcho!;
+  const a = song.arr;
+  const tune = a.tune;
+  const bar = Math.floor(step / 16) % tune.lead.length;
+  const s = step % 16;
+  const chords = tune.chords[bar];
+  const chord = chords.length > 1 && s >= 8 ? chords[1] : chords[0];
+  const eighth = sixteenth * 2;
+  const sectionB = bar >= 16 && bar < 24;
+  // Fills on the last half of every 8th bar, a longer one before A' and the loop.
+  const fillFrom = bar % 8 === 7 ? (bar % 16 === 15 ? 4 : 8) : 16;
+  const d = a.drums;
+
+  if (s % 2 === 0) {
+    // Lead: a plain square in A for punch, a thinner pulse in B for contrast.
+    for (const [i, midi, len] of tune.lead[bar]) {
+      if (i * 2 !== s) continue;
+      note(bus, t, hz(midi), len * eighth * 0.9, sectionB ? 0.25 : a.lead, a.leadVol, { vibrato: 16, echo: 0.35, echoTo, sustain: 0.65, attack: 0.003 });
+    }
+    for (const [i, midi, len] of tune.counter?.[bar] ?? []) {
+      if (i * 2 !== s) continue;
+      note(bus, t, hz(midi), len * eighth * (sectionB ? 0.6 : 0.85), 0.125, sectionB ? 0.026 : 0.032, { echo: 0.45, echoTo, sustain: 0.6, attack: 0.004 });
+    }
+
+    // Bass: root and octave on every eighth, with a fifth for a little swing.
+    const root = inOctave(chord[0], 36);
+    const pat = sectionB ? [0, 12, 7, 12, 0, 12, 7, 12] : [0, 12, 0, 12, 0, 12, 7, 12];
+    note(bus, t, hz(root + pat[s / 2]), eighth * 0.75, 'triangle', a.bass, { sustain: 0.85, attack: 0.003 });
+  }
+
+  // Harmony: short off-beat stabs of the chord's upper two notes.
+  if (s % 4 === 2) {
+    note(bus, t, hz(inOctave(chord[1], 60)), eighth * 0.4, 0.125, 0.028, { echo: 0.3, echoTo });
+    note(bus, t, hz(inOctave(chord[2], 60)), eighth * 0.4, 0.125, 0.028, { echo: 0.3, echoTo });
+  }
+
+  // Drums. A crash opens every 8-bar phrase.
+  if (bar % 8 === 0 && s === 0) hiss(bus, t, 0.7, 'highpass', 5000, 0.08 * d);
+  if (s < fillFrom) {
+    // March beat: kick on 1 and 3 (four on the floor in B), snare on 2 and 4.
+    if (s === 0 || s === 8 || (sectionB ? s % 4 === 0 : s === 10 && bar % 2 === 1)) {
+      note(bus, t, 145, 0.13, 'sine', 0.32 * d, { slideTo: 44, attack: 0.002 });
+    }
+    if (s === 4 || s === 12) {
+      hiss(bus, t, 0.12, 'bandpass', 2000, 0.15 * d, 0.6);
+      note(bus, t, 200, 0.06, 'triangle', 0.08 * d, { slideTo: 125, attack: 0.002 });
+    }
+    if (s === 14 && bar % 2 === 1) hiss(bus, t, 0.05, 'bandpass', 2400, 0.05 * d, 0.8);
+    // Hats on the eighths, a soft sixteenth before each beat, open hats in B.
+    if (s % 2 === 0) hiss(bus, t, sectionB && s % 4 === 2 ? 0.07 : 0.028, 'highpass', 7000, (s % 4 === 2 ? 0.06 : 0.042) * d);
+    else if (s % 4 === 3) hiss(bus, t, 0.02, 'highpass', 8000, 0.025 * d);
+  } else {
+    // Fill: a snare roll that climbs in level over falling toms.
+    const k = (s - fillFrom) / (16 - fillFrom);
+    hiss(bus, t, 0.07, 'bandpass', 1500 + k * 1200, (0.06 + 0.08 * k) * d, 0.7);
+    if (s % 2 === 0) {
+      const tom = 260 - k * 130;
+      note(bus, t, tom, 0.1, 'triangle', 0.1 * d, { slideTo: tom * 0.6, attack: 0.002 });
+    }
+    if (s === 15) note(bus, t, 145, 0.13, 'sine', 0.3 * d, { slideTo: 44, attack: 0.002 });
+  }
+}
+
 function tick() {
-  if (!ctx || !musicBus || ctx.state !== 'running') return;
+  if (!ctx || !musicBus || !songOut || ctx.state !== 'running') return;
   const now = ctx.currentTime;
   // After a pause or a long stall, pick up from now instead of catching up.
   if (song.next < now - 0.2) song.next = now + 0.05;
@@ -389,6 +598,70 @@ function blip(freq: number, dur: number, wave: Wave, vol: number, delay = 0, o: 
 function crunch(dur: number, freq: number, vol: number, delay = 0, type: BiquadFilterType = 'bandpass') {
   if (!ready()) return;
   hiss(sfxBus!, ctx!.currentTime + delay, dur, type, freq, vol, 0.7);
+}
+
+/* ---------------- title jingles ---------------- */
+
+// Holds the song back for `seconds` (cutting what was sounding) and then
+// starts the current mood from its first bar, so it enters after a jingle.
+function holdMusic(seconds: number) {
+  if (ctx && musicBus) restartSong(seconds);
+}
+
+// A big pulse chord hit: one note per MIDI number, with a triangle root below.
+function chordHit(midis: number[], delay: number, dur: number, vol: number, wave: Wave = 0.25) {
+  midis.forEach((m, i) => blip(hz(m), dur, i % 2 ? 0.5 : wave, vol, delay, { sustain: 0.6, vibrato: dur > 0.3 ? 18 : 0, echo: 0.3 }));
+  blip(hz(midis[0] - 24), dur, 'triangle', 0.16, delay, { sustain: 0.8 });
+}
+
+function kick(delay: number, vol = 0.3) {
+  blip(150, 0.14, 'sine', vol, delay, { slideTo: 44, attack: 0.002 });
+}
+
+/**
+ * The title sting (about 3 s) for when the logo slams in: a rising G major
+ * arpeggio over a snare roll, two F stabs and a bright G chord with a crash.
+ * The current song waits and starts from its first bar right after it.
+ */
+export function jingleIntro(): void {
+  holdMusic(3.1);
+  if (!ready()) return;
+  // Two and a half octaves up, speeding up as it climbs.
+  const arp = [55, 59, 62, 67, 71, 74, 79, 83, 86, 91];
+  arp.forEach((m, i) => {
+    const at = i * 0.125 - i * i * 0.0035;
+    blip(hz(m), 0.16, 0.25, 0.05 + i * 0.002, at, { sustain: 0.6, echo: 0.25 });
+    blip(hz(m - 12), 0.1, 'triangle', 0.09, at, { sustain: 0.7 });
+  });
+  // Snare roll, quiet to loud.
+  for (let i = 0; i < 28; i++) crunch(0.06, 1700 + i * 30, 0.05 + i * 0.006, i * 0.045);
+  // F – F – G: the flat seventh pushing up to the tonic.
+  chordHit([65, 69, 72, 77], 1.05, 0.11, 0.045);
+  kick(1.05, 0.26);
+  chordHit([65, 69, 72, 77], 1.2, 0.11, 0.045);
+  kick(1.2, 0.26);
+  chordHit([67, 71, 74, 79, 83], 1.4, 1.5, 0.045);
+  kick(1.4, 0.34);
+  crunch(1.2, 5500, 0.22, 1.4, 'highpass');
+  crunch(0.18, 1900, 0.2, 1.4);
+  // A little sparkle trailing off the hit.
+  [91, 95, 98, 103].forEach((m, i) => blip(hz(m), 0.1, 0.125, 0.022, 1.55 + i * 0.07, { echo: 0.5 }));
+}
+
+/**
+ * The Start sting (about 0.8 s): a quick upward flourish and a chord hit.
+ * Call setMusicMood for the next song right after it; it enters when the
+ * sting ends.
+ */
+export function jingleStart(): void {
+  holdMusic(0.85);
+  if (!ready()) return;
+  [74, 79, 83].forEach((m, i) => blip(hz(m), 0.07, 0.125, 0.05, i * 0.05));
+  blip(hz(67), 0.15, 0.5, 0.03, 0, { slideTo: hz(79) });
+  chordHit([79, 83, 86], 0.16, 0.6, 0.045, 0.25);
+  kick(0.16, 0.3);
+  crunch(0.12, 2000, 0.18, 0.16);
+  crunch(0.45, 6000, 0.14, 0.16, 'highpass');
 }
 
 export const sfx = {

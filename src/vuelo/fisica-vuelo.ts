@@ -222,6 +222,8 @@ type Estado = {
   t: number;
   manteniendo: boolean;
   yRef: number;
+  /** Hands-off: the flight-path angle held since the stick was released. */
+  thetaRef: number;
   dirH: number;
   sentido: number; // remembered turn direction for a near-180° reversal (±1, 0 none)
   tonelObjetivo: number; // 0 (canopy up flying right) or π (rolled)
@@ -236,7 +238,7 @@ function estado(a: Avion): Estado {
   let e = estados.get(a);
   if (!e) {
     e = {
-      t: 0, manteniendo: false, yRef: a.y, dirH: Math.cos(a.rumbo) >= 0 ? 1 : -1, sentido: 0,
+      t: 0, manteniendo: false, yRef: a.y, thetaRef: 0, dirH: Math.cos(a.rumbo) >= 0 ? 1 : -1, sentido: 0,
       tonelObjetivo: a.alabeo >= 0 ? 0 : PI, tPerdida: 0, contacto: false, enTecho: false, trabajo: 0,
     };
     estados.set(a, e);
@@ -362,17 +364,18 @@ function subpaso(
     e.manteniendo = false;
     thetaD = Math.atan2(my, mx);
   } else {
+    // Hands-off keeps flying the way the nose was going: no auto-levelling.
     if (!e.manteniendo) {
       e.manteniendo = true;
-      e.yRef = a.y + clamp(a.vy, -60, 60) * 0.3;
+      e.thetaRef = gam;
       e.dirH = Math.abs(a.vx) > 10 ? Math.sign(a.vx) : Math.cos(a.rumbo) >= 0 ? 1 : -1;
     }
-    let vyT = clamp(2 * (e.yRef - a.y), -0.35 * V, 0.35 * V);
-    // Stall protection when hands-off: trade height for speed.
-    if (V < 1.15 * p.velPerdida) vyT = Math.min(vyT, -(1.15 * p.velPerdida - V) * 1.2);
-    // Follow the pilot's held altitude down if it was taken during a sink.
-    if (vyT < 0 && a.y < e.yRef) e.yRef = Math.min(e.yRef, a.y + 40);
-    thetaD = Math.atan2(vyT, e.dirH * Math.sqrt(Math.max(V * V - vyT * vyT, 1)));
+    // Only near a stall does it ease the nose down to keep flying.
+    if (V < 1.15 * p.velPerdida) {
+      const down = -Math.PI / 2;
+      e.thetaRef += wrap(down - e.thetaRef) * Math.min(1, h * (1.15 * p.velPerdida - V) * 0.05);
+    }
+    thetaD = e.thetaRef;
   }
   // Ceiling: taper the allowed climb angle in thin air.
   const maxSin = clamp((techo - 6 - a.y) / 45, -0.4, 1);

@@ -219,6 +219,14 @@ html.lite .liquid-glass-strong::before {
   }
 }
 
+/* End-of-wave card in /aviones: drops in softly. */
+@keyframes aparece {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.96);
+  }
+}
+
 /* ── Isla en 2D, dibujada en crayón (src/game/PixelScene.tsx, crayon.ts) ──
    El color de fondo es el del papel: evita un flash antes del primer cuadro.
    Los letreros del mapa van con letra manuscrita, como escritos a mano. */
@@ -256,5 +264,70 @@ html.lite .liquid-glass-strong::before {
   .font-cozy button:focus-visible {
     outline-width: 4px;
     outline-color: #3d2410;
+  }
+}
+
+/* ── Escuadrón Dui: SNES-style intro, title logo and credits roll ── */
+.logo-dui {
+  color: #ffd84a;
+  letter-spacing: 0.04em;
+  /* A chunky ink outline and a drop, like a 16-bit title. */
+  text-shadow:
+    -3px 0 0 #3a2a6a, 3px 0 0 #3a2a6a, 0 -3px 0 #3a2a6a, 0 3px 0 #3a2a6a,
+    -3px -3px 0 #3a2a6a, 3px -3px 0 #3a2a6a, -3px 3px 0 #3a2a6a, 3px 3px 0 #3a2a6a,
+    0 7px 0 #e8742a, 0 10px 0 #3a2a6a;
+}
+.intro-vuela {
+  animation: intro-vuela 0.9s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+@keyframes intro-vuela {
+  from {
+    opacity: 0;
+    transform: translateX(-70vw) rotate(-8deg);
+  }
+}
+.intro-golpe {
+  animation: intro-golpe 0.55s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+@keyframes intro-golpe {
+  0% {
+    opacity: 0;
+    transform: scale(3.2);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.94);
+  }
+  75% {
+    transform: scale(1.04) rotate(-1deg);
+  }
+}
+.intro-ratones {
+  animation: intro-ratones 0.8s ease-out both;
+}
+@keyframes intro-ratones {
+  from {
+    opacity: 0;
+    transform: translateX(60vw);
+  }
+}
+.creditos-rueda {
+  animation: creditos-rueda 70s linear both;
+}
+@keyframes creditos-rueda {
+  to {
+    transform: translateY(-100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .intro-vuela,
+  .intro-golpe,
+  .intro-ratones {
+    animation: none;
+  }
+  /* No roll: the credits become a list you scroll yourself. */
+  .creditos-rueda {
+    animation: none;
+    padding-top: 4rem;
   }
 }

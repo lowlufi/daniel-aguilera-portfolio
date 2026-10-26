@@ -1,15 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
-import { initAudio, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, sfx } from '../game/audio';
+import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, sfx } from '../game/audio';
 import { cargarSonidos } from './sonido';
 import { PLANES, createVuelo, dibujo, readSave, type Hud, type Result, type SavedGame, type Vuelo } from './motor';
 import type { ModeloAvion } from './fisica-tipos';
 
 /*
  * "Escuadrón Dui": the plane game around the canvas engine in motor.ts. This
- * file only does the menus, the HUD, the pause and the touch controls.
+ * file only does the intro, the title screen, the credits, the hangar, the
+ * HUD, the pause and the touch controls.
  */
 
-type Phase = 'menu' | 'play' | 'over';
+/** intro → titulo (title menu over a self-playing game) → menu (hangar) → play → over. */
+type Phase = 'intro' | 'titulo' | 'creditos' | 'menu' | 'play' | 'over';
+
+const AUTOR = 'Daniel Aguilera Campusano';
+/** Every role in the credits, all of them by the author. */
+const ROLES = [
+  'Dirección del juego', 'Idea original', 'Diseño de juego', 'Guion y personajes', 'Programación', 'Motor del juego',
+  'Física de vuelo', 'Física de misiles y explosiones', 'Inteligencia artificial de los ratones', 'Cazas ratón y jefes',
+  'Diseño de niveles: el valle y el océano', 'Arte pixel', 'Diseño de personajes', 'Animación', 'Fondos y escenarios',
+  'Efectos visuales, luces y sombras', 'Interfaz y menús', 'Diseño de sonido', 'Música original (chiptune)',
+  'Controles táctiles', 'Investigación de experiencia de juego', 'Balance y dificultad', 'Accesibilidad',
+  'Pruebas y control de calidad', 'Producción', 'Sitio web danieleduardo.cl',
+];
+const ELENCO = [
+  ['Dui', 'el gato naranjo, piloto del Caza Mandarina'],
+  ['Lulu', 'la gatita negra de ojos amarillos, Avioneta Mostaza'],
+  ['Almendrita', 'la yorkshire, Bombardero Nube'],
+  ['Vecina Margarita', 'ella misma (y su portaaviones)'],
+  ['Los ratones', 'muchos, muchísimos ratones'],
+];
+/** CC0 sound recordings (no attribution required; thanked anyway). */
+const SONIDOS_CC0 = ['modusmogulus', 'craigsmith', 'qubodup', 'unfa', 'josecruz98', 'Alxy', 'Anthousai', 'Rocotilos'];
 
 const CHIP = 'inline-flex h-8 [@media(min-height:500px)]:h-10 items-center gap-1 rounded-full bg-[#fff8e7]/95 px-2.5 [@media(min-height:500px)]:px-3 text-xs [@media(min-height:500px)]:text-sm whitespace-nowrap font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] tabular-nums';
 const BTN = 'whitespace-nowrap rounded-full bg-[#fff8e7]/95 px-3 md:px-4 h-8 [@media(min-height:500px)]:h-10 text-xs md:text-sm font-extrabold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] hover:-translate-y-0.5 transition-transform';
@@ -88,7 +110,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const game = useRef<Vuelo | null>(null);
-  const [phase, setPhase] = useState<Phase>('menu');
+  const [phase, setPhase] = useState<Phase>('intro');
+  // Intro beats: 0 «presenta» (waits for a key), 1 pilots, 2 logo slam, 3 «press start».
+  const [introStep, setIntroStep] = useState(0);
   const [saved, setSaved] = useState<SavedGame | null>(readSave);
   const [plane, setPlane] = useState<ModeloAvion>(() => readSave()?.pilot ?? 'caza');
   const [hud, setHud] = useState<Hud | null>(null);
@@ -108,6 +132,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       },
     });
     game.current = g;
+    // The title screen's background: a game flown by the autopilot.
+    g.attract();
     return () => {
       g.destroy();
       game.current = null;
@@ -138,6 +164,43 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     for (const p of PLANES) out[p.id] = { plane: dibujo.planeSprite(p.id).toDataURL(), pilot: dibujo.pilotPortrait(p.id).toDataURL() };
     return out;
   }, []);
+  // The mice for the intro: a jeep, a frigate and Margarita on her cart.
+  const ratones = useMemo(() => (['jeep', 'fragata', 'margarita'] as const).map((k) => dibujo.vehicleSprite(k, 0).toDataURL()), []);
+
+  /** Title music on, at its normal level (the game itself has none). */
+  const tituloMusica = useCallback(() => {
+    initAudio(muted);
+    setMusicVolume(1);
+    setMusicMood('titulo');
+  }, [muted]);
+
+  // The intro: the first key/tap starts the music and the show; the next skips to «press start».
+  const advanceIntro = useCallback(() => {
+    if (introStep === 0) {
+      tituloMusica();
+      jingleIntro();
+      setIntroStep(1);
+    } else if (introStep < 3) setIntroStep(3);
+    else {
+      jingleStart();
+      setPhase('titulo');
+    }
+  }, [introStep, tituloMusica]);
+  useEffect(() => {
+    if (phase !== 'intro' || introStep === 0 || introStep >= 3) return;
+    const id = window.setTimeout(() => setIntroStep((n) => Math.min(3, n + 1)), introStep === 1 ? 2300 : 1300);
+    return () => window.clearTimeout(id);
+  }, [phase, introStep]);
+  useEffect(() => {
+    if (phase !== 'intro') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      e.preventDefault();
+      advanceIntro();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [phase, advanceIntro]);
 
   const play = useCallback((resume = false) => {
     // No background music here: only the engines and the effects.
@@ -155,6 +218,27 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setPhase('play');
   }, [muted, plane]);
 
+  // «Menos movimiento», remembered on this device.
+  const [calma, setCalma] = useState(() => {
+    try {
+      return localStorage.getItem('vuelo-calma') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleCalma = (on: boolean) => {
+    setCalma(on);
+    game.current?.setCalma(on);
+    try {
+      localStorage.setItem('vuelo-calma', on ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  };
+  useEffect(() => {
+    game.current?.setCalma(calma);
+  }, [calma]);
+
   const togglePause = useCallback(() => {
     if (phase !== 'play') return;
     setPaused((p) => {
@@ -164,12 +248,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   }, [phase]);
 
   const toMenu = useCallback(() => {
-    game.current?.demo();
+    game.current?.attract();
     game.current?.setPaused(false);
     setPaused(false);
     setSaved(readSave());
-    setPhase('menu');
-  }, []);
+    tituloMusica();
+    setPhase('titulo');
+  }, [tituloMusica]);
 
   const toggleMute = useCallback(() => {
     setMuted((m) => {
@@ -188,7 +273,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
-      if (phase !== 'play' && e.code === 'Enter') play();
+      // Enter flies from the hangar or the game-over card (the title menu uses its focused button).
+      if ((phase === 'menu' || phase === 'over') && e.code === 'Enter') play();
     };
     const onHide = () => {
       if (document.hidden && phase === 'play' && !paused) togglePause();
@@ -317,7 +403,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {/* Top bar: score on the left, the way out on the right. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
-          {phase === 'menu' ? (
+          {phase === 'intro' || phase === 'titulo' || phase === 'creditos' ? null : phase === 'menu' ? (
             <span className={`${CHIP} px-4`}>✈️ Escuadrón Dui</span>
           ) : (
             hud && (
@@ -438,6 +524,75 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           </span>
         </div>
       )}
+      {phase === 'play' && hud?.pista && !hud.resumen && !paused && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex justify-center px-4 [@media(max-height:500px)]:bottom-24">
+          <span className="rounded-full bg-[#3a2a6a]/75 px-4 py-1.5 text-center text-sm font-black text-white shadow">💡 {hud.pista}</span>
+        </div>
+      )}
+      {phase === 'play' && hud?.mision && !hud.resumen && !paused && (
+        <div className="pointer-events-none absolute left-3 top-[6.5rem] z-10 [@media(max-height:500px)]:top-[5.5rem]">
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow ${
+              hud.mision.hecha ? 'bg-[#c8f0c8] text-[#2f6a3a]' : hud.mision.fallida ? 'bg-[#ead6b3]/80 text-[#a08060] line-through' : 'bg-[#fff8e7]/90 text-[#6b4f3a]'
+            }`}
+          >
+            {hud.mision.hecha ? '🏅' : '🎯'} {hud.mision.texto}
+            {hud.mision.meta > 1 && !hud.mision.hecha ? ` (${hud.mision.prog}/${hud.mision.meta})` : ''}
+          </span>
+        </div>
+      )}
+      {phase === 'play' && hud?.resumen && !paused && (
+        <div className="pointer-events-none absolute inset-x-0 top-[14%] z-20 flex justify-center px-4">
+          <div className="w-full max-w-sm animate-[aparece_0.35s_ease-out] rounded-[1.6rem] bg-[#fff8e7]/95 p-4 text-center shadow-[0_6px_0_rgba(91,70,54,0.2)] ring-4 ring-[#ead6b3]">
+            <div className="flex items-center justify-center gap-3">
+              <img src={thumbs[plane].pilot} alt="" className="h-12 w-12 animate-bounce rounded-full bg-white p-0.5 ring-2 ring-[#f0a45d]" style={{ imageRendering: 'pixelated' }} />
+              <h2 className="text-xl font-black text-[#e8742a]">¡Oleada {hud.resumen.oleada} superada!</h2>
+            </div>
+            <div className="mt-3 grid grid-cols-5 gap-1.5 text-[#6b4f3a]">
+              {[
+                ['🐭', hud.resumen.enemigos, 'enemigos'],
+                ['⭐', hud.resumen.puntos, 'puntos'],
+                ['⏱️', `${hud.resumen.tiempo}s`, 'tiempo'],
+                ['🐟', hud.resumen.pescado, 'pescado'],
+                ['✈️', hud.resumen.aviones, 'aviones'],
+              ].map(([icon, value, label]) => (
+                <div key={label} className="rounded-xl bg-white/70 px-1 py-1.5">
+                  <div className="text-base leading-none">{icon}</div>
+                  <div className="mt-0.5 text-sm font-black tabular-nums">{value}</div>
+                  <div className="text-[9px] font-bold text-[#a08060]">{label}</div>
+                </div>
+              ))}
+            </div>
+            {hud.resumen.mision && (
+              <p className={`mt-2 text-sm font-black ${hud.resumen.cumplida ? 'text-[#2f8a4a]' : 'text-[#a08060]'}`}>
+                {hud.resumen.cumplida ? '🏅' : '▫️'} Misión: {hud.resumen.mision} {hud.resumen.cumplida ? '✓' : ''}
+              </p>
+            )}
+            {hud.resumen.destino ? (
+              <p className="mt-3 animate-pulse rounded-full bg-[#7ad8ff] px-3 py-1 text-sm font-black text-[#1a3a6a]">
+                🔥 ¡Super nitro! {hud.resumen.destino === 'oceano' ? 'Rumbo al mar de San Antonio 🌊' : 'Rumbo a Valparaíso 🏘️'}
+              </p>
+            ) : (
+              <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {hud.resumen.siguiente}</p>
+            )}
+            <p className="mt-1 text-[10px] font-bold text-[#a08060]">Partida guardada ✓ · puedes seguir otro día</p>
+          </div>
+        </div>
+      )}
+      {phase === 'play' && hud && hud.hielo > 0.25 && !paused && (
+        <div className="pointer-events-none absolute inset-x-0 top-[30%] z-20 flex justify-center px-4">
+          <span
+            role="alert"
+            className={`rounded-full px-4 py-1.5 text-center text-sm font-black shadow-[0_3px_0_rgba(26,58,106,0.35)] ${
+              hud.congelado ? 'animate-pulse bg-[#e6f6ff] text-[#1a3a6a] ring-4 ring-[#9ad8ff]' : 'bg-[#bfe8ff] text-[#1a3a6a]'
+            }`}
+          >
+            {hud.congelado
+              ? '🧊 ¡Avión congelado! Los controles no responden… cayendo hasta descongelar'
+              : `❄️ ¡Frío extremo! Baja o te congelarás · hielo ${Math.round(hud.hielo * 100)}%`}
+          </span>
+        </div>
+      )}
       {phase === 'play' && hud?.stall && !paused && (
         <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 text-center">
           <span className="inline-block animate-pulse rounded-full bg-[#ffe048] px-4 py-1.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_#e08a10]">
@@ -491,11 +646,131 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
 
+      {/* Intro, SNES style: «presenta», the pilots fly in, the logo slams down, press start. */}
+      {phase === 'intro' && (
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={introStep < 3 ? 'Saltar la intro' : 'Empezar'}
+          onPointerDown={advanceIntro}
+          className={`absolute inset-0 z-50 grid cursor-pointer place-items-center overflow-hidden transition-colors duration-700 ${introStep === 0 ? 'bg-[#120c24]' : 'bg-[#120c24]/55'}`}
+        >
+          {introStep === 0 ? (
+            <div className="text-center">
+              <p className="animate-[aparece_1.2s_ease-out] text-sm font-black uppercase tracking-[0.35em] text-[#c9b4ff]">danieleduardo.cl</p>
+              <p className="mt-1 animate-[aparece_1.6s_ease-out] text-lg font-black text-white">presenta</p>
+              <p className="mt-10 animate-pulse text-xs font-black text-[#ffe3a3]">{touchUi ? 'Toca la pantalla' : 'Presiona cualquier tecla'} 🔊</p>
+            </div>
+          ) : (
+            <div className="flex w-full max-w-3xl flex-col items-center px-4 text-center">
+              {/* The squadron flies in from the left… */}
+              <div className="flex items-end justify-center gap-4 sm:gap-8">
+                {PLANES.map((p, i) => (
+                  <div key={p.id} className="intro-vuela flex flex-col items-center" style={{ animationDelay: `${i * 0.25}s` }}>
+                    <img src={thumbs[p.id].pilot} alt="" className="h-12 w-12 rounded-full bg-[#fff8e7] p-1 ring-4 ring-[#f0a45d] sm:h-16 sm:w-16" style={{ imageRendering: 'pixelated' }} />
+                    <img src={thumbs[p.id].plane} alt="" className="mt-1 h-8 w-auto sm:h-12" style={{ imageRendering: 'pixelated' }} />
+                    <span className="mt-1 text-xs font-black text-white drop-shadow sm:text-sm">{p.pilot}</span>
+                  </div>
+                ))}
+              </div>
+              {/* …the logo slams down… */}
+              {introStep >= 2 && (
+                <h1 className="logo-dui intro-golpe mt-4 text-5xl font-black leading-none sm:text-7xl">
+                  ESCUADRÓN
+                  <br />
+                  DUI
+                </h1>
+              )}
+              {/* …the mice come the other way… */}
+              {introStep >= 2 && (
+                <div className="mt-3 flex items-end gap-3">
+                  {ratones.map((src, i) => (
+                    <img key={i} src={src} alt="" className="intro-ratones h-8 w-auto sm:h-10" style={{ imageRendering: 'pixelated', animationDelay: `${i * 0.15}s` }} />
+                  ))}
+                </div>
+              )}
+              {introStep >= 3 && <p className="mt-6 animate-pulse text-xl font-black tracking-widest text-[#ffe048] drop-shadow">{touchUi ? 'TOCA PARA EMPEZAR' : 'PRESIONA START'}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Title menu over the self-playing game. */}
+      {phase === 'titulo' && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#120c24]/50 via-transparent to-[#120c24]/50 p-4">
+          <h1 className="logo-dui text-5xl font-black leading-none sm:text-7xl [@media(max-height:500px)]:text-4xl">
+            ESCUADRÓN DUI
+          </h1>
+          <nav aria-label="Menú principal" className="flex w-full max-w-xs flex-col gap-2.5">
+            {saved && (
+              <button type="button" autoFocus onClick={() => play(true)} className={`${GO} w-full`}>
+                ▶ Continuar · oleada {saved.wave}
+              </button>
+            )}
+            <button type="button" autoFocus={!saved} onClick={() => { sfx.select(); setPhase('menu'); }} className={saved ? `${BTN} h-12 w-full text-base` : `${GO} w-full`}>
+              ✈️ {saved ? 'Nueva partida' : 'Jugar'}
+            </button>
+            <button type="button" onClick={() => { sfx.select(); setPhase('creditos'); }} className={`${BTN} h-12 w-full text-base`}>
+              🎬 Créditos
+            </button>
+            <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} h-12 w-full text-base`}>
+              🏠 Versión clásica del portafolio
+            </button>
+          </nav>
+          <p className="text-xs font-bold text-white/80 drop-shadow">© 2026 {AUTOR} · danieleduardo.cl</p>
+        </div>
+      )}
+
+      {/* Credits: a slow SNES-style roll; every role is the author's. */}
+      {phase === 'creditos' && (
+        <div role="dialog" aria-modal="true" aria-label="Créditos" className="absolute inset-0 z-30 overflow-hidden bg-[#120c24]/85 text-center text-white motion-reduce:overflow-y-auto">
+          <div className="creditos-rueda mx-auto max-w-lg px-6 pb-[60vh] pt-[100vh]">
+            <h2 className="logo-dui text-4xl font-black">ESCUADRÓN DUI</h2>
+            <p className="mt-2 text-sm font-bold text-[#c9b4ff]">un juego de {AUTOR}</p>
+            <dl className="mt-10 space-y-5">
+              {ROLES.map((r) => (
+                <div key={r}>
+                  <dt className="text-xs font-black uppercase tracking-widest text-[#ffe3a3]">{r}</dt>
+                  <dd className="text-lg font-black">{AUTOR}</dd>
+                </div>
+              ))}
+            </dl>
+            <h3 className="mt-14 text-xs font-black uppercase tracking-widest text-[#ffe3a3]">Elenco</h3>
+            <ul className="mt-3 space-y-2">
+              {ELENCO.map(([n, d]) => (
+                <li key={n}>
+                  <span className="font-black">{n}</span> <span className="text-sm text-white/70">· {d}</span>
+                </li>
+              ))}
+            </ul>
+            <h3 className="mt-14 text-xs font-black uppercase tracking-widest text-[#ffe3a3]">Recursos</h3>
+            <p className="mt-3 text-sm text-white/80">
+              Algunos efectos de sonido son grabaciones de dominio público (CC0) de Freesound.org; gracias a {SONIDOS_CC0.join(', ')}.
+              <br />
+              Tipografías Fredoka y Nunito (SIL Open Font License).
+              <br />
+              La música, el arte y todo lo demás: {AUTOR}.
+            </p>
+            <h3 className="mt-14 text-xs font-black uppercase tracking-widest text-[#ffe3a3]">Agradecimientos especiales</h3>
+            <p className="mt-3 text-sm text-white/80">A Dui, Lulu y Almendrita, por inspirar cada vuelo.</p>
+            <p className="mt-16 text-2xl font-black">¡Gracias por jugar!</p>
+            <p className="mt-2 text-sm text-white/70">© 2026 {AUTOR} · danieleduardo.cl</p>
+          </div>
+          <button type="button" autoFocus onClick={() => setPhase('titulo')} className={`${BTN} absolute bottom-5 left-1/2 h-12 -translate-x-1/2`}>
+            ← Volver
+          </button>
+        </div>
+      )}
+
       {/* Menu: the story, the hangar and the controls. */}
       {phase === 'menu' && (
         <div role="dialog" aria-modal="true" aria-label="Hangar" className="absolute inset-0 z-30 grid place-items-center overflow-y-auto p-4 pt-20 [@media(max-height:500px)]:pt-14 [@media(max-height:500px)]:pb-2">
           <div className="w-full max-w-2xl rounded-[2rem] bg-[#fff8e7]/95 p-5 md:p-7 [@media(max-height:500px)]:p-3 shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
-            <h1 className="text-center text-3xl md:text-4xl font-black text-[#e8742a] [@media(max-height:500px)]:text-2xl">Escuadrón Dui</h1>
+            <div className="flex items-center justify-between gap-2">
+              <button type="button" onClick={() => setPhase('titulo')} className={`${BTN} h-9`}>← Volver</button>
+              <h1 className="text-center text-3xl md:text-4xl font-black text-[#e8742a] [@media(max-height:500px)]:text-2xl">Escuadrón Dui</h1>
+              <span className="w-20" />
+            </div>
             <p className="mx-auto mt-2 max-w-lg text-center text-[15px] font-bold leading-snug [@media(max-height:500px)]:hidden">
               Los ratones quieren llevarse el pescado de la despensa. Dui, Lulu y Almendrita despegan para detenerlos: esquiva sus misiles y frena sus vehículos antes de que lleguen.
             </p>
@@ -598,6 +873,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <button type="button" autoFocus onClick={togglePause} className={GO}>Seguir</button>
               <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Salir al hangar</button>
             </div>
+            <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 text-sm font-black text-[#6b4f3a]">
+              <input type="checkbox" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="h-5 w-5 accent-[#f0a45d]" />
+              Menos movimiento (sin sacudidas ni destellos fuertes)
+            </label>
           </div>
         </div>
       )}
