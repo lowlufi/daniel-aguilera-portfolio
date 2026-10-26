@@ -17,7 +17,7 @@ export type ModeloBase = 'avioneta' | 'caza' | 'bombardero';
 /** Every plane in the hangar: the home ones plus the iconic jets and the saucer. */
 export type ModeloAvion = ModeloBase | 'raptor' | 'sukhoi' | 'b2' | 'ovni';
 /** Bomb loads: plain, cluster, white phosphorus, gas, and the saucer's plasma charge. */
-export type BombaTipo = 'comun' | 'racimo' | 'fosforo' | 'gas' | 'plasma';
+export type BombaTipo = 'comun' | 'racimo' | 'fosforo' | 'gas' | 'plasma' | 'guiada' | 'rebote' | 'crio' | 'emp' | 'termobarica';
 
 /**
  * Stick input. x: -1 left … +1 right, y: -1 down … +1 up, in SCREEN

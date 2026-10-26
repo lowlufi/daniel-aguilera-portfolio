@@ -118,7 +118,7 @@ export const HANGAR: PlaneSpec[] = [
   {
     id: 'raptor', pilot: '', name: 'Raptor', real: 'F-22 Raptor',
     blurb: 'Caza furtivo: los radares casi no lo ven. Supercrucero y toberas vectoriales.',
-    parts: ['cola', 'ala', 'motor'], hp: 4, rack: 4, bombRack: 2, flareRack: 4, reload: 0.8, bombCd: 0.8, bombs: 1, hit: 6,
+    parts: ['cola', 'ala', 'motor'], hp: 4, rack: 4, bombRack: 2, flareRack: 3, reload: 0.8, bombCd: 0.8, bombs: 1, hit: 6,
     stats: { velocidad: 5, blindaje: 3, misiles: 5, bombas: 2 },
     kit: {
       misil: {
@@ -126,7 +126,7 @@ export const HANGAR: PlaneSpec[] = [
         energia: 4.5, dano: 2.8, cadencia: 0.2, look: { cuerpo: '#f0f0f4', punta: '#8a8a9a', aletas: '#5a5a6a', largo: 13 }, sonido: 'misil',
       },
       metralla: { nombre: 'M61 Vulcan 20 mm', vel: 780, cad: 0.045, dano: 0.8, calor: 0.03, gravedad: 0.05, color: 'blanco', sonido: 'vulcan' },
-      bengala: { nombre: 'Bengalas MJU-10', tipo: 'magnesio', n: 4, intentos: 1 },
+      bengala: { nombre: 'Bengalas MJU-10', tipo: 'magnesio', n: 3, intentos: 1 },
     },
     bomba: 'racimo', sigilo: 0.4,
     desbloqueo: { tipo: 'oleada', n: 2, texto: 'Llega a la oleada 2' },
@@ -134,7 +134,7 @@ export const HANGAR: PlaneSpec[] = [
   {
     id: 'sukhoi', pilot: '', name: 'Sukhoi', real: 'Su-57',
     blurb: 'Supermaniobrable: gira en un pañuelo. Cañón de 30 mm que pega fuerte.',
-    parts: ['cola', 'ala', 'motor', 'cabina'], hp: 5, rack: 4, bombRack: 2, flareRack: 4, reload: 0.85, bombCd: 0.8, bombs: 1, hit: 6,
+    parts: ['cola', 'ala', 'motor', 'cabina'], hp: 5, rack: 4, bombRack: 2, flareRack: 3, reload: 0.85, bombCd: 0.8, bombs: 1, hit: 6,
     stats: { velocidad: 5, blindaje: 3, misiles: 4, bombas: 3 },
     kit: {
       misil: {
@@ -142,7 +142,7 @@ export const HANGAR: PlaneSpec[] = [
         energia: 4, dano: 2.6, cadencia: 0.2, look: { cuerpo: '#d8dcc8', punta: '#3a4a3a', aletas: '#6a7a5a', largo: 11 }, sonido: 'misil',
       },
       metralla: { nombre: 'Cañón GSh-30 30 mm', vel: 640, cad: 0.11, dano: 2.2, calor: 0.06, gravedad: 0.07, color: 'oro', sonido: 'canon30' },
-      bengala: { nombre: 'Trampas térmicas', tipo: 'trampa', n: 5, intentos: 1 },
+      bengala: { nombre: 'Trampas térmicas', tipo: 'trampa', n: 3, intentos: 1 },
     },
     bomba: 'fosforo', sigilo: 0.2,
     desbloqueo: { tipo: 'oleada', n: 3, texto: 'Llega a la oleada 3' },
@@ -150,7 +150,7 @@ export const HANGAR: PlaneSpec[] = [
   {
     id: 'b2', pilot: '', name: 'Spirit', real: 'B-2 Spirit',
     blurb: 'Ala volante furtiva: bodega enorme y misiles crucero. Sin metralla.',
-    parts: ['ala', 'motor', 'cabina', 'bodega'], hp: 7, rack: 2, bombRack: 5, flareRack: 4, reload: 1.6, bombCd: 1, bombs: 4, hit: 10,
+    parts: ['ala', 'motor', 'cabina', 'bodega'], hp: 7, rack: 2, bombRack: 5, flareRack: 3, reload: 1.6, bombCd: 1, bombs: 4, hit: 10,
     stats: { velocidad: 2, blindaje: 5, misiles: 3, bombas: 5 },
     kit: {
       misil: {
@@ -158,7 +158,7 @@ export const HANGAR: PlaneSpec[] = [
         energia: 10, dano: 5, cadencia: 0.5, look: { cuerpo: '#4a4a56', punta: '#2a2a32', aletas: '#6a6a7a', largo: 15 }, sonido: 'crucero',
       },
       metralla: null,
-      bengala: { nombre: 'Chaff (dipolos)', tipo: 'chaff', n: 4, intentos: 2 },
+      bengala: { nombre: 'Chaff (dipolos)', tipo: 'chaff', n: 3, intentos: 2 },
     },
     bomba: 'racimo', sigilo: 0.6,
     desbloqueo: { tipo: 'oleada', n: 5, texto: 'Llega a la oleada 5' },
@@ -166,7 +166,7 @@ export const HANGAR: PlaneSpec[] = [
   {
     id: 'ovni', pilot: '', name: 'Platillo', real: 'OVNI',
     blurb: 'Tecnología de otro mundo: rayo láser, orbes de plasma y hologramas.',
-    parts: ['cabina', 'motor', 'ala'], hp: 5, rack: 3, bombRack: 3, flareRack: 4, reload: 0.9, bombCd: 0.9, bombs: 1, hit: 7,
+    parts: ['cabina', 'motor', 'ala'], hp: 5, rack: 3, bombRack: 3, flareRack: 3, reload: 0.9, bombCd: 0.9, bombs: 1, hit: 7,
     stats: { velocidad: 4, blindaje: 4, misiles: 5, bombas: 4 },
     kit: {
       misil: {
@@ -174,7 +174,7 @@ export const HANGAR: PlaneSpec[] = [
         energia: 5, dano: 3, cadencia: 0.25, look: 'orbe', sonido: 'orbe',
       },
       metralla: { nombre: 'Rayo láser', vel: 1300, cad: 0.07, dano: 0.9, calor: 0.05, gravedad: 0, color: 'laser', sonido: 'laser' },
-      bengala: { nombre: 'Hologramas', tipo: 'holograma', n: 2, intentos: 3 },
+      bengala: { nombre: 'Hologramas', tipo: 'holograma', n: 3, intentos: 3 },
     },
     bomba: 'plasma', sigilo: 0.3,
     desbloqueo: { tipo: 'ovnis', n: 3, texto: 'Derriba 3 ovnis' },
@@ -193,6 +193,11 @@ export const BOMBAS: Record<BombaTipo, BombaInfo> = {
   fosforo: { nombre: 'Fósforo blanco', texto: 'Deja el suelo ardiendo unos segundos.', desbloqueo: { tipo: 'oleada', n: 3, texto: 'Llega a la oleada 3' } },
   gas: { nombre: 'Gas', texto: 'Una nube verde que se mueve con el viento y daña lo que toca.', desbloqueo: { tipo: 'oleada', n: 4, texto: 'Llega a la oleada 4' } },
   plasma: { nombre: 'Plasma', texto: 'La carga del platillo: un estallido violeta enorme.', soloOvni: true },
+  guiada: { nombre: 'Guiada láser', texto: 'Corrige su caída hacia el enemigo más cercano.', desbloqueo: { tipo: 'oleada', n: 2, texto: 'Llega a la oleada 2' } },
+  rebote: { nombre: 'De rebote', texto: 'Rebota hasta tres veces (¡sobre el agua también!) antes de estallar.', desbloqueo: { tipo: 'oleada', n: 3, texto: 'Llega a la oleada 3' } },
+  crio: { nombre: 'Criogénica', texto: 'Congela los vehículos cercanos: se quedan quietos y sin disparar.', desbloqueo: { tipo: 'oleada', n: 4, texto: 'Llega a la oleada 4' } },
+  emp: { nombre: 'Pulso EMP', texto: 'Apaga misiles enemigos y deja mudas las baterías un rato.', desbloqueo: { tipo: 'oleada', n: 5, texto: 'Llega a la oleada 5' } },
+  termobarica: { nombre: 'Termobárica', texto: 'Una bola de fuego que chupa el aire y estalla dos veces.', desbloqueo: { tipo: 'oleada', n: 6, texto: 'Llega a la oleada 6' } },
 };
 export const TIPOS_BOMBA = Object.keys(BOMBAS) as BombaTipo[];
 

@@ -24,7 +24,7 @@ function h01(a: number, b: number) {
 /* ── Bombs ───────────────────────────────────────────────────────────────── */
 
 /** Sprites for the non-plain bombs, nose to +x, centred. */
-const BOMB_SPRITE: Record<'racimo' | 'fosforo' | 'gas', () => HTMLCanvasElement> = {
+const BOMB_SPRITE: Record<Exclude<BombaTipo, 'comun' | 'plasma'>, () => HTMLCanvasElement> = {
   // Fat cluster canister with yellow bands and a box tail.
   racimo: () => D.outlined('bomba|racimo', '#2e3a1e', 20, 12, 10, 6, (g) => {
     D.oval(g, 1, 0, 6, 4, '#4a5a2a');
@@ -57,6 +57,49 @@ const BOMB_SPRITE: Record<'racimo' | 'fosforo' | 'gas', () => HTMLCanvasElement>
     }
     R(g, -8, -4, 2, 9, '#2a5a34');
     R(g, -7, -3, 1, 7, '#5aa45a');
+  }),
+  // Slim grey glide bomb with a seeker eye in the nose and long fins.
+  guiada: () => D.outlined('bomba|guiada', '#3a3a4a', 20, 12, 10, 6, (g) => {
+    D.oval(g, 0, 0, 7, 2, '#8a8a9a');
+    D.oval(g, 0, -1, 6, 1, '#b4b4c4');
+    D.disc(g, 6, 0, 2, '#3a3a4a');
+    R(g, 6, -1, 1, 1, '#ff4a5a');
+    R(g, -2, -4, 3, 2, '#6a6a7a');
+    R(g, -2, 3, 3, 2, '#6a6a7a');
+    R(g, -9, -3, 3, 7, '#5a5a6a');
+  }),
+  // A round drum, like the old bouncing mines, painted with a stripe.
+  rebote: () => D.outlined('bomba|rebote', '#3a2a1a', 14, 14, 7, 7, (g) => {
+    D.disc(g, 0, 0, 5, '#7a5a3a');
+    D.disc(g, -1, -1, 3, '#a87a4a');
+    R(g, -5, -1, 11, 2, P.gold);
+    R(g, -1, -1, 2, 2, '#3a2a1a');
+  }),
+  // Pale-blue cryo canister with frost and a snowflake.
+  crio: () => D.outlined('bomba|crio', '#2a4a7a', 18, 12, 9, 6, (g) => {
+    D.oval(g, 0, 0, 6, 3, '#7ab8e8');
+    D.oval(g, 0, -1, 5, 2, '#bfe8ff');
+    R(g, -1, -2, 1, 5, P.white);
+    R(g, -3, 0, 5, 1, P.white);
+    R(g, -2, -1, 3, 3, '#e6f6ff');
+    R(g, 5, -1, 2, 2, '#4a8ad8');
+    R(g, -8, -3, 2, 7, '#4a6a9a');
+  }),
+  // Black EMP shell with a glowing cyan coil.
+  emp: () => D.outlined('bomba|emp', '#1a1a2a', 18, 12, 9, 6, (g) => {
+    D.oval(g, 0, 0, 6, 3, '#2a2a3a');
+    D.oval(g, 0, -1, 5, 2, '#4a4a5a');
+    for (let i = -3; i <= 3; i += 2) R(g, i, -3, 1, 7, '#7af0ff');
+    R(g, 5, -1, 2, 2, '#ffd84a');
+    R(g, -8, -3, 2, 7, '#3a3a4a');
+  }),
+  // Fat orange thermobaric bomb with a black band.
+  termobarica: () => D.outlined('bomba|termobarica', '#5a2a1a', 20, 14, 10, 7, (g) => {
+    D.oval(g, 0, 0, 7, 4, '#e86a2a');
+    D.oval(g, 0, -1, 6, 3, '#ff9a4a');
+    R(g, -1, -4, 2, 9, '#2a1a1a');
+    R(g, 3, -2, 2, 1, '#ffe48a');
+    R(g, -9, -4, 3, 9, '#7a3a1a');
   }),
 };
 

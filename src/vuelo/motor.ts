@@ -171,12 +171,17 @@ const CAP_MAX: Record<Arma, number> = { misil: 8, bomba: 6, bengala: 6 };
 const PRIZE_NAME: Record<Arma, string> = { misil: 'misil', bomba: 'bomba', bengala: 'bengala' };
 const BOMB_RELOAD = 2.2;
 /** Special upgrades from a downed fighter's golden balloon. */
-type Mejora = 'doble' | 'escudo' | 'cohetes' | 'chorrillana';
+type Mejora = 'doble' | 'escudo' | 'cohetes' | 'chorrillana' | 'bombas' | 'bengalas' | 'furia' | 'iman' | 'lluvia';
 const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
   doble: { nombre: 'Metralla doble sin calentarse', t: 20 },
   escudo: { nombre: 'Escudo de burbuja', t: 10 },
   cohetes: { nombre: 'Misiles sin fin', t: 15 },
   chorrillana: { nombre: 'Chorrillana: misil triple', t: 10 },
+  bombas: { nombre: 'Bombas ilimitadas', t: 15 },
+  bengalas: { nombre: 'Bengalas sin fin', t: 15 },
+  furia: { nombre: 'Furia: daño doble', t: 15 },
+  iman: { nombre: 'Imán de premios', t: 20 },
+  lluvia: { nombre: 'Lluvia de bombas: ×3', t: 12 },
 };
 /** Super nitro: how long it burns, its push, and the recharge time. */
 const NITRO_T = 3;
@@ -399,9 +404,9 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   sigilo?: boolean;
 };
 /** A falling bomb of the player's, with its load; bomblets are the cluster's children. */
-type BombaJ = Bomba & { tipo: BombaTipo; sub?: boolean };
+type BombaJ = Bomba & { tipo: BombaTipo; sub?: boolean; rebotes?: number };
 /** Burning phosphorus on the ground or a drifting gas cloud: hurts what's inside for a while. */
-type Zona = { tipo: 'fuego' | 'gas'; x: number; y: number; r: number; t: number; vida: number; tick: number };
+type Zona = { tipo: 'fuego' | 'gas' | 'hielo' | 'emp'; x: number; y: number; r: number; t: number; vida: number; tick: number };
 type Bala = Cuerpo & { life: number; d: number; g: number; c: HG.KitMetralla['color'] };
 let shotIds = 0;
 
@@ -1376,7 +1381,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const imp = ex.impulso(d);
       if (imp > 0.5) FA.empujeVehiculo(c, ((c.mid.x - x) / (d || 1)) * imp, ((c.mid.y - y) / (d || 1)) * imp + imp * 0.5);
       if (from === 'jugador') {
-        const dmg = damage * ex.dano(d);
+        let dmg = damage * ex.dano(d);
+        if (c.kind === 'portaaviones') {
+          // A huge hull: measure to its nearest plate, not its middle, and bombs (big
+          // blasts) hit it extra hard — the deck and the hangar below are its weak spot.
+          const look = A.VEH_LOOK[c.kind];
+          const hx = Math.max(0, Math.abs(x - c.x) - look.w / 2);
+          const hy = y < c.y ? c.y - y : Math.max(0, y - (c.y + look.h));
+          dmg = damage * ex.dano(Math.hypot(hx, hy)) * (energy >= 5 ? 2.2 : 1);
+        }
         if (dmg >= 0.25) hurtCar(c, dmg);
       }
     }
@@ -1443,7 +1456,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
   }
   /** Damage multiplier from the «daño» upgrade. */
-  const danoMul = () => 1.35 * (1 + 0.15 * s.niv.dano);
+  const danoMul = () => 1.35 * (1 + 0.15 * s.niv.dano) * (s.boost === 'furia' ? 2 : 1);
   /** Most slots a weapon can have: the base cap plus the «munición» upgrade. */
   const capMax = (k: Arma) => CAP_MAX[k] + s.niv.municion;
   /** Something new in the hangar: a cheer, and the names go on the wave card. */
@@ -1989,7 +2002,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       AB.nuclearRecogida();
     } else if (kind === 'especial') {
       // A special upgrade at random (or a full nitro).
-      const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'chorrillana', 'nitro'];
+      const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'chorrillana', 'bombas', 'bengalas', 'furia', 'iman', 'lluvia', 'nitro'];
       const pick = opts[Math.floor(Math.random() * opts.length)];
       if (pick === 'nitro') {
         s.nitroCd = 0;
@@ -2143,6 +2156,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     L.luz(s.luces, p.x + Math.cos(p.rumbo) * nose, p.y + Math.sin(p.rumbo) * nose, 6, gk.color === 'laser' ? '#7af0ff' : '#ffe48a', 0.04);
   }
 
+  /** «Imán de premios»: balloons and crates drift to the plane. */
+  function atraer(o: { x: number; y: number }, dt: number) {
+    const p = s.plane;
+    const dx = p.x - o.x, dy = p.y - o.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 320 || d < 1) return;
+    const v = Math.min(d, 160 * dt);
+    o.x += (dx / d) * v;
+    o.y += (dy / d) * v;
+  }
+
   /** A bomb reaching its target, by load. */
   function impactoBomba(b: BombaJ) {
     const x = b.x, y = Math.max(b.y, ground(b.x));
@@ -2163,7 +2187,66 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       blast(x, y, 34, 'jugador', 6);
       L.luz(s.luces, x, y, 60, '#c89aff', 0.5);
       if (!s.attract) AB.plasmaBomba(pan);
+    } else if (b.tipo === 'termobarica') {
+      // First the fuel cloud's blast, then the air rushing back in pulls everything to the middle and goes off again.
+      blast(x, y, 30, 'jugador', 4.5);
+      for (const c of s.cars) {
+        const d = c.mid.x - x;
+        if (Math.abs(d) < 140) FA.empujeVehiculo(c, -Math.sign(d) * 90, 30);
+      }
+      L.luz(s.luces, x, y, 70, '#ff9a3c', 0.6);
+      later(() => blast(x, y + 8, 14, 'jugador', 3), 280);
+    } else if (b.tipo === 'crio') {
+      // Barely a pop: it's the cold that does the work.
+      blast(x, y, 1.5, 'jugador', 0.1);
+      for (const c of s.cars) if (Math.hypot(c.mid.x - x, c.mid.y - y) < 95 && !isBoss(c.kind)) c.mem.hielo = 5;
+      for (const c of s.cars) if (isBoss(c.kind) && Math.hypot(c.mid.x - x, c.mid.y - y) < 120) c.mem.hielo = 1.5;
+      s.zonas.push({ tipo: 'hielo', x, y: ground(x), r: 80, t: 0, vida: 5, tick: 0 });
+      if (!s.attract) AB.congelado();
+    } else if (b.tipo === 'emp') {
+      blast(x, y, 3, 'jugador', 0.6);
+      const R2 = 200;
+      for (const c of s.cars) if (Math.hypot(c.mid.x - x, c.mid.y - y) < R2) {
+        c.mem.emp = 6;
+        c.fireT = Math.max(c.fireT, 6);
+      }
+      for (const f of s.fighters) if (Math.hypot(f.a.x - x, f.a.y - y) < R2) {
+        f.gunCd += 4;
+        f.misilCd += 6;
+      }
+      let n = 0;
+      for (const sh of s.shots) {
+        if (!sh.enemy || sh.m.t < 0 || Math.hypot(sh.m.x - x, sh.m.y - y) > R2 * 1.4) continue;
+        sh.m.guiado = false;
+        sh.m.combustible = 0;
+        sh.tgt = null;
+        n++;
+      }
+      if (n) pop(x, y + 30, n > 1 ? `⚡ ¡${n} misiles apagados!` : '⚡ ¡Misil apagado!', '#7af0ff');
+      s.zonas.push({ tipo: 'emp', x, y, r: R2, t: 0, vida: 0.7, tick: 0 });
+      L.luz(s.luces, x, y, 80, '#7af0ff', 0.4);
+      if (!s.attract) AB.rayoOvni();
     } else blast(x, y, FA.ENERGIA.bombaJugador, 'jugador', 4);
+  }
+
+  /** Steers a guided bomb: it can't climb, only glide sideways towards a target below. */
+  function guiarBomba(b: BombaJ, dt: number) {
+    let best: { x: number; y: number } | null = null, bd = 260;
+    const pick = (x: number, y: number) => {
+      const d = Math.abs(x - b.x);
+      if (d < bd && y < b.y) {
+        bd = d;
+        best = { x, y };
+      }
+    };
+    for (const c of s.cars) pick(c.mid.x, c.mid.y);
+    for (const u of s.gigantes) if (u.viva) pick(u.x, ground(u.x));
+    if (!best) return;
+    const tgt = best as { x: number; y: number };
+    const tiempo = Math.max(0.25, (b.y - tgt.y) / Math.max(40, -b.vy));
+    const quiere = (tgt.x - b.x) / tiempo;
+    b.vx += clamp(quiere - b.vx, -240 * dt, 240 * dt);
+    if (Math.random() < dt * 20) L.luz(s.luces, b.x, b.y, 4, '#ff4a5a', 0.05);
   }
 
   /** Phosphorus fires and gas clouds: damage over time to what's inside. */
@@ -2177,6 +2260,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         z.y = Math.max(ground(z.x) + 18, z.y + 3 * dt);
         z.r = Math.min(95, z.r + 14 * dt);
       } else if (Math.random() < dt * 14) puff(z.x + rand(-z.r, z.r), z.y + rand(4, 14), 1, false, 0.9, rand(-8, 8), rand(20, 45));
+      if (z.tipo === 'hielo' || z.tipo === 'emp') continue;
       z.tick -= dt;
       if (z.tick > 0) continue;
       z.tick = 0.25;
@@ -2310,8 +2394,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     if (input.bomb && s.bombT <= 0 && s.bombAmmo >= 1) {
       s.bombAmmo--;
-      for (let i = 0; i < s.spec.bombs; i++) s.bombs.push({ ...FA.soltarBomba(p, i), tipo: s.bomba });
-      s.bombT = s.spec.bombCd;
+      for (let i = 0; i < s.spec.bombs; i++) {
+        s.bombs.push({ ...FA.soltarBomba(p, i), tipo: s.bomba });
+        // «Lluvia de bombas»: two more fanned out either side of each one.
+        if (s.boost === 'lluvia') for (const dv of [-35, 35]) {
+          const b = FA.soltarBomba(p, i);
+          b.vx += dv;
+          s.bombs.push({ ...b, tipo: s.bomba });
+        }
+      }
+      s.bombT = s.spec.bombCd * (s.boost === 'bombas' ? 0.5 : 1);
       fx('bomba', sfx.bomb, { vol: 0.5 });
     }
     if (input.flare && !s.flareWasDown && s.flares > 0 && s.flareCd <= 0) {
@@ -2708,6 +2800,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (s.boostT > 0) {
         s.boostT -= dt;
         if (s.boost === 'cohetes') s.ammo = s.cap.misil;
+        if (s.boost === 'bombas') s.bombAmmo = s.cap.bomba;
+        if (s.boost === 'bengalas') s.flares = s.cap.bengala;
         if (s.boostT <= 0) s.boost = '';
       }
       if (s.ammo < s.cap.misil) {
@@ -2926,7 +3020,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const look = A.VEH_LOOK[c.kind];
       const order = IA.pensar(c, vista, c.mem);
       const x0 = c.x;
-      FA.pasoVehiculo(c, c.mem.puente > 0 ? 0 : order.velocidad * speedUp, dt, ground, look.w);
+      const helado = c.mem.hielo > 0;
+      if (helado) c.mem.hielo -= dt;
+      if (c.mem.emp > 0) {
+        c.mem.emp -= dt;
+        if (Math.random() < dt * 6) VFX.chispazo(s.fx, c.mid.x + rand(-8, 8), c.mid.y + rand(0, 8), 0, 40, still || s.calma);
+      }
+      if (helado) c.vx *= Math.max(0, 1 - dt * 8);
+      FA.pasoVehiculo(c, c.mem.puente > 0 || helado ? 0 : order.velocidad * speedUp, dt, ground, look.w);
       c.wheel += Math.abs(c.x - x0);
       // Stuck in broken ground: the mice get out and build a plank bridge
       // across it (if there's no crater to bridge, they just bounce out).
@@ -2982,7 +3083,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const onScreen = c.x > s.camX - 10 && c.x < s.camX + view.vw + 10 && c.y > s.camY - A.DIRT - 20;
       if (s.mode === 'play' && !s.dead && onScreen) {
         c.fireT -= dt;
-        if (salvo.has(c.id) || (order.disparar && c.fireT <= 0)) {
+        if (c.mem.hielo > 0 || c.mem.emp > 0) c.fireT = Math.max(c.fireT, 0.3);
+        else if (salvo.has(c.id) || (order.disparar && c.fireT <= 0)) {
           carFires(c);
           c.fireT = Math.max(0.6, spec.cd * 0.8 * (1 - (s.wave - 1) * 0.04)) * rand(0.7, 1.2) * (order.cadencia ?? 1) * (1 + 0.33 * s.ayuda);
         }
@@ -3369,10 +3471,22 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (!s.attract) AB.racimo(panOf(b.x), 7);
         continue;
       }
+      // A laser-guided bomb nudges its fall towards the nearest ground target ahead.
+      if (b.tipo === 'guiada') guiarBomba(b, dt);
       let hit = b.y <= ground(b.x);
       for (const c of s.cars) {
         const look = A.VEH_LOOK[c.kind];
         if (Math.abs(b.x - c.x) < look.w / 2 && b.y < c.y + look.h && b.y > c.y) hit = true;
+      }
+      // The bouncing bomb skips off the ground or the sea up to three times.
+      if (b.tipo === 'rebote' && b.y <= ground(b.x) && (b.rebotes ?? 0) < 3 && !s.cars.some((c) => Math.abs(b.x - c.x) < A.VEH_LOOK[c.kind].w / 2)) {
+        b.rebotes = (b.rebotes ?? 0) + 1;
+        b.y = ground(b.x) + 1;
+        b.vy = Math.abs(b.vy) * 0.55 + 25;
+        b.vx *= 0.85;
+        if (sobreMar(b.x)) chapoteo(b.x, 0.8);
+        else puff(b.x, b.y, 2, false, 0.6);
+        continue;
       }
       if (s.jefe && JF.tocado(s.jefe, b.x, b.y, 2)) hit = true;
       // Bombs also catch enemy missiles on their way down.
@@ -3463,8 +3577,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
 
+    const iman = s.boost === 'iman' && s.mode === 'play' && !s.dead;
     for (const q of s.prizes) {
       q.t += dt;
+      if (iman) atraer(q, dt);
       // Loose balloons never vanish: they rise (faster in thin air) until the cold
       // up high frosts them over, freezes them in place and they burst.
       const frio = q.y > FRIO_DESDE;
@@ -3495,6 +3611,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.prizes = s.prizes.filter((q) => q.t < 99);
     for (const c of s.crates) {
       c.t += dt;
+      if (iman) atraer(c, dt);
       if (c.landed) c.landed += dt;
       else if (c.vy > 0) {
         c.vy -= FA.GRAVEDAD * dt;
@@ -3701,6 +3818,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const x = sx(c.x);
       if (x < -40 || x > vw + 40) continue;
       A.drawVehicle(g, c.kind, x, sy(c.y + c.suspension), -c.angulo, c.wheel, c.aim, s.t, c.flash > 0);
+      if (c.mem.hielo > 0) {
+        // Iced over: a pale blue glaze and a few icicles.
+        const lk = A.VEH_LOOK[c.kind];
+        const top = sy(c.y + c.suspension + lk.h);
+        g.globalAlpha = 0.45 * Math.min(1, c.mem.hielo);
+        A.R(g, Math.round(x - lk.w / 2), top, lk.w, lk.h, '#bfe8ff');
+        g.globalAlpha = 1;
+        for (let i = -lk.w / 2 + 2; i < lk.w / 2; i += 5) A.R(g, Math.round(x + i), sy(c.y + c.suspension) - 1, 1, 2 + (Math.abs(i) % 2), '#e6f6ff');
+      }
       const life = c.hp / (isBoss(c.kind) ? s.bossMax : VEH[c.kind].hp);
       if (life < 0.99) A.scorchMarks(g, c.kind, x, sy(c.y + c.suspension), c.id, 1 - life, s.t);
     }
@@ -3759,7 +3885,27 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const z of s.zonas) {
       const k = Math.min(1, z.t / 0.4) * Math.min(1, (z.vida - z.t) / 1.2);
       if (z.tipo === 'fuego') AD.drawFuego(g, sx(z.x), sy(z.y), z.r * 2, s.t, k);
-      else AD.drawGas(g, sx(z.x), sy(z.y), z.r, s.t, k);
+      else if (z.tipo === 'gas') AD.drawGas(g, sx(z.x), sy(z.y), z.r, s.t, k);
+      else if (z.tipo === 'hielo') {
+        // Frost spread on the ground: pale crystals glinting.
+        g.globalAlpha = 0.75 * k;
+        for (let i = -z.r; i <= z.r; i += 3) {
+          const hgt = 1 + ((i * 7 + 13) & 3);
+          A.R(g, sx(z.x + i), sy(ground(z.x + i)) - hgt, 2, hgt, i % 2 ? '#bfe8ff' : '#e6f6ff');
+          if (((i * 13) & 7) === 0 && Math.floor(s.t * 4 + i) % 3 === 0) A.R(g, sx(z.x + i), sy(ground(z.x + i)) - hgt - 2, 1, 1, P.white);
+        }
+        g.globalAlpha = 1;
+      } else {
+        // The EMP: a cyan ring racing out, crackling.
+        const rr = z.r * Math.min(1, z.t / z.vida);
+        g.globalAlpha = 0.8 * (1 - z.t / z.vida);
+        for (let a = 0; a < 40; a++) {
+          const an = (a / 40) * Math.PI * 2;
+          const j = (a + Math.floor(s.t * 30)) % 3;
+          A.R(g, Math.round(sx(z.x) + Math.cos(an) * rr), Math.round(sy(z.y) + Math.sin(an) * rr * 0.9) + j - 1, 2, 2, j ? '#7af0ff' : P.white);
+        }
+        g.globalAlpha = 1;
+      }
     }
     for (const f of s.flareBodies) AD.drawBengalaTipo(g, f.tipo, sx(f.x), sy(f.y), s.t + f.t);
     for (const b of s.bombs) {
