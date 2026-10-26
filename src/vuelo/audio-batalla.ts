@@ -66,9 +66,9 @@ let vivos = 0; // nodos creados por este módulo que siguen conectados
 const LIMITE = 50; // tope para efectos sueltos de baja prioridad (incluye los 10 nodos fijos del bus)
 const LIMITE_AMB = 44; // los adornos de ambiente (pájaros, hielo, estrellas) ceden antes
 
-function salida(): Mezcla | null {
-  // The self-playing game behind the title menu stays silent.
-  if (juegoCallado()) return null;
+function salida(ui = false): Mezcla | null {
+  // The self-playing game behind the title menu stays silent (menus/UI don't).
+  if (!ui && juegoCallado()) return null;
   const o = inyectado ?? sampleOut();
   if (!o) return null;
   if (!inyectado && o.ctx.state !== 'running') return null;
@@ -380,7 +380,9 @@ type Nombre =
   | 'tk' | 'tk2' | 'tk-sordo' | 'siseo' | 'nitro' | 'nitro-fin' | 'mejora' | 'fanfarria'
   | 'gaviota' | 'ola' | 'chapuzon' | 'bocina' | 'caza'
   | 'nuclear' | 'trueno-cerca' | 'trueno-lejos' | 'chispa' | 'lluvia' | 'escarcha' | 'hielo-alerta' | 'congelado' | 'deshielo'
-  | 'mision' | 'uf' | 'vida' | 'nuke-recoge' | 'bumeran' | 'pista' | 'oleada';
+  | 'mision' | 'uf' | 'vida' | 'nuke-recoge' | 'bumeran' | 'pista' | 'oleada'
+  | 'vulcan' | 'canon30' | 'laser' | 'orbe' | 'crucero' | 'fosforo' | 'gas' | 'plasma-bomba' | 'chaff' | 'holograma' | 'trampa'
+  | 'hangar-sel' | 'hangar-bloq' | 'desbloqueo';
 
 const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
@@ -504,6 +506,20 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   bumeran: hornoBumeran,
   pista: hornoPista,
   oleada: hornoOleada,
+  vulcan: hornoVulcan,
+  canon30: hornoCanon30,
+  laser: hornoLaser,
+  orbe: hornoOrbe,
+  crucero: hornoCrucero,
+  fosforo: hornoFosforo,
+  gas: hornoGas,
+  'plasma-bomba': hornoPlasmaBomba,
+  chaff: hornoChaff,
+  holograma: hornoHolograma,
+  trampa: hornoTrampa,
+  'hangar-sel': hornoHangarSel,
+  'hangar-bloq': hornoHangarBloq,
+  desbloqueo: hornoDesbloqueo,
 };
 
 function pieza(sr: number, vidrio: boolean) {
@@ -1431,6 +1447,314 @@ function hornoOleada(sr: number) {
   return normalizaEst([L, R], 0.88);
 }
 
+/* ── hornos de armas por avión, bombas especiales y hangar ── */
+
+/**
+ * Cañón rotatorio (F-22, M61): cinco tiros a ~105 por segundo en 45 ms, así
+ * una llamada cada 45 ms empalma un «brrrt» continuo. Cada tiro es un clic
+ * muy corto + un golpe grave de 4 ms: el zumbido sale del ritmo, no de un tono.
+ */
+function hornoVulcan(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.1));
+  const pulsos = new Float32Array(a.length);
+  for (let k = 0; k < 5; k++) {
+    const i0 = Math.max(0, Math.floor((k * 0.009 + rand(0, 0.0008)) * sr));
+    const amp = rand(0.72, 1);
+    let f = 0;
+    for (let j = 0; i0 + j < a.length && j < 0.03 * sr; j++) {
+      const t = j / sr;
+      f += (95 + 160 * Math.exp(-t / 0.004)) / sr;
+      pulsos[i0 + j] += (ruido() * Math.exp(-t / 0.0012) * 0.9 + Math.sin(TAU * f) * Math.exp(-t / 0.009) * 0.8) * Math.min(1, t / 0.0005) * amp;
+    }
+  }
+  const hp = new Bq(sr, 'hp', 1800, 0.7);
+  const bp = new Bq(sr, 'bp', 1400, 1.1);
+  const lp = new Bq(sr, 'lp', 6000, 0.7);
+  for (let i = 0; i < a.length; i++) {
+    const x = pulsos[i];
+    a[i] = lp.run(Math.tanh((hp.run(x) * 0.8 + bp.run(x) * 2.2 + x * 0.5) * 1.4));
+  }
+  return normaliza(a, 0.9);
+}
+
+/** Cañón de 30 mm (Su-57): estampido grave y largo, boca más oscura y el «clac» del cierre. */
+function hornoCanon30(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.26));
+  const hp = new Bq(sr, 'hp', 900, 0.7);
+  const bp = new Bq(sr, 'bp', rand(1000, 1300), 1.2);
+  const lp = new Bq(sr, 'lp', 5000, 0.7);
+  let f = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const click = hp.run(ruido()) * Math.exp(-t / 0.002);
+    const boca = bp.run(ruido()) * Math.exp(-t / 0.02) * 2.2;
+    f += (55 + 140 * Math.exp(-t / 0.012)) / sr;
+    const cuerpo = Math.sin(TAU * f) * Math.exp(-t / 0.06) * Math.min(1, t / 0.001);
+    a[i] = lp.run(Math.tanh((click + boca + cuerpo * 1.4) * 1.7));
+  }
+  ping(sr, a, 0.035, 1650, 0.015, 0.1);
+  return normaliza(a, 0.9);
+}
+
+/** Láser del platillo: «piu» corto que cae, sin vibrato. */
+function hornoLaser(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.14));
+  const lp = new Bq(sr, 'lp', 5000, 0.7);
+  let ph = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    ph += (380 + 1500 * Math.exp(-t / 0.03)) / sr;
+    const env = Math.min(1, t / 0.002) * Math.exp(-t / 0.035);
+    a[i] = lp.run((Math.tanh(1.6 * Math.sin(TAU * ph)) * 0.7 + 0.25 * Math.sin(2 * TAU * ph)) * env);
+  }
+  return normaliza(a, 0.85);
+}
+
+/**
+ * Orbe de plasma: soplido cuyo filtro sube, ondula despacio (3.5 Hz, sobre el
+ * ruido, no sobre el tono) y cae; debajo una quinta que se desliza hacia arriba
+ * con un batido lento de 3 Hz entre las voces.
+ */
+function hornoOrbe(sr: number) {
+  const d = 0.7;
+  const a = new Float32Array(Math.floor(sr * d));
+  const bp = new Bq(sr, 'bp', 500, 3);
+  const lp = new Bq(sr, 'lp', 2500, 0.7);
+  let p1 = 0, p2 = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr, u = t / d;
+    if ((i & 31) === 0) bp.f((500 + 1500 * Math.sin(Math.PI * Math.min(1, u * 1.3))) * (1 + 0.12 * Math.sin(TAU * 3.5 * t)));
+    const env = Math.min(1, t / 0.04) * Math.pow(1 - u, 1.5);
+    const f = 200 + 260 * (1 - Math.exp(-t / 0.12));
+    p1 += f / sr;
+    p2 += (f * 1.5 + 3) / sr;
+    a[i] = bp.run(ruido()) * 1.6 * env + lp.run((Math.sin(TAU * p1) + 0.45 * Math.sin(TAU * p2)) * 0.5) * env * 0.6;
+  }
+  return normaliza(a, 0.85);
+}
+
+/** Misil crucero desde la bodega: «clonc» grave al soltarlo y, 0.28 s después, el motor que enciende y ruge. */
+function hornoCrucero(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 1.8));
+  golpe(sr, a, 0, 110, 38, 0.09, 1, 700);
+  ping(sr, a, 0.005, 620, 0.08, 0.12);
+  const t0 = 0.28;
+  golpe(sr, a, t0, 160, 50, 0.04, 0.7, 2400);
+  const rug = new Bq(sr, 'lp', 350, 0.8);
+  const sis = new Bq(sr, 'bp', 2200, 1);
+  for (let i = Math.floor(t0 * sr); i < a.length; i++) {
+    const u = i / sr - t0;
+    if ((i & 31) === 0) rug.f(350 + 700 * Math.min(1, u / 0.5));
+    const env = Math.min(1, u / 0.08) * (u < 0.9 ? 1 : Math.exp(-(u - 0.9) / 0.25));
+    const fl = 1 + 0.1 * ruido();
+    a[i] += Math.tanh((rug.run(ruido()) * 1.5 + sis.run(ruido()) * 0.35) * env * fl * 1.2) * 0.8;
+  }
+  chasquidos(sr, a, t0, 1.4, (t) => 50 * Math.exp(-(t - t0) / 0.5), { hp: 2200, amp: 0.3, largo: [0.001, 0.004] });
+  return normaliza(a, 0.92);
+}
+
+/** Racimo: «pop» de la carcasa y n petarditos repartidos en ~0.6 s y en el estéreo. */
+function hornoRacimo(sr: number, n: number) {
+  const len = Math.floor(sr * 0.95);
+  const L = new Float32Array(len);
+  const R = new Float32Array(len);
+  const tmp = new Float32Array(Math.floor(sr * 0.25));
+  const suma = (t0: number, pan: number, amp: number) => {
+    const i0 = Math.floor(t0 * sr);
+    for (let j = 0; j < tmp.length && i0 + j < len; j++) aEstereo(L, R, i0 + j, tmp[j] * amp, pan);
+  };
+  golpe(sr, tmp, 0, 200, 70, 0.025, 0.8, 2600);
+  chasquidos(sr, tmp, 0, 0.05, () => 300, { hp: 2500, amp: 0.3, largo: [0.0005, 0.002] });
+  suma(0, 0, 1);
+  const tiempos = Array.from({ length: n }, () => 0.08 + Math.pow(Math.random(), 0.8) * 0.6).sort((p, q) => p - q);
+  for (const t of tiempos) {
+    tmp.fill(0);
+    golpe(sr, tmp, 0, rand(220, 320), rand(70, 100), rand(0.018, 0.03), 1, 3000);
+    chasquidos(sr, tmp, 0.002, 0.06, () => 400, { hp: 2500, amp: 0.3, largo: [0.0005, 0.002] });
+    suma(t, rand(-0.6, 0.6), rand(0.45, 0.75));
+  }
+  return normalizaEst([L, R], 0.88);
+}
+
+/** Fósforo blanco: «fuump» de ignición, siseo brillante que chisporrotea y se apaga en ~1.5 s. */
+function hornoFosforo(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 1.6));
+  const lp = new Bq(sr, 'lp', 600, 0.7);
+  const hp = new Bq(sr, 'hp', 2500, 0.7);
+  const lp2 = new Bq(sr, 'lp', 10000, 0.7);
+  const bp = new Bq(sr, 'bp', 5500, 2);
+  let vivo = 1, meta = 1;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    // Chisporroteo irregular (no periódico): la llama «respira» al azar.
+    if ((i & 255) === 0) meta = rand(0.45, 1);
+    vivo += (meta - vivo) * 0.004;
+    const env = Math.min(1, t / 0.03) * Math.exp(-t / 0.6);
+    const ign = t < 0.4 ? lp.run(ruido()) * Math.min(1, t / 0.01) * Math.exp(-t / 0.08) * 1.2 : 0;
+    a[i] = ign + (lp2.run(hp.run(ruido())) * 0.7 + bp.run(ruido()) * 0.5) * env * vivo;
+  }
+  chasquidos(sr, a, 0.02, 1.5, (t) => 160 * Math.exp(-t / 0.6), { hp: 2000, amp: 0.5, largo: [0.0005, 0.003] });
+  return normaliza(a, 0.85);
+}
+
+/** Gas: «pof» sordo del bote y un siseo largo y suave que baja (~1.5 s). */
+function hornoGas(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 1.7));
+  golpe(sr, a, 0, 130, 50, 0.04, 0.9, 500);
+  const bp = new Bq(sr, 'bp', 3500, 0.6);
+  const lp = new Bq(sr, 'lp', 6000, 0.7);
+  const t0 = 0.03;
+  for (let i = Math.floor(t0 * sr); i < a.length; i++) {
+    const u = i / sr - t0;
+    if ((i & 31) === 0) bp.f(1800 + 1700 * Math.exp(-u / 0.6));
+    a[i] += lp.run(bp.run(ruido())) * Math.min(1, u / 0.06) * Math.exp(-u / 0.7) * 0.5;
+  }
+  return normaliza(a, 0.85);
+}
+
+/** Bomba de plasma: zumbido que sube 0.5 s (sin vibrato) y un «uomp» sub-grave. */
+function hornoPlasmaBomba(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 1.6));
+  const tw = 0.5;
+  let ph = 0;
+  for (let i = 0; i < tw * sr; i++) {
+    const t = i / sr, u = t / tw;
+    ph += (300 + 1100 * u * u) / sr;
+    const env = Math.pow(u, 1.5) * Math.min(1, (tw - t) / 0.015) * 0.5;
+    a[i] = (Math.sin(TAU * ph) + 0.3 * Math.sin(2 * TAU * ph)) * env;
+  }
+  const lp = new Bq(sr, 'lp', 300, 0.7);
+  let fs = 0;
+  for (let i = Math.floor(tw * sr); i < a.length; i++) {
+    const t = i / sr - tw;
+    fs += (32 + 60 * Math.exp(-t / 0.06)) / sr;
+    const sub = Math.sin(TAU * fs) * Math.min(1, t / 0.004) * Math.exp(-t / 0.35) * 1.2;
+    a[i] += Math.tanh(sub * 1.4) * 0.9 + lp.run(ruido()) * Math.exp(-t / 0.15) * Math.min(1, t / 0.003) * 0.8;
+  }
+  chasquidos(sr, a, tw, tw + 0.4, (t) => 120 * Math.exp(-(t - tw) / 0.12), { hp: 3000, amp: 0.25, largo: [0.0005, 0.002] });
+  return normaliza(a, 0.92);
+}
+
+/** Chaff: «pff» del eyector y un susurro de papel metálico (cintas finas, distinto en cada oído). */
+function hornoChaff(sr: number) {
+  const n = Math.floor(sr * 0.9);
+  const chs = [0, 1].map(() => {
+    const a = new Float32Array(n);
+    const bp = new Bq(sr, 'bp', 1500, 1.2);
+    for (let i = 0; i < 0.08 * sr; i++) {
+      const t = i / sr;
+      a[i] = bp.run(ruido()) * Math.min(1, t / 0.004) * Math.exp(-t / 0.02) * 0.9;
+    }
+    chasquidos(sr, a, 0.01, 0.85, (t) => 1200 * Math.exp(-t / 0.25), { hp: 3500, amp: 0.8, largo: [0.0003, 0.0015] });
+    for (let k = 0; k < 25; k++) ping(sr, a, rand(0.02, 0.6), rand(4000, 9000), rand(0.005, 0.015), rand(0.03, 0.08));
+    return a;
+  });
+  return normalizaEst(chs, 0.8);
+}
+
+/** Hologramas: dos notas de cristal (Sol6–Re7) que se cruzan en el estéreo, con eco y brillitos. */
+function hornoHolograma(sr: number) {
+  const n = Math.floor(sr * 0.95);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  campana(sr, L, R, 0, 1568, 0.25, 0.45, -0.35, 1, 2);
+  campana(sr, L, R, 0.09, 2349.3, 0.3, 0.45, 0.35, 1, 2);
+  campana(sr, L, R, 0.24, 1568, 0.2, 0.14, 0.35, 1, 2);
+  campana(sr, L, R, 0.33, 2349.3, 0.22, 0.14, -0.35, 1, 2);
+  for (let k = 0; k < 10; k++) {
+    const i0 = Math.floor(rand(0.1, 0.6) * sr);
+    const f = rand(4000, 7000), tau = rand(0.01, 0.03), amp = rand(0.04, 0.08), pan = rand(-0.8, 0.8);
+    for (let j = 0; i0 + j < n && j < tau * 6 * sr; j++) aEstereo(L, R, i0 + j, Math.sin((TAU * f * j) / sr) * Math.exp(-j / sr / tau) * amp, pan);
+  }
+  return normalizaEst([L, R], 0.8);
+}
+
+/** Salva de bengalas pesadas: cuatro estampidos con su soplido y una cola de chispas. */
+function hornoTrampa(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 1.3));
+  for (let k = 0; k < 4; k++) {
+    const t0 = k * 0.075 + rand(0, 0.01);
+    golpe(sr, a, t0, rand(170, 210), rand(60, 75), 0.03, rand(0.7, 1), 2200);
+    const bp = new Bq(sr, 'bp', 2500, 1);
+    const i0 = Math.floor(t0 * sr);
+    for (let j = 0; j < 0.4 * sr && i0 + j < a.length; j++) {
+      const t = j / sr;
+      a[i0 + j] += bp.run(ruido()) * Math.min(1, t / 0.005) * Math.exp(-t / 0.12) * 0.35;
+    }
+  }
+  chasquidos(sr, a, 0.05, 1.25, (t) => 90 * Math.exp(-t / 0.45), { hp: 2200, amp: 0.4, largo: [0.0008, 0.004] });
+  return normaliza(a, 0.88);
+}
+
+/** Nota de pulso blando (seno con 2.º y 3.º armónico): los avisos del hangar. */
+function nota(sr: number, L: Float32Array, R: Float32Array, t0: number, f: number, tau: number, amp: number, pan: number) {
+  const i0 = Math.floor(t0 * sr);
+  for (let j = 0; i0 + j < L.length && j < tau * 6 * sr; j++) {
+    const t = j / sr;
+    const y = (Math.sin(TAU * f * t) + 0.3 * Math.sin(TAU * 2 * f * t) * Math.exp(-t / 0.05) + 0.1 * Math.sin(TAU * 3 * f * t) * Math.exp(-t / 0.03)) * Math.exp(-t / tau) * Math.min(1, t / 0.003) * amp;
+    aEstereo(L, R, i0 + j, y, pan);
+  }
+}
+
+/** Hangar, avión elegido: «tin-tan» de quinta (Sol5–Re6). */
+function hornoHangarSel(sr: number) {
+  const n = Math.floor(sr * 0.6);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  nota(sr, L, R, 0, 783.99, 0.07, 0.4, -0.1);
+  nota(sr, L, R, 0.075, 1174.66, 0.16, 0.42, 0.1);
+  campana(sr, L, R, 0.075, 2349.3, 0.1, 0.06, 0.2, 0.6, 2);
+  return normalizaEst([L, R], 0.75);
+}
+
+/** Hangar, avión bloqueado: zumbido grave corto y blando (sin trémolo ni vibrato). */
+function hornoHangarBloq(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.24));
+  const lp = new Bq(sr, 'lp', 700, 0.7);
+  let ph = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    ph += (135 - 15 * Math.min(1, t / 0.2)) / sr;
+    let s = 0;
+    for (let k = 1; k <= 6; k++) s += Math.sin(TAU * k * ph) / k;
+    const env = Math.min(1, t / 0.006) * (t < 0.17 ? 1 : Math.exp(-(t - 0.17) / 0.015));
+    a[i] = lp.run(s * env);
+  }
+  return normaliza(a, 0.7);
+}
+
+/** ¡Desbloqueado!: arpegio Do–Mi–Sol–Do, acorde que brilla y un timbal suave (~0.9 s). */
+function hornoDesbloqueo(sr: number) {
+  const n = Math.floor(sr * 1);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, k) => nota(sr, L, R, k * 0.065, f, 0.09, 0.34, -0.45 + k * 0.3));
+  for (const [f, p] of [[1046.5, -0.35], [1318.5, 0.35], [1568, 0]] as const) nota(sr, L, R, 0.27, f, 0.3, 0.24, p);
+  [2093, 2637, 3136].forEach((f, k) => campana(sr, L, R, 0.29 + k * 0.05, f, 0.25, 0.1, -0.5 + k * 0.5, 0.8, 2));
+  const tim = new Float32Array(n);
+  golpe(sr, tim, 0.27, 100, 65, 0.12, 0.45, 700);
+  for (let i = 0; i < n; i++) {
+    L[i] += tim[i];
+    R[i] += tim[i];
+  }
+  return normalizaEst([L, R], 0.88);
+}
+
+/** Racimos ya horneados por número de petardos (dos variantes de cada uno). */
+const hornosRacimo = new Map<string, AudioBuffer>();
+function bufRacimo(m: Mezcla, n: number) {
+  const clave = `${n}-${Math.random() < 0.5 ? 0 : 1}`;
+  let b = hornosRacimo.get(clave);
+  if (!b) {
+    const [l, r] = hornoRacimo(m.ctx.sampleRate, n);
+    b = m.ctx.createBuffer(2, l.length, m.ctx.sampleRate);
+    b.getChannelData(0).set(l);
+    b.getChannelData(1).set(r);
+    hornosRacimo.set(clave, b);
+  }
+  return b;
+}
+
 const hornos = new Map<Nombre, AudioBuffer>();
 function buf(m: Mezcla, n: Nombre) {
   let b = hornos.get(n);
@@ -1763,7 +2087,10 @@ function latido(m: Mezcla, t: number, vol: number, rate: number) {
 /** Un efecto suelto de baja prioridad (respeta el tope de nodos). */
 function unaVez(m: Mezcla, n: Nombre, vol: number, rate: number, t: number, pan = 0, tope = LIMITE, destino: AudioNode = m.bus) {
   if (vivos + 3 > tope) return null;
-  const src = fuente(m, buf(m, n), false, rate);
+  return unaVezBuf(m, buf(m, n), vol, rate, t, pan, destino);
+}
+function unaVezBuf(m: Mezcla, b: AudioBuffer, vol: number, rate: number, t: number, pan: number, destino: AudioNode) {
+  const src = fuente(m, b, false, rate);
   const g = ganancia(m, vol);
   const cadena: AudioNode[] = [g];
   if (pan) {
@@ -2356,6 +2683,96 @@ export function oleadaInicio(): void {
   evento('oleada', 2, (m, t) => unaVez(m, 'oleada', 0.4 * cede(), 1, t, 0, LIMITE + 6));
 }
 
+/* ────────────────────────── armas por avión, bombas y hangar ────────────────────────── */
+
+/*
+ * Niveles respecto de la metralla (~0.22–0.27 por el bus de explosiones):
+ * las armas de ráfaga quedan a la par o por debajo, los lanzamientos únicos
+ * algo por encima (como un misil) y todo lo de combate va por el bus que se
+ * agacha con las alarmas. En el aire fino todo pierde cuerpo, como la metralla.
+ */
+const enAire = () => 0.5 + 0.5 * aire;
+const lado = (pan: number) => clamp(num(pan), -1, 1) || 0;
+const tirosVulcan: Corta[] = [];
+const tirosCanon: Corta[] = [];
+const tirosLaser: Corta[] = [];
+
+/** Cañón rotatorio del F-22 (llamar en cada tiro, ~cada 45 ms; se limita a uno cada 40 ms y 3 voces). */
+export function vulcan(pan: number): void {
+  evento('vulcan', 0.04, (m, t) => corta(m, tirosVulcan, 3, 'vulcan', 0.22 * rand(0.9, 1) * enAire(), rand(0.96, 1.04), t, pan, m.explo));
+}
+/** Cañón de 30 mm del Su-57 (llamar en cada tiro, ~cada 110 ms; se limita a uno cada 90 ms y 3 voces). */
+export function canon30(pan: number): void {
+  evento('canon30', 0.09, (m, t) => corta(m, tirosCanon, 3, 'canon30', 0.15 * rand(0.88, 1) * enAire(), rand(0.94, 1.05), t, pan, m.explo));
+}
+/** Láser del platillo (llamar en cada tiro, ~cada 70 ms; se limita a uno cada 60 ms y 3 voces). Suave. */
+export function laser(pan: number): void {
+  evento('laser', 0.06, (m, t) => corta(m, tirosLaser, 3, 'laser', 0.15 * rand(0.85, 1) * enAire(), rand(0.93, 1.07), t, pan, m.explo));
+}
+/** Orbe de plasma del platillo: soplido que ondula (0.7 s). */
+export function orbe(pan: number): void {
+  evento('orbe', 0.15, (m, t) => unaVez(m, 'orbe', 0.22 * enAire(), rand(0.95, 1.05), t, lado(pan), LIMITE + 4, m.explo));
+}
+/** Misil crucero desde la bodega del B-2: «clonc» y encendido del motor (1.6 s). */
+export function crucero(pan: number): void {
+  evento('crucero', 0.3, (m, t) => unaVez(m, 'crucero', 0.28 * enAire(), rand(0.96, 1.03), t, lado(pan), LIMITE + 4, m.explo));
+}
+/** Bomba de racimo que se abre: «pop» y n petarditos en ~0.6 s (n se limita a 1–12). */
+export function racimo(pan: number, n: number): void {
+  evento('racimo', 0.12, (m, t) => {
+    if (vivos + 3 > LIMITE + 4) return;
+    const k = clamp(Math.round(num(n, 6)), 1, 12);
+    const vol = 0.26 * (0.85 + 0.15 * Math.min(1, k / 8)) * enAire();
+    unaVezBuf(m, bufRacimo(m, k), vol, rand(0.94, 1.06), t, lado(pan), m.explo);
+  });
+}
+/** Fósforo blanco: ignición, siseo brillante y chisporroteo que se apaga (~1.5 s). */
+export function fosforo(pan: number): void {
+  evento('fosforo', 0.25, (m, t) => unaVez(m, 'fosforo', 0.32 * enAire(), rand(0.96, 1.04), t, lado(pan), LIMITE + 4, m.explo));
+}
+/** Bote de gas: «pof» sordo y siseo largo y suave (~1.5 s). */
+export function gas(pan: number): void {
+  evento('gas', 0.25, (m, t) => unaVez(m, 'gas', 0.24 * enAire(), rand(0.95, 1.05), t, lado(pan), LIMITE + 4, m.explo));
+}
+/** Bomba de plasma del platillo: zumbido que sube y «uomp» sub-grave (1.2 s). */
+export function plasmaBomba(pan: number): void {
+  evento('plasma-bomba', 0.3, (m, t) => unaVez(m, 'plasma-bomba', 0.32 * enAire(), rand(0.97, 1.03), t, lado(pan), LIMITE + 4, m.explo));
+}
+/** Chaff del B-2: eyector y susurro de cintas metálicas (0.8 s). */
+export function chaff(pan: number): void {
+  evento('chaff', 0.25, (m, t) => unaVez(m, 'chaff', 0.45 * enAire(), rand(0.95, 1.05), t, lado(pan), LIMITE + 4, m.explo));
+}
+/** Señuelos holográficos del platillo: dos notas de cristal con brillitos (0.8 s). */
+export function holograma(pan: number): void {
+  evento('holograma', 0.3, (m, t) => unaVez(m, 'holograma', 0.2, 1, t, lado(pan), LIMITE + 4, m.explo));
+}
+/** Salva de bengalas pesadas del Su-57: cuatro estampidos y cola de chispas (1.2 s). */
+export function trampa(pan: number): void {
+  evento('trampa', 0.3, (m, t) => unaVez(m, 'trampa', 0.3 * enAire(), rand(0.96, 1.04), t, lado(pan), LIMITE + 4, m.explo));
+}
+
+/** Un sonido de interfaz: suena aunque el juego de fondo del menú esté callado. */
+function interfaz(clave: string, intervalo: number, n: Nombre, vol: number) {
+  const m = salida(true);
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  if (t - (ultimos.get(clave) ?? -99) < intervalo) return;
+  ultimos.set(clave, t);
+  unaVez(m, n, vol, 1, t, 0, LIMITE + 6);
+}
+/** Hangar: avión elegido («tin-tan» de quinta, 0.3 s). */
+export function hangarSel(): void {
+  interfaz('hangar-sel', 0.06, 'hangar-sel', 0.24);
+}
+/** Hangar: tocó un avión bloqueado (zumbido grave y blando, 0.2 s). */
+export function hangarBloqueado(): void {
+  interfaz('hangar-bloq', 0.15, 'hangar-bloq', 0.2);
+}
+/** ¡Nuevo avión o bomba desbloqueada!: arpegio ascendente y acorde (~0.9 s). */
+export function desbloqueo(): void {
+  interfaz('desbloqueo', 0.6, 'desbloqueo', 0.33);
+}
+
 /* ────────────────────────── altitud y ambiente ────────────────────────── */
 
 export type Zona = 'campo' | 'nubes' | 'estratosfera' | 'espacio';
@@ -2708,6 +3125,8 @@ function reiniciar() {
   mira = null;
   nitroV = null;
   balas.length = balasEnemigas.length = chapuzones.length = 0;
+  tirosVulcan.length = tirosCanon.length = tirosLaser.length = 0;
+  hornosRacimo.clear();
   cazasCerca.clear();
   pulsoG?.disconnect();
   pulsoG = null;

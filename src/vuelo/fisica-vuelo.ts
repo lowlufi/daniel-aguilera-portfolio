@@ -184,6 +184,42 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
     accRigidez: 12, accAmort: 2.5, accPerdida: 5, wCabeceo: 8.5, tiempoTonel: 0.6,
     helice: true, panza: 7,
   }),
+  // F-22: stealth air-superiority jet. Supercruise, thrust vectoring keeps the
+  // nose alive at high angle of attack and low speed.
+  raptor: derivar({
+    masa: 1.8, velCrucero: 165, velMax: 300, clCrucero: 0.14, cl0: 0.05, clAlfa: 5.2,
+    alfaPerdida: 0.4, cd0: 0.017, kInducido: 0.06, cargaMax: 12, cargaMin: -3.5,
+    tpwCrucero: 0.75, tpwMax: 1.5, inercia: 1.1, accMando: 40, mandoMinimo: 0.35,
+    accRigidez: 18, accAmort: 2.6, accPerdida: 6, wCabeceo: 17, tiempoTonel: 0.26,
+    helice: false, panza: 5,
+  }),
+  // Su-57: supermaneuverable, 3-D vectoring: the tightest pitch of the jets,
+  // stalls late and recovers easily.
+  sukhoi: derivar({
+    masa: 1.9, velCrucero: 160, velMax: 290, clCrucero: 0.15, cl0: 0.07, clAlfa: 5.4,
+    alfaPerdida: 0.5, cd0: 0.019, kInducido: 0.06, cargaMax: 12.5, cargaMin: -4,
+    tpwCrucero: 0.72, tpwMax: 1.45, inercia: 1, accMando: 46, mandoMinimo: 0.45,
+    accRigidez: 16, accAmort: 2.3, accPerdida: 5, wCabeceo: 20, tiempoTonel: 0.24,
+    helice: false, panza: 5,
+  }),
+  // B-2: a heavy flying wing. Clean and efficient (low drag, lots of lift) but
+  // sluggish in pitch and roll, and a low g limit.
+  b2: derivar({
+    masa: 4.5, velCrucero: 120, velMax: 190, clCrucero: 0.3, cl0: 0.25, clAlfa: 6,
+    alfaPerdida: 0.26, cd0: 0.014, kInducido: 0.03, cargaMax: 5, cargaMin: -1.5,
+    tpwCrucero: 0.45, tpwMax: 0.75, inercia: 5, accMando: 16, mandoMinimo: 0.3,
+    accRigidez: 13, accAmort: 2.6, accPerdida: 5, wCabeceo: 9, tiempoTonel: 0.55,
+    helice: false, panza: 5,
+  }),
+  // The saucer: whatever drives it, it out-climbs and out-turns everything
+  // and barely stalls.
+  ovni: derivar({
+    masa: 1.2, velCrucero: 130, velMax: 250, clCrucero: 0.2, cl0: 0.3, clAlfa: 6,
+    alfaPerdida: 0.6, cd0: 0.02, kInducido: 0.04, cargaMax: 14, cargaMin: -8,
+    tpwCrucero: 0.9, tpwMax: 1.8, inercia: 0.6, accMando: 55, mandoMinimo: 0.7,
+    accRigidez: 22, accAmort: 3.2, accPerdida: 4, wCabeceo: 22, tiempoTonel: 0.2,
+    helice: false, panza: 5,
+  }),
 };
 
 // ---------------------------------------------------------------- damage ---

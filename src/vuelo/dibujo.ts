@@ -1,6 +1,6 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
-import type { ModeloAvion } from './fisica-tipos';
+import type { ModeloAvion, ModeloBase } from './fisica-tipos';
 import { anchoLetrero, escribir } from './fondo';
 
 /*
@@ -106,6 +106,10 @@ export type PlaneLook = {
   /** Propeller hub [x, y, radius] or jet nozzle [x, y], relative to the centre. */
   prop?: [number, number, number];
   jet?: [number, number];
+  /** Saucer underglow centre [x, y]: pulses where a jet would have its flame. */
+  glow?: [number, number];
+  /** Pilot sits under a closed dome: no scarf flapping in the wind. */
+  cupula?: boolean;
   /** Where the pilot's scarf starts flapping from, and its two colors. */
   scarf: [number, number];
   scarfC: [string, string];
@@ -128,10 +132,40 @@ export const LOOKS: Record<ModeloAvion, PlaneLook> = {
     ink: '#2a5a9a', w: 44, h: 26, prop: [10, 3, 3], scarf: [6, -7], scarfC: [P.p0, P.p1], rack: [-2, 5],
     parts: { cola: [-16, -6], ala: [-2, 2], motor: [6, 3], cabina: [14, -1], bodega: [-5, 4] },
   },
+  raptor: {
+    ink: '#323846', w: 38, h: 20, jet: [-17, 0], scarf: [2, -6], scarfC: ['#3a6ad8', '#8ab4ff'], rack: [0, 2],
+    parts: { cola: [-12, -5], ala: [-3, 3], motor: [-16, 0] },
+  },
+  sukhoi: {
+    ink: '#28324a', w: 40, h: 20, jet: [-18, 2], scarf: [4, -6], scarfC: [P.red, P.gold], rack: [-2, 4],
+    parts: { cola: [-13, -5], ala: [-3, 4], motor: [-16, 2], cabina: [8, -3] },
+  },
+  b2: {
+    ink: '#121218', w: 52, h: 18, jet: [-15, 0], scarf: [8, -6], scarfC: [P.teal0, P.teal], rack: [0, 3],
+    parts: { ala: [-19, 0], motor: [2, -5], cabina: [14, -3], bodega: [1, 3] },
+  },
+  ovni: {
+    ink: '#3a3e58', w: 34, h: 18, glow: [0, 7], cupula: true, scarf: [-3, -6], scarfC: ['#5affc8', '#c8fff0'], rack: [0, 5],
+    parts: { cabina: [0, -4], motor: [0, 5], ala: [-12, 2] },
+  },
 };
 
-/** Small pilot heads for the cockpit (the big ones are for the hangar portraits). */
-function miniHead(g: Ctx, m: ModeloAvion, x: number, y: number) {
+/* ── Who's flying: any pilot can take any plane ─────────────────────────── */
+
+let piloto: ModeloBase = 'caza';
+
+/** Sets the pilot drawn in every cockpit from now on (part of every sprite cache key). */
+export function fijarPiloto(p: ModeloBase) {
+  piloto = p;
+}
+
+/** The pilot currently drawn in the cockpits. */
+export function pilotoActual(): ModeloBase {
+  return piloto;
+}
+
+/** Small pilot heads for the cockpit (the big ones are for the hangar portraits). (x, y) is the chin. */
+export function miniHead(g: Ctx, m: ModeloBase, x: number, y: number) {
   if (m === 'caza') {
     R(g, x - 3, y - 7, 2, 2, P.o1);
     R(g, x + 1, y - 7, 2, 2, P.o1);
@@ -219,7 +253,7 @@ function paintAvioneta(g: Ctx, has: Has) {
   } else stub(g, -1, 1, 3, 2);
   // Cockpit, windscreen and Lulu.
   R(g, -3, -3, 6, 1, Y0);
-  miniHead(g, 'avioneta', 0, -2);
+  miniHead(g, piloto, 0, -2);
   if (has('cabina')) {
     R(g, 4, -6, 1, 4, P.gl1);
     R(g, 3, -5, 1, 3, P.gl0);
@@ -255,7 +289,7 @@ function paintCaza(g: Ctx, has: Has) {
   } else stub(g, -13, -2, 2, 4);
   // Bubble canopy with Dui inside.
   D.oval(g, 4, -3, 4, 2, P.gl0);
-  miniHead(g, 'caza', 3, -1);
+  miniHead(g, piloto, 3, -1);
   g.globalAlpha = 0.45;
   D.oval(g, 4, -3, 3, 1, P.gl1);
   g.globalAlpha = 1;
@@ -302,19 +336,261 @@ function paintBombardero(g: Ctx, has: Has) {
     R(g, -5, 5, 2, 1, P.s1);
   }
   D.oval(g, 6, -5, 3, 2, P.gl0);
-  miniHead(g, 'bombardero', 6, -3);
+  miniHead(g, piloto, 6, -3);
   g.globalAlpha = 0.45;
   D.oval(g, 6, -5, 2, 1, P.gl1);
   g.globalAlpha = 1;
 }
 
-const PAINT: Record<ModeloAvion, (g: Ctx, has: Has) => void> = { avioneta: paintAvioneta, caza: paintCaza, bombardero: paintBombardero };
+/** Gold-tinted bubble canopy (stealth jets) with the pilot inside; (hx, hy) is the chin. */
+function goldCanopy(g: Ctx, cx: number, cy: number, rx: number, ry: number, hx: number, hy: number) {
+  D.oval(g, cx, cy, rx, ry, '#7a6a3a');
+  miniHead(g, piloto, hx, hy);
+  g.globalAlpha = 0.45;
+  D.oval(g, cx, cy, rx - 1, Math.max(1, ry - 1), '#ffd878');
+  g.globalAlpha = 1;
+  R(g, cx + 1, cy - ry, 2, 1, '#fff6b0');
+}
+
+/** F-22: low-vis two-tone grey, twin canted fins, chined nose, flat 2D nozzle. */
+function paintRaptor(g: Ctx, has: Has) {
+  const G0 = '#4e5666', G = '#7c8698', G1 = '#a4adbd', G2 = '#c8cfdb', CAM = '#68717f', DK = '#262a36';
+  if (has('cola')) {
+    // Twin canted fins: the far one peeks out ahead of and above the near one.
+    for (let i = 0; i < 6; i++) R(g, -14 + Math.round(i * 0.7), -9 + i, 3, 1, i ? G0 : G);
+    for (let i = 0; i < 6; i++) R(g, -17 + Math.round(i * 0.7), -8 + i, 4, 1, i === 0 ? G2 : i < 3 ? G1 : G);
+    R(g, -15, -6, 1, 3, CAM);
+    // Diamond tailplane, low at the back.
+    R(g, -18, 1, 7, 1, G);
+    R(g, -17, 2, 5, 1, G0);
+  } else stub(g, -13, -4, 2, 4);
+  // Flat, broad fuselage with a sharp chine running into the nose.
+  R(g, -11, -3, 15, 1, G1);
+  R(g, -15, -2, 24, 1, G);
+  R(g, -16, -1, 28, 1, G);
+  R(g, -16, 0, 31, 1, G);
+  R(g, -16, 1, 33, 1, G0);
+  R(g, -14, 2, 20, 1, G0);
+  R(g, 7, 0, 8, 1, G1);
+  // Two-tone camo patches and panel lines.
+  R(g, -10, -2, 6, 2, CAM);
+  R(g, -15, 0, 3, 1, CAM);
+  R(g, -2, 0, 3, 1, CAM);
+  R(g, -6, -2, 1, 3, G0);
+  // Caret intake under the canopy.
+  R(g, 1, 0, 1, 2, G2);
+  R(g, 2, 0, 3, 2, DK);
+  if (has('ala')) {
+    // Diamond wing seen edge-on: swept leading edge, forward-swept trailing edge.
+    R(g, -9, 2, 13, 1, G1);
+    R(g, -10, 3, 11, 1, G);
+    R(g, -8, 4, 7, 1, G0);
+    R(g, -6, 5, 3, 1, G0);
+  } else stub(g, -3, 2, 3, 2);
+  if (has('motor')) {
+    // Flat thrust-vectoring nozzle: two paddles and a dark slot.
+    R(g, -18, -2, 3, 4, G0);
+    R(g, -18, -2, 3, 1, G);
+    R(g, -18, -1, 1, 2, DK);
+  } else stub(g, -16, -2, 2, 4);
+  goldCanopy(g, 6, -3, 5, 2, 5, -1);
+}
+
+/** Su-57: long and slender, blue-grey splinter camo, twin engines far apart, LEVCONs. */
+function paintSukhoi(g: Ctx, has: Has) {
+  const B0 = '#46546e', B = '#7888a6', B1 = '#a6b4cc', S1 = '#5a6a8a', S2 = '#93a3be', DK = '#262a36';
+  if (has('cola')) {
+    for (let i = 0; i < 6; i++) R(g, -14 + Math.round(i * 0.6), -8 + i, 3, 1, i ? B0 : B);
+    for (let i = 0; i < 5; i++) R(g, -17 + Math.round(i * 0.6), -7 + i, 4, 1, i === 0 ? B1 : i < 2 ? S2 : B);
+    R(g, -16, -5, 2, 1, S1);
+    R(g, -19, 0, 6, 1, B);
+    R(g, -18, 1, 4, 1, B0);
+  } else stub(g, -14, -3, 2, 4);
+  // Long, slender fuselage and a slightly drooped nose.
+  R(g, -8, -3, 13, 1, B1);
+  R(g, -15, -2, 25, 1, B);
+  R(g, -16, -1, 29, 1, B);
+  R(g, -16, 0, 32, 1, B);
+  R(g, 12, 1, 5, 1, B0);
+  R(g, 17, 1, 1, 1, P.metal0);
+  // Splinter camo: hard-edged angular patches.
+  R(g, -12, -2, 4, 1, S1);
+  R(g, -11, -1, 4, 1, S1);
+  R(g, -10, 0, 3, 1, S1);
+  R(g, -4, -2, 5, 1, S2);
+  R(g, -3, -1, 3, 1, S2);
+  R(g, 9, -1, 3, 1, S1);
+  R(g, 10, 0, 3, 1, S1);
+  // Twin engine nacelles slung low and wide apart.
+  if (has('motor')) {
+    R(g, -17, 1, 18, 3, B0);
+    R(g, -16, 1, 16, 1, B);
+    R(g, -8, 2, 4, 1, S1);
+    R(g, -19, 1, 3, 3, P.metal0);
+    R(g, -18, 1, 2, 1, P.metal);
+    R(g, -19, 2, 1, 1, DK);
+  } else {
+    R(g, -12, 1, 13, 2, B0);
+    stub(g, -14, 1, 2, 3);
+  }
+  if (has('ala')) {
+    R(g, -10, 3, 14, 1, B1);
+    R(g, -11, 4, 12, 1, B);
+    R(g, -9, 5, 7, 1, B0);
+    R(g, -6, 4, 3, 1, S1);
+  } else stub(g, -3, 3, 3, 2);
+  // Intake under the big leading-edge extension, its edge running to the cockpit.
+  R(g, 1, 1, 3, 2, DK);
+  R(g, 4, 1, 1, 2, B1);
+  R(g, 2, 0, 10, 1, B1);
+  if (has('cabina')) goldCanopy(g, 8, -3, 5, 2, 7, -1);
+  else {
+    R(g, 4, -3, 8, 1, B0);
+    miniHead(g, piloto, 7, -1);
+    R(g, 12, -3, 1, 1, P.gl0);
+  }
+}
+
+/** Top and bottom of the B-2's side profile at column x: a thin wedge with a hump. */
+function b2Top(x: number) {
+  if (x < -10) return 1 - Math.floor((x + 24) / 7);
+  if (x <= 17) return -1 - Math.round(4 * Math.max(0, 1 - ((x - 5) / 13) ** 2));
+  return [-1, -1, 0, 0, 1][x - 18] ?? 1;
+}
+
+/** B-2: a flying wing seen from the side, charcoal, humped centre, no tail. */
+function paintB2(g: Ctx, has: Has) {
+  const K0 = '#22242c', K = '#3a3d4a', K1 = '#555a6a', K2 = '#737a8e', K3 = '#9aa2b8';
+  const x0 = has('ala') ? -24 : -14;
+  for (let x = x0; x <= 22; x++) {
+    const top = b2Top(x), bot = x >= 21 ? 1 : 2;
+    R(g, x, top, 1, bot - top + 1, K1);
+    R(g, x, top, 1, 1, x < -10 || x > 17 ? K3 : K2);
+    if (bot - top >= 2) R(g, x, bot - 1, 1, 1, K);
+    R(g, x, bot, 1, 1, K0);
+  }
+  // The wing's leading edge running past the hump, and the sawtooth's seams.
+  R(g, -10, 0, 28, 1, K2);
+  for (const x of [-22, -18, -14]) if (x >= x0) R(g, x, 1, 1, 1, K0);
+  if (!has('ala')) stub(g, -15, 0, 2, 3);
+  // Bomb bay doors on the belly.
+  if (has('bodega')) {
+    R(g, -4, 2, 10, 1, K);
+    R(g, 1, 2, 1, 1, K0);
+  } else {
+    R(g, -4, 2, 10, 1, '#14141c');
+    R(g, -5, 3, 2, 1, K1);
+    R(g, 6, 3, 2, 1, K1);
+  }
+  // Dorsal intakes on the hump and the exhaust trough on the wing's back.
+  if (has('motor')) {
+    R(g, -1, -6, 6, 1, K3);
+    R(g, -1, -5, 1, 1, K1);
+    R(g, 0, -5, 4, 1, '#121218');
+    R(g, -15, 0, 6, 1, K0);
+    R(g, -15, 0, 2, 1, P.metal0);
+  } else stub(g, 1, -6, 3, 2);
+  // Small cockpit windows at the front of the hump.
+  if (has('cabina')) {
+    D.oval(g, 11, -3, 4, 2, '#3a4a6a');
+    miniHead(g, piloto, 11, -1);
+    g.globalAlpha = 0.4;
+    D.oval(g, 11, -3, 3, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 14, -3, 2, 1, P.gl1);
+    R(g, 15, -2, 1, 1, P.gl0);
+  } else {
+    miniHead(g, piloto, 11, -1);
+    R(g, 14, -3, 2, 1, '#14141c');
+    R(g, 15, -3, 1, 1, P.gold);
+  }
+}
+
+const OM0 = '#7a8098', OM = '#b8c0d4', OM1 = '#e0e6f0';
+
+/** The flying saucer: silver disc, glass dome with the pilot, emitter underneath. */
+function paintOvni(g: Ctx, has: Has) {
+  if (has('cabina')) D.oval(g, 0, -2, 7, 6, P.gl0);
+  miniHead(g, piloto, 1, -1);
+  if (has('cabina')) {
+    g.globalAlpha = 0.4;
+    D.oval(g, 0, -3, 6, 4, P.gl1);
+    g.globalAlpha = 1;
+    R(g, -4, -6, 2, 1, P.white);
+    R(g, -5, -5, 1, 1, P.white);
+  } else {
+    // Shattered dome: a few shards left standing round the pilot.
+    R(g, -7, -3, 2, 3, P.gl0);
+    R(g, -6, -5, 1, 2, P.gl1);
+    R(g, 5, -4, 2, 4, P.gl0);
+    R(g, 6, -6, 1, 2, P.gl1);
+  }
+  D.oval(g, 0, 2, 15, 3, OM0);
+  D.oval(g, 0, 1, 14, 2, OM);
+  R(g, -10, 0, 20, 1, OM1);
+  R(g, -14, 2, 29, 1, '#8a90a8');
+  for (const x of [-8, -3, 2, 7]) R(g, x, 4, 2, 1, '#5a5f78');
+  if (has('motor')) {
+    D.oval(g, 0, 5, 6, 1, OM0);
+    R(g, -3, 6, 7, 1, '#3affb0');
+    R(g, -1, 6, 3, 1, '#c8fff0');
+  } else stub(g, -2, 4, 4, 2);
+  if (!has('ala')) {
+    // A bite out of the rim.
+    g.clearRect(-16, -1, 5, 8);
+    stub(g, -11, 0, 2, 4);
+  }
+}
+
+const LUZ = ['#ff5a7a', '#ffe048', '#5affc8', '#7ab8ff'];
+
+/**
+ * The saucer's ring of blinking lights, spinning round the rim: an ellipse of
+ * radii (14, ry) centred at (0, cy). `all` false hides the back half (side view).
+ */
+export function ovniLuces(g: Ctx, cy: number, ry: number, t: number, all: boolean) {
+  const a0 = g.globalAlpha;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + t * 1.6;
+    const sn = Math.sin(a);
+    if (!all && sn < -0.05) continue;
+    const x = Math.round(Math.cos(a) * 14);
+    const y = cy + Math.round(sn * ry);
+    const on = (Math.floor(t * 8) + i) % 3 !== 0;
+    const col = LUZ[i % 4];
+    if (on) {
+      g.globalAlpha = a0 * 0.35;
+      R(g, x - 1, y, 3, 1, col);
+      R(g, x, y - 1, 1, 3, col);
+      g.globalAlpha = a0;
+    }
+    R(g, x, y, 1, 1, on ? col : '#5a5f78');
+  }
+}
+
+/** The saucer's pulsing green/cyan underglow, centred at (x, y). */
+export function ovniGlow(g: Ctx, x: number, y: number, rx: number, ry: number, t: number) {
+  const a0 = g.globalAlpha;
+  const p = 0.5 + 0.5 * Math.sin(t * 7);
+  g.globalAlpha = a0 * (0.16 + 0.14 * p);
+  D.oval(g, x, y + 1, rx + 2 + Math.round(p), ry + 1, '#3affb0');
+  g.globalAlpha = a0 * (0.3 + 0.2 * p);
+  D.oval(g, x, y, rx, ry, '#7affe0');
+  g.globalAlpha = a0 * 0.7;
+  R(g, x - 2, y, 5, 1, '#e0fff8');
+  g.globalAlpha = a0;
+}
+
+const PAINT: Record<ModeloAvion, (g: Ctx, has: Has) => void> = {
+  avioneta: paintAvioneta, caza: paintCaza, bombardero: paintBombardero,
+  raptor: paintRaptor, sukhoi: paintSukhoi, b2: paintB2, ovni: paintOvni,
+};
 
 /** The plane's sprite with the given parts missing (cached per combination). */
 export function planeSprite(m: ModeloAvion, lost: readonly Parte[] = []) {
   const L = LOOKS[m];
   const key = lost.length ? [...lost].sort().join(',') : '';
-  return D.outlined(`avion2|${m}|${key}`, L.ink, L.w, L.h, L.w / 2, L.h / 2, (g) => {
+  return D.outlined(`avion2|${m}|${piloto}|${key}`, L.ink, L.w, L.h, L.w / 2, L.h / 2, (g) => {
     PAINT[m](g, (p) => !lost.includes(p));
     if (lost.length) scorch(g, lost.length, m.length);
   });
@@ -323,7 +599,7 @@ export function planeSprite(m: ModeloAvion, lost: readonly Parte[] = []) {
 /** Just one part, drawn alone: the piece that flies off when it's shot away. */
 export function partSprite(m: ModeloAvion, part: Parte) {
   const L = LOOKS[m];
-  return D.outlined(`pieza|${m}|${part}`, L.ink, L.w, L.h, L.w / 2, L.h / 2, (g) => {
+  return D.outlined(`pieza|${m}|${part}|${piloto}`, L.ink, L.w, L.h, L.w / 2, L.h / 2, (g) => {
     // Paint everything, then keep only a box around the part.
     const c = document.createElement('canvas');
     c.width = L.w;
@@ -354,14 +630,19 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
   // Fine steps keep the turn smooth; the half roll is a clean flip, no squash.
   g.rotate(Math.round(angle / 0.02) * 0.02 + (lost.includes('ala') ? 0.05 : 0));
   g.scale(1, roll >= 0 ? 1 : -1);
-  // The pilot's scarf flaps behind the cockpit.
+  const engine = !lost.includes('motor');
+  // The saucer's underglow sits behind the disc.
+  if (L.glow && engine) ovniGlow(g, L.glow[0], L.glow[1], 6, 2, t);
+  // The pilot's scarf flaps behind the cockpit (not under a closed dome).
   const [sx0, sy0] = L.scarf;
-  for (let i = 0; i < 4; i++) {
-    const wave = Math.round(Math.sin(t * 18 - i * 0.9) * (i * 0.4));
-    R(g, sx0 - 3 - i * 2, sy0 + wave + (i > 1 ? 1 : 0), 2, 1, L.scarfC[i % 2]);
+  if (!L.cupula) {
+    for (let i = 0; i < 4; i++) {
+      const wave = Math.round(Math.sin(t * 18 - i * 0.9) * (i * 0.4));
+      R(g, sx0 - 3 - i * 2, sy0 + wave + (i > 1 ? 1 : 0), 2, 1, L.scarfC[i % 2]);
+    }
   }
   if (!blink) g.drawImage(img, -L.w / 2, -L.h / 2);
-  const engine = !lost.includes('motor');
+  if (m === 'ovni' && !blink && !lost.includes('ala')) ovniLuces(g, 2, 1, t, false);
   if (L.prop && engine) {
     const [px, py, r] = L.prop;
     const f = Math.floor(t * 40) % 3;
@@ -390,11 +671,11 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
   g.restore();
 }
 
-const HEAD: Record<ModeloAvion, (g: Ctx, x: number, y: number) => void> = { avioneta: luluHead, caza: duiHead, bombardero: almendritaHead };
-const INK: Record<ModeloAvion, string> = { avioneta: '#1a1428', caza: P.o0, bombardero: '#7a4a1e' };
+const HEAD: Record<ModeloBase, (g: Ctx, x: number, y: number) => void> = { avioneta: luluHead, caza: duiHead, bombardero: almendritaHead };
+const INK: Record<ModeloBase, string> = { avioneta: '#1a1428', caza: P.o0, bombardero: '#7a4a1e' };
 
 /** The pilot's head alone, for the hangar cards. */
-export function pilotPortrait(m: ModeloAvion) {
+export function pilotPortrait(m: ModeloBase) {
   return D.outlined(`piloto|${m}`, INK[m], 16, 16, 7, 13, (g) => HEAD[m](g, 0, 0));
 }
 

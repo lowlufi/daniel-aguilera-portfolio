@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, menu } from '../game/audio';
 import { cargarSonidos } from './sonido';
+import * as AD from './armas-dibujo';
 import { PLANES, createVuelo, dibujo, readSave, type Hud, type Mejorable, type Result, type SavedGame, type Vuelo } from './motor';
-import type { ModeloAvion } from './fisica-tipos';
+import type { BombaTipo, ModeloBase as ModeloAvion, ModeloAvion as Avion } from './fisica-tipos';
+import * as HG from './hangar';
+import * as AB from './audio-batalla';
 import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
 
 /*
@@ -143,6 +146,131 @@ function FondoTarjeta({ m }: { m: ModeloAvion }) {
   return <img src={src} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ imageRendering: 'pixelated' }} />;
 }
 
+/**
+ * The hangar: pick the plane (each with its real weapons) and the bomb load.
+ * Locked ones show what unlocks them.
+ */
+function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClose }: {
+  piloto: ModeloAvion; avion: Avion; bomba: BombaTipo; libres: Avion[]; bombas: BombaTipo[];
+  onAvion: (a: Avion) => void; onBomba: (b: BombaTipo) => void; onClose: () => void;
+}) {
+  const sprites = useMemo(() => {
+    dibujo.fijarPiloto(piloto);
+    const out = {} as Record<Avion, string>;
+    for (const a of HG.HANGAR) out[a.id] = dibujo.planeSprite(a.id).toDataURL();
+    return out;
+  }, [piloto]);
+  const bombaSprites = useMemo(() => {
+    const out = {} as Record<BombaTipo, string>;
+    for (const b of HG.TIPOS_BOMBA) {
+      const c = document.createElement('canvas');
+      c.width = 24;
+      c.height = 16;
+      AD.drawBombaTipo(c.getContext('2d')!, b, 12, 8, 0);
+      out[b] = c.toDataURL();
+    }
+    return out;
+  }, []);
+  useEffect(() => {
+    // The hangar owns the keyboard while open: Esc closes it, nothing reaches the game or the select.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Tab' || e.code === 'Enter' || e.code === 'Space') return;
+      e.stopImmediatePropagation();
+      if (e.type === 'keydown' && (e.code === 'Escape' || e.code === 'KeyP')) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+  const sel = HG.especDe(avion);
+  return (
+    <div role="dialog" aria-modal="true" aria-label="Hangar" className="pointer-events-auto absolute inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-[#120c24]/80 p-3 pt-16 [@media(max-height:500px)]:p-1.5 [@media(max-height:500px)]:pt-12">
+      <div className="w-full max-w-4xl rounded-[1.6rem] bg-[#fff8e7] p-3 text-[#6b4f3a] ring-4 ring-[#ead6b3] [@media(max-height:500px)]:p-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="logo-dui text-2xl font-black sm:text-3xl">🛩️ HANGAR</h2>
+          <button type="button" autoFocus onClick={onClose} className={GO + ' py-2 text-sm'}>Listo ✓</button>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+          {HG.HANGAR.map((a) => {
+            const libre = libres.includes(a.id);
+            const elegido = a.id === avion;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => {
+                  if (!libre) return AB.hangarBloqueado();
+                  AB.hangarSel();
+                  onAvion(a.id);
+                }}
+                aria-pressed={elegido}
+                aria-label={`${a.real ?? a.name}${libre ? '' : `, bloqueado: ${a.desbloqueo?.texto}`}`}
+                className={`relative rounded-xl p-1.5 text-center transition-transform ${elegido ? 'bg-[#3a2a6a] text-white ring-4 ring-[#ffd84a]' : libre ? 'bg-white/80 hover:-translate-y-0.5' : 'bg-[#e6d6bd]/60 text-[#a08060]'}`}
+              >
+                <img src={sprites[a.id]} alt="" className={`mx-auto h-10 w-auto ${libre ? '' : 'opacity-40 grayscale'}`} style={{ imageRendering: 'pixelated' }} />
+                <div className="text-xs font-black leading-tight">{a.real ?? a.name}</div>
+                {libre ? (
+                  <div className="text-[10px] font-bold opacity-80">{a.real ? a.name : 'De la casa'}</div>
+                ) : (
+                  <div className="text-[10px] font-black">🔒 {a.desbloqueo?.texto}</div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {/* The chosen plane's numbers and weapons. */}
+        <div className="mt-2 grid gap-2 rounded-2xl bg-white/70 p-2 text-left sm:grid-cols-2">
+          <div>
+            <p className="text-sm font-black">{sel.real ?? sel.name} <span className="font-bold text-[#a08060]">· {sel.blurb}</span></p>
+            <dl className="mt-1 grid grid-cols-4 gap-1 text-center text-xs font-bold">
+              <div><dt className="text-[10px] text-[#a08060]">Velocidad</dt><dd><Stars n={sel.stats.velocidad} /></dd></div>
+              <div><dt className="text-[10px] text-[#a08060]">Blindaje</dt><dd><Stars n={sel.stats.blindaje} /></dd></div>
+              <div><dt className="text-[10px] text-[#a08060]">Misiles</dt><dd><Stars n={sel.stats.misiles} /></dd></div>
+              <div><dt className="text-[10px] text-[#a08060]">Bombas</dt><dd><Stars n={sel.stats.bombas} /></dd></div>
+            </dl>
+          </div>
+          <ul className="text-xs font-bold leading-snug">
+            <li>🚀 {sel.kit.misil.nombre} ×{sel.rack}</li>
+            <li>🔫 {sel.kit.metralla ? sel.kit.metralla.nombre : 'Sin metralla'}</li>
+            <li>✨ {sel.kit.bengala.nombre} ×{sel.flareRack}</li>
+            <li>💣 Bodega: {sel.bombRack} {sel.bombs > 1 ? `(suelta ${sel.bombs} a la vez)` : ''}{sel.sigilo > 0 ? ' · 👻 furtivo' : ''}</li>
+          </ul>
+        </div>
+        <p className="mt-2 text-sm font-black">💣 Bombas</p>
+        <div className="mt-1 grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+          {HG.TIPOS_BOMBA.map((b) => {
+            const info = HG.BOMBAS[b];
+            const libre = bombas.includes(b);
+            const elegida = b === bomba;
+            if (info.soloOvni && avion !== 'ovni') return null;
+            return (
+              <button
+                key={b}
+                type="button"
+                onClick={() => {
+                  if (!libre) return AB.hangarBloqueado();
+                  AB.hangarSel();
+                  onBomba(b);
+                }}
+                aria-pressed={elegida}
+                className={`rounded-xl p-1.5 text-left transition-transform ${elegida ? 'bg-[#3a2a6a] text-white ring-4 ring-[#ffd84a]' : libre ? 'bg-white/80 hover:-translate-y-0.5' : 'bg-[#e6d6bd]/60 text-[#a08060]'}`}
+              >
+                <div className="flex items-center gap-1">
+                  <img src={bombaSprites[b]} alt="" className={`h-5 w-auto ${libre ? '' : 'opacity-40 grayscale'}`} style={{ imageRendering: 'pixelated' }} />
+                  <span className="text-xs font-black">{info.nombre}</span>
+                </div>
+                <div className="text-[10px] font-bold opacity-80">{libre ? info.texto : `🔒 ${info.desbloqueo?.texto ?? ''}`}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Stars({ n }: { n: number }) {
   return (
     <span aria-label={`${n} de 5`} className="tracking-tight text-[#f0a45d]">
@@ -162,6 +290,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const [saved, setSaved] = useState<SavedGame | null>(readSave);
   const [plane, setPlane] = useState<ModeloAvion>(() => readSave()?.pilot ?? 'caza');
   const [hud, setHud] = useState<Hud | null>(null);
+  // The hangar: open or not, and the plane/bomb picked before take-off (null = the pilot's own plane).
+  const [hangar, setHangar] = useState(false);
+  const [avion, setAvion] = useState<Avion | null>(null);
+  const [bomba, setBomba] = useState<BombaTipo | null>(null);
+  const cerrarHangar = useCallback(() => setHangar(false), []);
   const [result, setResult] = useState<Result | null>(null);
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(readMuted);
@@ -267,15 +400,17 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     game.current?.setPaused(false);
     const from = resume ? readSave() : null;
     if (from) setPlane(from.pilot);
-    game.current?.start(from ? from.pilot : plane, from);
+    game.current?.start(from ? from.pilot : plane, from, false, avion ?? undefined, bomba ?? undefined);
     setSaved(null);
     setPhase('play');
-  }, [muted, plane]);
+  }, [muted, plane, avion, bomba]);
 
   // Character select: who is confirmed (playing their pose) before take-off.
   const [confirmado, setConfirmado] = useState<ModeloAvion | null>(null);
   const elegir = useCallback((m: ModeloAvion) => {
     setPlane(m);
+    setAvion(null);
+    setBomba(null);
     menu.aceptar();
   }, []);
   // The game-over buttons wake up after a moment, so a held fire key can't skip the card.
@@ -713,6 +848,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             {hud.resumen.dato && (
               <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a] [@media(max-height:500px)]:text-[10px]">💡 ¿Sabías que…? {hud.resumen.dato}</p>
             )}
+            {hud.resumen.nuevos && hud.resumen.nuevos.length > 0 && (
+              <p className="mt-2 animate-pulse rounded-full bg-[#3a2a6a] px-3 py-1 text-sm font-black text-[#ffd84a]">🔓 Nuevo en el hangar: {hud.resumen.nuevos.join(', ')}</p>
+            )}
             {hud.mejoras.tienda && (
               // The upgrade shop: the break waits until «Seguir».
               <div className="pointer-events-auto mt-3 rounded-2xl bg-[#3a2a6a]/90 p-2 text-white">
@@ -743,14 +881,31 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     );
                   })}
                 </div>
-                <button type="button" autoFocus onClick={() => game.current?.cerrarTienda()} className={`${GO} mt-2 py-2 text-sm`}>
-                  Seguir ▶
-                </button>
+                <div className="mt-2 flex items-center justify-center gap-2">
+                  <button type="button" onClick={() => { menu.aceptar(); setHangar(true); }} className={`${BTN} h-9`}>
+                    🛩️ Hangar · {HG.especDe(hud.hangar.avion).real ?? HG.especDe(hud.hangar.avion).name}
+                  </button>
+                  <button type="button" autoFocus onClick={() => game.current?.cerrarTienda()} className={`${GO} py-2 text-sm`}>
+                    Seguir ▶
+                  </button>
+                </div>
               </div>
             )}
             <p className="mt-1 text-[10px] font-bold text-[#a08060]">Partida guardada ✓ · puedes seguir otro día</p>
           </div>
         </div>
+      )}
+      {phase === 'play' && hangar && hud?.mejoras.tienda && !paused && (
+        <Hangar
+          piloto={hud.hangar.piloto}
+          avion={hud.hangar.avion}
+          bomba={hud.hangar.bomba}
+          libres={hud.hangar.libres}
+          bombas={hud.hangar.bombas}
+          onAvion={(a) => game.current?.elegirAvion(a)}
+          onBomba={(b) => game.current?.elegirAvion(hud.hangar.avion, b)}
+          onClose={cerrarHangar}
+        />
       )}
       {phase === 'play' && hud && hud.hielo > 0.25 && !paused && (
         <div className="pointer-events-none absolute inset-x-0 top-[30%] z-20 flex justify-center px-4">
@@ -990,6 +1145,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 ▶ Continuar · {PLANES.find((p) => p.id === saved.pilot)?.pilot}, oleada {saved.wave}
               </button>
             )}
+            <button type="button" disabled={!!confirmado} onClick={() => { menu.aceptar(); setHangar(true); }} className={`${BTN} h-12`}>
+              🛩️ Hangar · {HG.especDe(avion ?? plane).real ?? HG.especDe(avion ?? plane).name}
+            </button>
             <button type="button" autoFocus disabled={!!confirmado} onClick={confirmar} className={GO}>
               ✈️ ¡A volar con {spec.pilot}!
             </button>
@@ -998,6 +1156,21 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             {touchUi ? 'Toca un piloto para elegirlo y otra vez para confirmar.' : '← → elige · Enter confirma · Esc vuelve'}
           </p>
           {portrait && <p className="text-center text-xs font-black text-[#ffe3a3]">📱 Gira el teléfono para jugar más cómodo.</p>}
+          {hangar && (
+            <Hangar
+              piloto={plane}
+              avion={avion ?? plane}
+              bomba={bomba ?? HG.especDe(avion ?? plane).bomba}
+              libres={HG.HANGAR.filter((a) => HG.avionLibre(a.id)).map((a) => a.id)}
+              bombas={HG.TIPOS_BOMBA.filter((b) => HG.bombaLibre(b, avion ?? plane))}
+              onAvion={(a) => {
+                setAvion(a);
+                setBomba(null);
+              }}
+              onBomba={setBomba}
+              onClose={cerrarHangar}
+            />
+          )}
         </div>
       )}
 

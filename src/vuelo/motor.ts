@@ -20,7 +20,9 @@ import * as FA from './fisica-armas';
 import * as MS from './misiles';
 import * as E from './estelas';
 import { dibujarFondo, nombreZona, precalentarFondo, zonaAltitud } from './fondo';
-import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Vehiculo, Bomba } from './fisica-tipos';
+import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, ModeloBase, Movil, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
+import * as HG from './hangar';
+import * as AD from './armas-dibujo';
 
 /*
  * The plane game: Dui, Lulu or Almendrita fly over a strip of hills while
@@ -36,54 +38,28 @@ import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Vehiculo, Bomba }
 
 type Ctx = CanvasRenderingContext2D;
 
-export type PlaneSpec = {
-  id: ModeloAvion;
-  pilot: string;
-  name: string;
-  blurb: string;
-  /** Parts a hit can tear off, in no particular order; one more hit after the last one destroys the plane. */
-  parts: Parte[];
-  hp: number;
-  rack: number;
-  /** Starting slots for bombs and flares (missile slots are `rack`). */
-  bombRack: number;
-  flareRack: number;
-  reload: number;
-  bombCd: number;
-  bombs: number;
-  /** Hit radius, px. */
-  hit: number;
-  stats: { velocidad: number; blindaje: number; misiles: number; bombas: number };
+export type PlaneSpec = HG.PlaneSpec;
+
+/** The pilots, each with the plane they fly from home (the character select). */
+const PRESENTA: Record<ModeloBase, string> = {
+  avioneta: 'Lulu, la gatita negra de ojos amarillos. Ágil: gira cerrado y suelta bombas seguido.',
+  caza: 'Dui, el gato naranja. El más veloz: deja atrás a los misiles y dispara más.',
+  bombardero: 'Almendrita, la yorkshire. Lenta pero blindada: suelta tres bombas de una vez.',
+};
+export const PLANES: (PlaneSpec & { id: ModeloBase })[] = (['avioneta', 'caza', 'bombardero'] as const).map((id) => ({ ...HG.especDe(id), id, blurb: PRESENTA[id] }));
+
+/** What the hangar shows: the plane and bomb picked, and what's unlocked. */
+export type HangarInfo = {
+  avion: ModeloAvion;
+  bomba: BombaTipo;
+  piloto: ModeloBase;
+  libres: ModeloAvion[];
+  bombas: BombaTipo[];
 };
 
-export const PLANES: PlaneSpec[] = [
-  {
-    id: 'avioneta',
-    pilot: 'Lulu',
-    name: 'Avioneta Mostaza',
-    blurb: 'Lulu, la gatita negra de ojos amarillos. Ágil: gira cerrado y suelta bombas seguido.',
-    parts: ['cola', 'ala', 'motor', 'cabina'], hp: 5, rack: 2, bombRack: 2, flareRack: 3, reload: 1.2, bombCd: 0.5, bombs: 1, hit: 7,
-    stats: { velocidad: 3, blindaje: 3, misiles: 3, bombas: 4 },
-  },
-  {
-    id: 'caza',
-    pilot: 'Dui',
-    name: 'Caza Mandarina',
-    blurb: 'Dui, el gato naranja. El más veloz: deja atrás a los misiles y dispara más.',
-    parts: ['cola', 'ala', 'motor'], hp: 4, rack: 3, bombRack: 1, flareRack: 3, reload: 0.85, bombCd: 0.9, bombs: 1, hit: 6,
-    stats: { velocidad: 5, blindaje: 2, misiles: 5, bombas: 2 },
-  },
-  {
-    id: 'bombardero',
-    pilot: 'Almendrita',
-    name: 'Bombardero Nube',
-    blurb: 'Almendrita, la yorkshire. Lento pero blindado: suelta tres bombas de una vez.',
-    parts: ['cola', 'ala', 'motor', 'cabina', 'bodega'], hp: 6, rack: 2, bombRack: 3, flareRack: 3, reload: 1.3, bombCd: 0.9, bombs: 3, hit: 9,
-    stats: { velocidad: 2, blindaje: 5, misiles: 2, bombas: 5 },
-  },
-];
-
 export type Hud = {
+  /** The plane, its weapons and the hangar picks. */
+  hangar: HangarInfo;
   /** Fish was just stolen: the pantry chip flashes. */
   stolen: boolean;
   score: number;
@@ -396,7 +372,7 @@ let carIds = 0;
 // Points for shooting down each kind of flying mouse.
 const AIR_SCORE: Record<AE.TipoAereo, number> = { helicoptero: 300, dron: 80, globo: 150, ovni: 150 };
 // How hard each plane's missiles hit a flying boss: the bomber has few, so they count more.
-const BOSS_MUL: Record<ModeloAvion, number> = { avioneta: 1.2, caza: 1, bombardero: 1.6 };
+const BOSS_MUL: Record<ModeloAvion, number> = { avioneta: 1.2, caza: 1, bombardero: 1.6, raptor: 1, sukhoi: 1, b2: 1.3, ovni: 1.1 };
 // Enemy missiles carry their type (misiles.ts); the player's are plain rockets.
 type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.MisilEnemigo; enemy: true; tgt: Movil | null; trail: number }) & {
   estela?: E.Estela;
@@ -416,7 +392,15 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   lock?: Fijable;
   gap2?: number;
   perdido?: boolean;
+  /** The player's missile: which one of the plane's kit. Enemy seekers: already rolled against stealth. */
+  k?: HG.KitMisil;
+  sigilo?: boolean;
 };
+/** A falling bomb of the player's, with its load; bomblets are the cluster's children. */
+type BombaJ = Bomba & { tipo: BombaTipo; sub?: boolean };
+/** Burning phosphorus on the ground or a drifting gas cloud: hurts what's inside for a while. */
+type Zona = { tipo: 'fuego' | 'gas'; x: number; y: number; r: number; t: number; vida: number; tick: number };
+type Bala = Cuerpo & { life: number; d: number; g: number; c: HG.KitMetralla['color'] };
 let shotIds = 0;
 
 // Trail style per missile type, shortened a little so phones keep 60 fps.
@@ -447,6 +431,8 @@ export type Resumen = {
   mision: string; cumplida: boolean; siguiente: string;
   /** A verified local fact about the place, for the card. */
   dato: string;
+  /** Planes or bombs this wave unlocked in the hangar. */
+  nuevos?: string[];
 };
 /** A small optional goal for the current wave. */
 type MisionId = 'despensa' | 'combo3' | 'misiles' | 'cazas' | 'piezas';
@@ -479,7 +465,7 @@ const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const SAVE_KEY = 'vuelo-partida';
 export type SavedGame = {
   v: 1;
-  pilot: ModeloAvion;
+  pilot: ModeloBase;
   wave: number;
   score: number;
   kills: number;
@@ -496,6 +482,8 @@ export type SavedGame = {
   puntosMejora?: number;
   niv?: Record<Mejorable, number>;
   enValpo?: boolean;
+  avion?: ModeloAvion;
+  bomba?: BombaTipo;
   at: number;
 };
 
@@ -504,7 +492,7 @@ export function readSave(): SavedGame | null {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const g = JSON.parse(raw) as SavedGame;
-    if (g?.v !== 1 || !PLANES.some((p) => p.id === g.pilot) || !(g.wave >= 1) || !(g.lives >= 1) || !(g.meta >= 1)) return null;
+    if (g?.v !== 1 || !PLANES.some((p) => p.id === g.pilot) || (g.avion !== undefined && !HG.HANGAR.some((p) => p.id === g.avion)) || !(g.wave >= 1) || !(g.lives >= 1) || !(g.meta >= 1)) return null;
     return g;
   } catch {
     return null;
@@ -632,7 +620,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     mode: 'demo' as 'demo' | 'play' | 'over',
     paused: false,
     t: 0,
-    spec: PLANES[0],
+    spec: PLANES[0] as PlaneSpec,
+    piloto: 'avioneta' as ModeloBase,
+    bomba: 'comun' as BombaTipo,
+    zonas: [] as Zona[],
     plane: FV.nuevoAvion('avioneta', 240, 120, true) as Avion,
     hp: 0,
     inv: 0,
@@ -690,11 +681,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     reason: 'avion' as Result['reason'],
     cars: [] as Car[],
     shots: [] as Shot[],
-    bombs: [] as Bomba[],
-    bullets: [] as (Cuerpo & { life: number })[],
+    bombs: [] as BombaJ[],
+    bullets: [] as Bala[],
     heat: 0,
     hot: false,
     gunT: 0,
+    gunWasDown: false,
     mapa: 'valle' as Mapa,
     /** Along the coast at sea: 0 off San Antonio … 1 at Valparaíso; seconds sailed. */
     costa: 0,
@@ -756,6 +748,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     attract: false,
     waveStartT: 0,
     resumen: null as Resumen | null,
+    nuevos: [] as string[],
     flashMap: 0,
     /** The map to fly off to at the next wave (the nitro trip), if any. */
     toMapa: '' as '' | Mapa,
@@ -768,7 +761,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     lockT: 0,
     vaporT: 0,
     shells: [] as Shell[],
-    flareBodies: [] as Cuerpo[],
+    flareBodies: [] as (Cuerpo & { tipo: HG.BengalaTipo })[],
     puffs: [] as Puff[],
     shards: [] as Shard[],
     crates: [] as Crate[],
@@ -859,13 +852,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const vol = (o.vol ?? 1) * (x === undefined ? 1 : near(x)) * (0.25 + 0.75 * AB.aireActual());
     if (!S.suena(n, { ...o, vol, pan: x === undefined ? 0 : panOf(x) })) synth();
   }
-  const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero' };
-  const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85 };
+  const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero', raptor: 'motor-jet', sukhoi: 'motor-jet', b2: 'motor-jet', ovni: 'motor-jet' };
+  const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85, raptor: 165, sukhoi: 160, b2: 120, ovni: 130 };
   function engines() {
     const p = s.plane;
     const on = s.mode === 'play' && !s.paused && !s.dead && !s.attract;
     const id = s.spec.id;
-    for (const m of Object.values(MOTOR)) if (m !== MOTOR[id]) S.motor(m, 0, 1);
+    for (const m of new Set(Object.values(MOTOR))) if (m !== MOTOR[id]) S.motor(m, 0, 1);
     // The engine note rises with airspeed and throttle, like a real one.
     const v = Math.hypot(p.vx, p.vy);
     S.motor(MOTOR[id], on ? (0.45 + 0.3 * p.gas) * AB.atenuacionMotor() : 0, 0.8 + (v / CRUISE[id]) * 0.25 + p.gas * 0.15, panOf(p.x));
@@ -930,6 +923,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.flareBodies = [];
     s.puffs = [];
     s.bullets = [];
+    s.zonas = [];
     s.heat = 0;
     s.hot = false;
     s.shards = [];
@@ -961,7 +955,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.say = null;
   }
 
-  function start(id: ModeloAvion, from?: SavedGame | null, autopiloto = false) {
+  function start(id: ModeloBase, from?: SavedGame | null, autopiloto = false, avion?: ModeloAvion, bomba?: BombaTipo) {
     resetWorld();
     // Set before the first wave so the title screen's game never saves over the player's.
     s.attract = autopiloto;
@@ -992,8 +986,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.niv = { dano: 0, salud: 0, defensa: 0, municion: 0 };
     s.coraza = 0;
     s.tienda = false;
-    s.spec = PLANES.find((p) => p.id === id)!;
-    s.plane = FV.nuevoAvion(id, 220, Math.min(130, ceiling() - 30), true);
+    s.piloto = id;
+    A.fijarPiloto(id);
+    const quiere = from?.avion ?? avion ?? id;
+    const modelo = autopiloto || HG.avionLibre(quiere) ? quiere : id;
+    s.spec = { ...HG.especDe(modelo), pilot: HG.PILOTO[id] };
+    const carga = from?.bomba ?? bomba ?? s.spec.bomba;
+    s.bomba = HG.bombaLibre(carga, modelo) ? carga : s.spec.bomba;
+    s.plane = FV.nuevoAvion(modelo, 220, Math.min(130, ceiling() - 30), true);
     s.mode = 'play';
     s.hp = s.spec.hp;
     s.lives = LIVES;
@@ -1056,7 +1056,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     save();
     // At home in San Antonio the game opens on the ground: boarding, then a manual take-off.
     if (!autopiloto && s.mapa === 'valle') {
-      const P = FV.PARAMS[id];
+      const P = FV.PARAMS[s.spec.id];
       s.despegue = 'subiendo';
       s.despT = 0;
       const p = s.plane;
@@ -1101,7 +1101,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function save() {
     if (s.mode !== 'play' || s.dead || s.attract) return;
     writeSave({
-      v: 1, pilot: s.spec.id, wave: s.wave, score: s.ckScore, kills: s.ckKills, lives: s.lives, lost: [...s.lost], cap: { ...s.cap }, bridges: s.bridges,
+      v: 1, pilot: s.piloto, avion: s.spec.id, bomba: s.bomba, wave: s.wave, score: s.ckScore, kills: s.ckKills, lives: s.lives, lost: [...s.lost], cap: { ...s.cap }, bridges: s.bridges,
       meta: s.meta, bossFor: s.bossFor, bossCount: s.bossCount, jefeFor: s.jefeFor, craters: s.craters, puntosMejora: s.puntosMejora, niv: { ...s.niv }, mapa: s.toMapa || s.mapa, enValpo: s.toMapa === 'oceano' ? false : s.enValpo, at: Date.now(),
     });
   }
@@ -1111,8 +1111,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * sea, flown by an autopilot that never loses and never saves.
    */
   function attract() {
-    const ids: ModeloAvion[] = ['caza', 'avioneta', 'bombardero'];
-    start(ids[Math.floor(Math.random() * ids.length)], null, true);
+    const ids: ModeloBase[] = ['caza', 'avioneta', 'bombardero'];
+    const aviones = HG.HANGAR.map((a) => a.id);
+    start(ids[Math.floor(Math.random() * ids.length)], null, true, Math.random() < 0.5 ? undefined : aviones[Math.floor(Math.random() * aviones.length)]);
     const mapas: Mapa[] = ['valle', 'oceano', 'valparaiso', 'tormenta'];
     cambiarMapa(mapas[Math.floor(Math.random() * mapas.length)]);
     s.wave = 2 + Math.floor(Math.random() * 3);
@@ -1172,6 +1173,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   function nextWave() {
     s.wave++;
+    if (!s.attract && s.mode === 'play') celebrar(HG.registrar({ oleada: s.wave }));
     s.queue = waveList(s.wave);
     // What a resumed game gets back: the score as the wave began.
     s.ckScore = s.score;
@@ -1255,7 +1257,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // From wave 2 on, a lost game can carry on from the same wave (score back to 0).
     writeSave(
       s.wave >= 2
-        ? { v: 1, pilot: s.spec.id, wave: s.wave, score: 0, kills: 0, lives: LIVES, lost: [], cap: { ...s.cap }, bridges: s.bridges, meta: META_MAX, bossFor: s.bossFor, bossCount: s.bossCount, craters: s.craters, mapa: s.mapa, enValpo: s.enValpo, jefeFor: s.jefeFor, at: Date.now() }
+        ? { v: 1, pilot: s.piloto, avion: s.spec.id, bomba: s.bomba, wave: s.wave, score: 0, kills: 0, lives: LIVES, lost: [], cap: { ...s.cap }, bridges: s.bridges, meta: META_MAX, bossFor: s.bossFor, bossCount: s.bossCount, craters: s.craters, mapa: s.mapa, enValpo: s.enValpo, jefeFor: s.jefeFor, at: Date.now() }
         : null,
     );
     const record = s.score > s.best;
@@ -1438,6 +1440,55 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   const danoMul = () => 1.35 * (1 + 0.15 * s.niv.dano);
   /** Most slots a weapon can have: the base cap plus the «munición» upgrade. */
   const capMax = (k: Arma) => CAP_MAX[k] + s.niv.municion;
+  /** Something new in the hangar: a cheer, and the names go on the wave card. */
+  function celebrar(nuevos: string[]) {
+    s.nuevos = nuevos;
+    if (!nuevos.length) return;
+    AB.desbloqueo();
+    later(() => pop(s.plane.x, s.plane.y + 40, `🔓 ¡Nuevo en el hangar: ${nuevos.join(', ')}!`, P.gold), 400);
+  }
+  /**
+   * The hangar between waves (or before the first): swaps the airframe in
+   * place, keeping position and speed. A fresh plane: whole, with full racks.
+   */
+  function cambiarAvion(id: ModeloAvion, bomba?: BombaTipo) {
+    if (!HG.avionLibre(id)) return false;
+    if (id !== s.spec.id) {
+      const viejo = s.spec;
+      s.spec = { ...HG.especDe(id), pilot: HG.PILOTO[s.piloto] };
+      // Slots won from crates carry over; the rack itself is the new plane's.
+      const extra = (k: Arma, base: number) => Math.max(0, s.cap[k] - base - s.niv.municion);
+      s.cap = {
+        misil: s.spec.rack + s.niv.municion + extra('misil', viejo.rack),
+        bomba: s.spec.bombRack + s.niv.municion + extra('bomba', viejo.bombRack),
+        bengala: s.spec.flareRack + s.niv.municion + extra('bengala', viejo.flareRack),
+      };
+      for (const k of ['misil', 'bomba', 'bengala'] as Arma[]) s.cap[k] = Math.min(s.cap[k], capMax(k) + 2);
+      s.ammo = s.cap.misil;
+      s.bombAmmo = s.cap.bomba;
+      s.flares = s.cap.bengala;
+      s.lost = [];
+      s.hp = s.spec.hp;
+      FV.fijarDano(s.plane, FV.SANO);
+      s.heat = 0;
+      s.hot = false;
+      if (!HG.bombaLibre(s.bomba, id)) s.bomba = s.spec.bomba;
+      VFX.explosion(s.fx, s.plane.x, s.plane.y, 0.6, { quieto: true, color: 'agua' });
+    }
+    if (bomba && HG.bombaLibre(bomba, id)) s.bomba = bomba;
+    s.hudKey = '';
+    save();
+    return true;
+  }
+  function hangarInfo(): HangarInfo {
+    return {
+      avion: s.spec.id,
+      bomba: s.bomba,
+      piloto: s.piloto,
+      libres: HG.HANGAR.filter((a) => HG.avionLibre(a.id)).map((a) => a.id),
+      bombas: HG.TIPOS_BOMBA.filter((b) => HG.bombaLibre(b, s.spec.id)),
+    };
+  }
   /** The «munición» upgrade adds one slot of each weapon per level (and fills them). */
   function aplicarMunicion() {
     s.cap = {
@@ -1474,6 +1525,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     releasePrize(s.airPrize.get(a.id), a.x, a.y + 10);
     s.airPrize.delete(a.id);
     // A UFO always leaves something big: an extra plane or a nuclear bomb.
+    if (a.tipo === 'ovni' && !s.attract) celebrar(HG.registrar({ ovnis: 1 }));
     if (a.tipo === 'ovni') releasePrize(s.lives < MAX_VIDAS && Math.random() < 0.5 ? 'vida' : 'nuclear', a.x + 12, a.y + 14);
     for (let i = 0; i < 2; i++) VFX.pieza(s.fx, a.x, a.y, a.vx * 0.5 + rand(-50, 50), rand(20, 80), null, '#a88af0');
     const ax = a.x, ay = a.y;
@@ -2048,10 +2100,18 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.gunT -= dt;
     s.heat = Math.max(0, s.heat - dt * (s.hot ? 0.45 : 0.3));
     if (s.hot && s.heat < 0.35) s.hot = false;
+    const gk = s.spec.kit.metralla;
+    if (!input.gun) s.gunWasDown = false;
     if (!input.gun || s.hot || s.gunT > 0) return;
+    if (!gk) {
+      // The B-2 has no gun: say so once per press.
+      if (!s.gunWasDown) pop(s.plane.x, s.plane.y + 16, 'Sin metralla: usa bombas y misiles', P.metal);
+      s.gunWasDown = true;
+      return;
+    }
     const doble = s.boost === 'doble';
-    s.gunT = doble ? 0.06 : 0.075;
-    if (!doble) s.heat += 0.045;
+    s.gunT = doble ? gk.cad * 0.8 : gk.cad;
+    if (!doble) s.heat += gk.calor;
     if (s.heat >= 1) {
       s.hot = true;
       pop(p.x, p.y + 16, '¡Metralla caliente!', P.r3);
@@ -2062,17 +2122,87 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Two guns side by side with the upgrade, one otherwise.
     for (const off of doble ? [-3, 3] : [0]) {
       const ox = -Math.sin(p.rumbo) * off, oy = Math.cos(p.rumbo) * off;
-      s.bullets.push({ x: p.x + Math.cos(p.rumbo) * nose + ox, y: p.y + Math.sin(p.rumbo) * nose + oy, vx: p.vx + Math.cos(a) * 680, vy: p.vy + Math.sin(a) * 680, t: 0, life: 2.2 });
+      s.bullets.push({
+        x: p.x + Math.cos(p.rumbo) * nose + ox, y: p.y + Math.sin(p.rumbo) * nose + oy, vx: p.vx + Math.cos(a) * gk.vel, vy: p.vy + Math.sin(a) * gk.vel,
+        t: 0, life: 1500 / gk.vel, d: gk.dano, g: gk.gravedad, c: gk.color,
+      });
     }
-    if (!s.attract) AB.metralla(panOf(p.x));
-    L.luz(s.luces, p.x + Math.cos(p.rumbo) * nose, p.y + Math.sin(p.rumbo) * nose, 6, '#ffe48a', 0.04);
+    if (!s.attract) {
+      const pan = panOf(p.x);
+      if (gk.sonido === 'vulcan') AB.vulcan(pan);
+      else if (gk.sonido === 'canon30') AB.canon30(pan);
+      else if (gk.sonido === 'laser') AB.laser(pan);
+      else AB.metralla(pan);
+    }
+    L.luz(s.luces, p.x + Math.cos(p.rumbo) * nose, p.y + Math.sin(p.rumbo) * nose, 6, gk.color === 'laser' ? '#7af0ff' : '#ffe48a', 0.04);
+  }
+
+  /** A bomb reaching its target, by load. */
+  function impactoBomba(b: BombaJ) {
+    const x = b.x, y = Math.max(b.y, ground(b.x));
+    const pan = panOf(x);
+    const enSuelo = y - ground(x) < 30;
+    if (b.tipo === 'racimo') blast(x, y, b.sub ? 5 : FA.ENERGIA.bombaJugador, 'jugador', b.sub ? 1.6 : 4);
+    else if (b.tipo === 'fosforo') {
+      blast(x, y, 10, 'jugador', 2);
+      // White phosphorus keeps burning on land; the sea puts it out in a hiss of steam.
+      if (enSuelo && !sobreMar(x)) s.zonas.push({ tipo: 'fuego', x, y: ground(x), r: 55, t: 0, vida: 6, tick: 0 });
+      else for (let i = 0; i < 6; i++) puff(x + rand(-20, 20), y + rand(0, 10), 2, false, 0.9, rand(-20, 20), rand(20, 50));
+      if (!s.attract) AB.fosforo(pan);
+    } else if (b.tipo === 'gas') {
+      blast(x, y, 3, 'jugador', 0.5);
+      s.zonas.push({ tipo: 'gas', x, y: Math.max(y, ground(x) + 22), r: 45, t: 0, vida: 7, tick: 0 });
+      if (!s.attract) AB.gas(pan);
+    } else if (b.tipo === 'plasma') {
+      blast(x, y, 34, 'jugador', 6);
+      L.luz(s.luces, x, y, 60, '#c89aff', 0.5);
+      if (!s.attract) AB.plasmaBomba(pan);
+    } else blast(x, y, FA.ENERGIA.bombaJugador, 'jugador', 4);
+  }
+
+  /** Phosphorus fires and gas clouds: damage over time to what's inside. */
+  function stepZonas(dt: number) {
+    const wind = FV.viento(s.t, s.plane.x, 0);
+    for (const z of s.zonas) {
+      z.t += dt;
+      if (z.tipo === 'gas') {
+        // The cloud drifts with the wind, rises a little and spreads.
+        z.x += wind * 0.6 * dt;
+        z.y = Math.max(ground(z.x) + 18, z.y + 3 * dt);
+        z.r = Math.min(95, z.r + 14 * dt);
+      } else if (Math.random() < dt * 14) puff(z.x + rand(-z.r, z.r), z.y + rand(4, 14), 1, false, 0.9, rand(-8, 8), rand(20, 45));
+      z.tick -= dt;
+      if (z.tick > 0) continue;
+      z.tick = 0.25;
+      const k = 1 - z.t / z.vida;
+      const dmg = (z.tipo === 'fuego' ? 0.16 : 0.1) * (0.5 + 0.5 * k) * danoMul();
+      const dentro = (x: number, y: number, m = 0) => (z.tipo === 'fuego' ? Math.abs(x - z.x) < z.r + m && y - z.y < 26 : Math.hypot(x - z.x, (y - z.y) * 1.4) < z.r + m);
+      for (const c of s.cars) if (dentro(c.mid.x, c.mid.y, 6)) hurtCar(c, dmg);
+      for (const u of s.gigantes) {
+        if (!u.viva) continue;
+        const bx = G.caja(u);
+        const cx = (bx.x0 + bx.x1) / 2;
+        if (dentro(cx, bx.y0, (bx.x1 - bx.x0) / 2)) giantHit(u, G.golpear(u, cx, bx.y0 + 2, dmg * 2));
+      }
+      if (z.tipo === 'gas') {
+        for (const a of s.aereos) {
+          if (a.hp <= 0 || !dentro(a.x, a.y)) continue;
+          a.hp -= dmg;
+          s.airFlash.set(a.id, 0.08);
+          if (a.hp <= 0) abatirAereo(a);
+        }
+        for (const f of s.fighters) if (f.hp > 0 && dentro(f.a.x, f.a.y)) hurtFighter(f, dmg);
+      }
+    }
+    s.zonas = s.zonas.filter((z) => z.t < z.vida);
   }
 
   /** Moves the tracers and hits whatever they touch. */
   function stepBullets(dt: number) {
     for (const b of s.bullets) {
       b.t += dt;
-      b.vy -= FA.GRAVEDAD * 0.06 * dt;
+      b.vy -= FA.GRAVEDAD * b.g * dt;
+      const bd = b.d * danoMul();
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       let hit = false;
@@ -2086,14 +2216,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const look = A.VEH_LOOK[c.kind];
         if (Math.abs(b.x - c.x) < look.w / 2 + 1 && b.y > c.y - 1 && b.y < c.y + look.h) {
           hit = true;
-          hurtCar(c, 0.11 * danoMul());
+          hurtCar(c, 0.11 * bd);
         }
       }
       for (const a of s.aereos) {
         if (hit || a.hp <= 0) continue;
         if (Math.hypot(a.x - b.x, a.y - b.y) < AE.radio(a) + 2) {
           hit = true;
-          a.hp -= 0.18 * danoMul();
+          a.hp -= 0.18 * bd;
           s.airFlash.set(a.id, 0.08);
           if (a.hp <= 0) abatirAereo(a);
         }
@@ -2103,14 +2233,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const bx = G.caja(u);
         if (b.x > bx.x0 && b.x < bx.x1 && b.y > bx.y0 && b.y < bx.y1) {
           hit = true;
-          giantHit(u, G.golpear(u, b.x, b.y, 0.25 * danoMul()));
+          giantHit(u, G.golpear(u, b.x, b.y, 0.25 * bd));
         }
       }
       for (const f of s.fighters) {
         if (hit || f.hp <= 0) continue;
         if (CZ.tocado(f, b.x, b.y, 1)) {
           hit = true;
-          hurtFighter(f, 0.2 * danoMul());
+          hurtFighter(f, 0.2 * bd);
         }
       }
       for (const o of s.shots) {
@@ -2128,7 +2258,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       if (!hit && s.jefe && JF.tocado(s.jefe, b.x, b.y, 1)) {
         hit = true;
-        const h = JF.golpear(s.jefe, b.x, b.y, 0.22 * BOSS_MUL[s.spec.id] * danoMul());
+        const h = JF.golpear(s.jefe, b.x, b.y, 0.22 * BOSS_MUL[s.spec.id] * bd);
         s.jefeFlash = 0.06;
         if (h.derrotado) award(h.puntos ?? 0, b.x, b.y);
       }
@@ -2144,32 +2274,37 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   function firePlayer() {
     const p = s.plane;
+    const km = s.spec.kit.misil;
     if (input.fire && s.ammo >= 1 && s.fireT <= 0) {
       const m = FA.misilJugador(p, s.wave);
+      m.combustible = km.opts.quemado;
       // No lock-on: the missile flies where the nose points.
       // Held the nose on an enemy long enough: this missile homes on it.
       const locked = s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo() ? s.lockCand : undefined;
-      s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked });
+      s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked, k: km });
       // Chorrillana: two more missiles fanned out either side of the nose.
       if (s.boost === 'chorrillana') {
         for (const da of [-0.14, 0.14]) {
           const extra = FA.misilJugador(p, s.wave);
+          extra.combustible = km.opts.quemado;
           const sp = Math.hypot(extra.vx, extra.vy);
           extra.rumbo += da;
           extra.vx = Math.cos(extra.rumbo) * sp;
           extra.vy = Math.sin(extra.rumbo) * sp;
-          s.shots.push({ m: extra, enemy: false, tgt: null, trail: 0 });
+          s.shots.push({ m: extra, enemy: false, tgt: null, trail: 0, k: km });
         }
       }
       usar('disparar');
       if (locked) usar('fijar');
       s.ammo--;
-      s.fireT = 0.22;
-      fx('misil', sfx.launch, { vol: 0.4, rate: rand(0.95, 1.1), dur: 0.35 });
+      s.fireT = km.cadencia;
+      if (km.sonido === 'orbe') { if (!s.attract) AB.orbe(panOf(p.x)); }
+      else if (km.sonido === 'crucero') { if (!s.attract) AB.crucero(panOf(p.x)); }
+      else fx('misil', sfx.launch, { vol: 0.4, rate: rand(0.95, 1.1), dur: 0.35 });
     }
     if (input.bomb && s.bombT <= 0 && s.bombAmmo >= 1) {
       s.bombAmmo--;
-      for (let i = 0; i < s.spec.bombs; i++) s.bombs.push(FA.soltarBomba(p, i));
+      for (let i = 0; i < s.spec.bombs; i++) s.bombs.push({ ...FA.soltarBomba(p, i), tipo: s.bomba });
       s.bombT = s.spec.bombCd;
       fx('bomba', sfx.bomb, { vol: 0.5 });
     }
@@ -2178,18 +2313,33 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.flares--;
       s.flareCd = 0.6;
       let fooled = 0;
-      for (let i = 0; i < 3; i++) {
-        const f = { x: p.x, y: p.y - 3, vx: p.vx * 0.5 + rand(-30, 30), vy: p.vy * 0.5 + rand(-10, 30), t: 0 };
+      const kb = s.spec.kit.bengala;
+      for (let i = 0; i < kb.n; i++) {
+        // Holograms keep pace beside the plane for a moment; the rest drop away.
+        const holo = kb.tipo === 'holograma';
+        const f = {
+          x: p.x, y: p.y - 3, tipo: kb.tipo, t: 0,
+          vx: holo ? p.vx * 0.9 + (i ? 40 : -40) : p.vx * 0.5 + rand(-30, 30),
+          vy: holo ? p.vy * 0.9 + (i ? 25 : -25) : p.vy * 0.5 + rand(-10, 30),
+        };
         s.flareBodies.push(f);
-        // Each seeker gets one look at each new flare: decoyed or not.
+        // Each seeker gets a few looks at each new decoy (more for better decoys).
         for (const sh of s.shots) {
-          if (sh.enemy && sh.tgt === p && sh.m.guiado && MS.engana(sh.m, f, p)) {
-            sh.tgt = f;
-            fooled++;
+          if (!(sh.enemy && sh.tgt === p && sh.m.guiado)) continue;
+          for (let k = 0; k < kb.intentos; k++) {
+            if (MS.engana(sh.m, f, p)) {
+              sh.tgt = f;
+              fooled++;
+              break;
+            }
           }
         }
       }
-      fx('bengalas', sfx.flare, { vol: 0.6 });
+      if (s.attract) { /* silent */ }
+      else if (kb.tipo === 'holograma') AB.holograma(panOf(p.x));
+      else if (kb.tipo === 'chaff') AB.chaff(panOf(p.x));
+      else if (kb.tipo === 'trampa') AB.trampa(panOf(p.x));
+      else fx('bengalas', sfx.flare, { vol: 0.6 });
       if (fooled) {
         pop(p.x, p.y + 18, fooled > 1 ? `¡${fooled} misiles engañados!` : '¡Misil engañado!', P.gold);
         sfx.star();
@@ -2722,6 +2872,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             dato: datoDe(destino || s.mapa),
           };
           nextWave();
+          if (s.nuevos.length) s.resumen.nuevos = s.nuevos;
           s.banner = '';
           s.breakT = s.resumen.destino ? TRANS_T + 1.6 : 4.2;
           window.setTimeout(() => {
@@ -2967,6 +3118,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (sh.enemy) {
         const em = sh.m;
         const F = MS.MISILES[em.tipo];
+        if (!sh.sigilo && sh.tgt === p) {
+          sh.sigilo = true;
+          if (em.guiado && s.spec.sigilo > 0 && Math.random() < s.spec.sigilo * 0.6) {
+            sh.tgt = null;
+            if (flying) pop(em.x, em.y + 10, '¡No te ve!', '#9ad8ff');
+          }
+        }
         const r = MS.paso(em, flying || sh.tgt !== p ? sh.tgt : null, dt, s.wave, ground);
         // Outrunning: fast and not flying into it, the missile bleeds energy (it
         // can't keep pulling lead); if the gap keeps growing it gives up.
@@ -3007,7 +3165,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
         // Boomerang: a dodged one turns round (about a second), relights and chases again.
         // A flare only fools it for a while: once the flare burns out, it hunts again.
-        if (sh.vueltas && sh.tgt !== p && flying && !s.flareBodies.includes(sh.tgt as Cuerpo)) {
+        if (sh.vueltas && sh.tgt !== p && flying && !s.flareBodies.some((f) => f === sh.tgt)) {
           sh.tgt = p;
           sh.pasada = true;
         }
@@ -3069,18 +3227,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       } else {
         // The player's rockets fly straight where the nose pointed.
         const lk = sh.lock && sh.lock.vivo() ? sh.lock.pos() : null;
-        const res = FA.pasoMisil(m, lk, dt, FA.MISIL_JUGADOR, ground, !lk);
+        const kit = sh.k ?? s.spec.kit.misil;
+        const res = FA.pasoMisil(m, lk, dt, kit.opts, ground, !lk);
         // Out of fuel it keeps flying ballistic and, nose down, dives until it hits something.
         if (res === 'suelo' || m.t > 30 || m.y > CEIL + 400) {
           m.t = -1;
-          blast(m.x, Math.max(m.y, ground(m.x)), FA.ENERGIA.misilJugador, 'jugador', 2.5);
+          blast(m.x, Math.max(m.y, ground(m.x)), kit.energia, 'jugador', kit.dano);
           continue;
         }
         for (const c of s.cars) {
           const look = A.VEH_LOOK[c.kind];
           if (Math.abs(m.x - c.x) < look.w / 2 + 2 && m.y > c.y - 2 && m.y < c.y + look.h) {
             m.t = -1;
-            blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
+            blast(m.x, m.y, kit.energia, 'jugador', kit.dano);
             break;
           }
         }
@@ -3089,7 +3248,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           for (const f of s.fighters) {
             if (CZ.tocado(f, m.x, m.y, 3)) {
               m.t = -1;
-              blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
+              blast(m.x, m.y, kit.energia, 'jugador', kit.dano);
               break;
             }
           }
@@ -3097,7 +3256,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         // …hit the flying boss…
         if (m.t >= 0 && s.jefe && JF.tocado(s.jefe, m.x, m.y, 3)) {
           m.t = -1;
-          blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
+          blast(m.x, m.y, kit.energia, 'jugador', kit.dano);
         }
         // …hit mice of every size on the ground…
         if (m.t >= 0) {
@@ -3106,8 +3265,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             const b = G.caja(u);
             if (m.x > b.x0 && m.x < b.x1 && m.y > b.y0 && m.y < b.y1) {
               m.t = -1;
-              giantHit(u, G.golpear(u, m.x, m.y, 2.5));
-              blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
+              giantHit(u, G.golpear(u, m.x, m.y, kit.dano));
+              blast(m.x, m.y, kit.energia, 'jugador', kit.dano);
               break;
             }
           }
@@ -3117,7 +3276,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           for (const a of s.aereos) {
             if (a.hp > 0 && Math.hypot(m.x - a.x, m.y - a.y) < AE.radio(a) + 3) {
               m.t = -1;
-              blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
+              blast(m.x, m.y, kit.energia, 'jugador', kit.dano);
               break;
             }
           }
@@ -3128,7 +3287,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             if (!o.enemy || o.m.t < 0) continue;
             if (Math.hypot(o.m.x - m.x, o.m.y - m.y) < 14 + MS.MISILES[o.m.tipo].radioChoque) {
               m.t = -1;
-              blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
+              blast(m.x, m.y, kit.energia, 'jugador', kit.dano);
               pop(m.x, m.y + 10, '¡Derribado!', P.gold);
               break;
             }
@@ -3173,8 +3332,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.warn = warn;
 
     // Bombs.
+    const racimos: BombaJ[] = [];
     for (const b of s.bombs) {
       FA.pasoBomba(b, dt, wind);
+      // A cluster canister opens over the target and sows its bomblets.
+      if (b.tipo === 'racimo' && !b.sub && b.t > 0.3 && (b.y - ground(b.x) < 110 || b.t > 2.4)) {
+        b.t = -1;
+        for (let i = 0; i < 7; i++) {
+          const k = (i - 3) / 3;
+          racimos.push({ x: b.x, y: b.y, vx: b.vx * 0.8 + k * 70 + rand(-10, 10), vy: b.vy * 0.6 + rand(-15, 25), rumbo: b.rumbo, t: 0, tipo: 'racimo', sub: true });
+        }
+        puff(b.x, b.y, 2, false, 0.6);
+        VFX.chispazo(s.fx, b.x, b.y, b.vx, b.vy, still || s.calma);
+        if (!s.attract) AB.racimo(panOf(b.x), 7);
+        continue;
+      }
       let hit = b.y <= ground(b.x);
       for (const c of s.cars) {
         const look = A.VEH_LOOK[c.kind];
@@ -3190,10 +3362,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       if (hit) {
         b.t = -1;
-        blast(b.x, Math.max(b.y, ground(b.x)), FA.ENERGIA.bombaJugador, 'jugador', 4);
+        impactoBomba(b);
       }
     }
+    s.bombs.push(...racimos);
     s.bombs = s.bombs.filter((b) => b.t >= 0 && b.x > 0 && b.x < LEVEL);
+    stepZonas(dt);
     stepBullets(dt);
 
     // Flak shells burst when their fuse runs out.
@@ -3211,8 +3385,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const f of s.flareBodies) {
       FV.pasoBengala(f, dt, wind);
       f.t += dt;
-      L.luz(s.luces, f.x, f.y, 16, '#ffe9a0', 0.06);
-      if (Math.random() < dt * 20) puff(f.x, f.y, 1, false, 0.5);
+      if (f.tipo === 'holograma') L.luz(s.luces, f.x, f.y, 14, '#7af0ff', 0.05);
+      else if (f.tipo !== 'chaff') {
+        L.luz(s.luces, f.x, f.y, f.tipo === 'trampa' ? 20 : 16, f.tipo === 'trampa' ? '#ffc070' : '#ffe9a0', 0.06);
+        if (Math.random() < dt * (f.tipo === 'trampa' ? 32 : 20)) puff(f.x, f.y, 1, false, 0.5);
+      }
     }
     s.flareBodies = s.flareBodies.filter((f) => f.t < 2.6 && f.y > ground(f.x));
     for (const h of s.puffs) {
@@ -3557,19 +3734,32 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Crates, smoke, flares, bombs, shells, missiles.
     for (const c of s.crates) A.drawCrate(g, sx(c.x), sy(c.y), Math.sin(c.t * 2.5), !c.landed && c.vy <= 0);
     for (const h of s.puffs) A.drawPuff(g, sx(h.x), sy(h.y), h.r, h.dark, 1 - h.t / h.life);
-    for (const f of s.flareBodies) A.drawFlare(g, sx(f.x), sy(f.y), s.t);
-    for (const b of s.bombs) A.drawBomb(g, sx(b.x), sy(b.y), -b.rumbo);
+    for (const z of s.zonas) {
+      const k = Math.min(1, z.t / 0.4) * Math.min(1, (z.vida - z.t) / 1.2);
+      if (z.tipo === 'fuego') AD.drawFuego(g, sx(z.x), sy(z.y), z.r * 2, s.t, k);
+      else AD.drawGas(g, sx(z.x), sy(z.y), z.r, s.t, k);
+    }
+    for (const f of s.flareBodies) AD.drawBengalaTipo(g, f.tipo, sx(f.x), sy(f.y), s.t + f.t);
+    for (const b of s.bombs) {
+      if (b.sub) AD.drawSubmunicion(g, sx(b.x), sy(b.y), -b.rumbo, s.t);
+      else AD.drawBombaTipo(g, b.tipo, sx(b.x), sy(b.y), -b.rumbo);
+    }
     // Machine-gun tracers: a glowing white-hot head and a long gold-to-red tail,
     // easy to see on any sky.
     for (const b of s.bullets) {
+      if (b.c === 'laser') {
+        AD.drawLaser(g, sx(b.x), sy(b.y), b.vx, -b.vy, s.t);
+        continue;
+      }
       const v = Math.hypot(b.vx, b.vy) || 1;
       const ux = b.vx / v, uy = -b.vy / v;
       const hx = sx(b.x), hy = sy(b.y);
+      const blanco = b.c === 'blanco';
       g.globalAlpha = 0.45;
       A.R(g, hx - 2, hy - 2, 5, 5, '#ffe48a');
       g.globalAlpha = 1;
       for (let i = 1; i <= 7; i++) {
-        const c = i <= 2 ? P.gold1 : i <= 4 ? P.gold : i <= 6 ? '#ff9a3c' : '#ff4a3c';
+        const c = blanco ? (i <= 3 ? P.white : i <= 5 ? '#d8e8ff' : '#9ab8e8') : i <= 2 ? P.gold1 : i <= 4 ? P.gold : i <= 6 ? '#ff9a3c' : '#ff4a3c';
         A.R(g, Math.round(hx - ux * i * 1.6), Math.round(hy - uy * i * 1.6), i <= 3 ? 2 : 1, i <= 3 ? 2 : 1, c);
       }
       A.R(g, hx - 1, hy - 1, 3, 3, '#3a2a6a');
@@ -3588,7 +3778,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (sh.enemy) {
         const F = MS.MISILES[sh.m.tipo];
         A.drawMissile(g, sx(sh.m.x), sy(sh.m.y), -sh.m.rumbo, true, sh.m.combustible > 0, s.t, { ...F.color, largo: F.largo }, sh.m.aviso > 0 && Math.floor(s.t * (8 + sh.m.aviso * 16)) % 2 === 0);
-      } else A.drawMissile(g, sx(sh.m.x), sy(sh.m.y), -sh.m.rumbo, false, sh.m.combustible > 0, s.t);
+      } else {
+        const look = (sh.k ?? s.spec.kit.misil).look;
+        if (look === 'orbe') AD.drawOrbe(g, sx(sh.m.x), sy(sh.m.y), s.t);
+        else A.drawMissile(g, sx(sh.m.x), sy(sh.m.y), -sh.m.rumbo, false, sh.m.combustible > 0, s.t, look);
+      }
     }
 
     for (const j of s.junk) A.drawJunk(g, j.kind, sx(j.x), sy(j.y), j.spin);
@@ -3610,7 +3804,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         A.R(g, sx(wx) - 3, gy - 7, 6, 5, '#6b4f3a');
         A.R(g, sx(wx) - 2, gy - 2, 1, 2 + paso, '#3a2a3a');
         A.R(g, sx(wx) + 1, gy - 2, 1, 3 - paso, '#3a2a3a');
-        const head = A.pilotPortrait(s.spec.id);
+        const head = A.pilotPortrait(s.piloto);
         g.drawImage(head, sx(wx) - 8, gy - 22 + paso);
       }
     }
@@ -3997,6 +4191,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   function hud() {
     const h: Hud = {
+      hangar: hangarInfo(),
       score: s.score,
       best: s.best,
       wave: s.wave,
@@ -4183,7 +4378,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, cambiarMapa, prepararTormenta };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba };
 
   return {
     start,
@@ -4199,6 +4394,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     cerrarTienda() {
       s.tienda = false;
       s.hudKey = '';
+    },
+    /** The hangar on the end-of-wave card: another plane and/or bomb load. */
+    elegirAvion(id: ModeloAvion, bomba?: BombaTipo) {
+      return cambiarAvion(id, bomba);
     },
     /** Super nitro from a double tap on the sky (phones). */
     nitro() {

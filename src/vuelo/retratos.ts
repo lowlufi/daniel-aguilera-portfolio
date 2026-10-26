@@ -1,6 +1,6 @@
 import { P } from '../game/dulce';
 import { planeSprite } from './dibujo';
-import type { ModeloAvion } from './fisica-tipos';
+import type { ModeloBase as ModeloAvion } from './fisica-tipos';
 
 /*
  * Big pilot portraits for the character-select screen (Metal Slug style):
