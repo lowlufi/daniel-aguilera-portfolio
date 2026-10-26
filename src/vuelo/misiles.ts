@@ -248,7 +248,7 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
     radioChoque: 11,
     energia: 6,
     danio: 2,
-    engañable: 0,
+    engañable: 0.4,
     estela: { nucleo: '#fff1c4', brillo: '#ff9d5c', humo: '#ebe5ea', ancho: 5, largo: 38, chispas: 3, ondula: 0.8 },
     color: { cuerpo: '#d9d2c6', punta: '#ff7a3d', aletas: '#7d6b5a' },
     largo: 12,
@@ -830,7 +830,7 @@ export function golpear(m: MisilEnemigo, dmg = 1): boolean {
  * pulsación bien soltada engaña a un buscador ≈ 65–75 % en la oleada 1 y
  * ≈ 55–65 % en la 10 (de lado más, de frente/cola menos).
  */
-const BENGALA_MAX = 0.4;
+const BENGALA_MAX = 0.85;
 
 /**
  * Probabilidad de que UNA bengala engañe a este misil. Parte de `probBengala`
@@ -858,13 +858,14 @@ export function probEngano(m: MisilEnemigo, bengala: Vec, avion: Vec): number {
   const rvx = avx - m.vx, rvy = avy - m.vy;
   const vc = -(rx * rvx + ry * rvy) / r;
   const tgo = vc > 1 ? r / vc : 99;
-  const fT = tgo < 0.15 ? 0.15 : tgo <= 0.35 ? lerp(0.15, 1, (tgo - 0.15) / 0.2) : tgo <= 0.9 ? 1 : clamp(1 - (tgo - 0.9) / 1.6, 0.05, 1);
+  // Mejor con el misil encima, pero soltarla antes también sirve (piso 0,35).
+  const fT = tgo < 0.15 ? 0.3 : tgo <= 0.35 ? lerp(0.3, 1, (tgo - 0.15) / 0.2) : tgo <= 1.2 ? 1 : clamp(1 - (tgo - 1.2) / 2.5, 0.35, 1);
   const va = Math.hypot(avx, avy);
   const lado = va > 1 ? Math.abs(avx * ry - avy * rx) / (va * r) : 0.5; // |sen| del ángulo vel-avión / línea de mira
   const fA = 0.7 + 0.3 * lado;
   const fN = lerp(1, 0.75, progreso(m.nivel));
   const fP = m.combustible > 0 ? 1 : 1.3;
-  return clamp(BENGALA_MAX * k * Math.min(1, base * 1.3) * fT * fA * fN * fP, 0, 0.6);
+  return clamp(BENGALA_MAX * k * Math.min(1, base * 1.5) * fT * fA * fN * fP, 0, 0.9);
 }
 
 /** Dado compartido por (bengala, salva): los misiles de una salva miran la misma escena. */

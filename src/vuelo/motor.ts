@@ -8,6 +8,7 @@ import * as AE from './aereos';
 import * as VFX from './efectos';
 import * as G from './gigantes';
 import * as JF from './jefes';
+import * as CZ from './cazas';
 import * as A from './dibujo';
 import type { Parte, Premio, VehiculoTipo } from './dibujo';
 import * as FV from './fisica-vuelo';
@@ -93,6 +94,12 @@ export type Hud = {
   meta: number;
   metaMax: number;
   ammo: number;
+  /** Machine-gun heat 0…1, and whether it overheated (cools down before firing again). */
+  heat: number;
+  hot: boolean;
+  /** Super nitro: 'listo' (double-tap accelerate), 'activo', or recharging with `nitroK` 0…1. */
+  nitro: 'listo' | 'activo' | 'carga';
+  nitroK: number;
   rack: number;
   flares: number;
   flareMax: number;
@@ -119,7 +126,7 @@ export type Hud = {
 
 export type Result = { pilot: string; score: number; best: number; wave: number; kills: number; reason: 'avion' | 'despensa'; record: boolean };
 
-export type Controls = { x: number; y: number; gas: number; fire: boolean; bomb: boolean; flare: boolean };
+export type Controls = { x: number; y: number; gas: number; fire: boolean; bomb: boolean; flare: boolean; gun: boolean };
 
 /* ── Battle damage ─────────────────────────────────────────────────────── */
 
@@ -159,7 +166,13 @@ type Arma = Exclude<Premio, 'reparar'>;
 const CAP_MAX: Record<Arma, number> = { misil: 8, bomba: 6, bengala: 4 };
 const PRIZE_NAME: Record<Arma, string> = { misil: 'misil', bomba: 'bomba', bengala: 'bengala' };
 const BOMB_RELOAD = 2.2;
-const FLARE_RELOAD = 8;
+/** Super nitro: how long it burns, its push, and the recharge time. */
+const NITRO_T = 2.5;
+const NITRO_ACC = 2.6 * FA.GRAVEDAD;
+const NITRO_CD = 9;
+/** Seconds holding the nose on an enemy before the missiles lock on. */
+const LOCK_TIME = 1;
+const FLARE_RELOAD = 4;
 /** Highest altitude the plane can fly: a tall sky, taller than the screen. */
 const CEIL = 3000;
 
@@ -185,9 +198,9 @@ const ground = (x: number) => {
 type VSpec = { speed: number; hp: number; masa: number; score: number; cd: number; color: string };
 const VEH: Record<VehiculoTipo, VSpec> = {
   jeep: { speed: 30, hp: 1, masa: 1, score: 100, cd: 3.4, color: '#b49af4' },
-  camion: { speed: 19, hp: 1.5, masa: 2, score: 150, cd: 4.6, color: '#b49af4' },
-  tanque: { speed: 13, hp: 2.5, masa: 4, score: 250, cd: 2.8, color: '#b49af4' },
-  sam: { speed: 11, hp: 2, masa: 2.5, score: 300, cd: 5.2, color: '#b49af4' },
+  camion: { speed: 19, hp: 1, masa: 2, score: 150, cd: 4.6, color: '#b49af4' },
+  tanque: { speed: 13, hp: 1.8, masa: 4, score: 250, cd: 2.8, color: '#b49af4' },
+  sam: { speed: 11, hp: 1.3, masa: 2.5, score: 300, cd: 5.2, color: '#b49af4' },
   margarita: { speed: 14, hp: 12, masa: 8, score: 2000, cd: 1.4, color: '#f08a94' },
 };
 
@@ -247,6 +260,13 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   /** Stable id for its chase sound, and whether its near-miss whoosh already played. */
   id?: number;
   pasada?: boolean;
+  /** Seconds the plane has been outrunning it, and whether it gave up. */
+  cola?: number;
+  gap?: number;
+  /** The player's missile homes on this target when it was fired with a lock. */
+  lock?: Fijable;
+  gap2?: number;
+  perdido?: boolean;
 };
 let shotIds = 0;
 
@@ -257,7 +277,7 @@ const trailStyle = (sh: Shot) => {
   let st = trailStyles.get(key);
   if (!st) {
     const base = sh.enemy ? MS.MISILES[sh.m.tipo].estela : E.ESTELA_JUGADOR;
-    st = { ...base, largo: Math.min(base.largo, sh.enemy ? 24 : 28) };
+    st = { ...base, largo: Math.min(base.largo + 8, sh.enemy ? 32 : 38) };
     trailStyles.set(key, st);
   }
   return st;
@@ -265,6 +285,8 @@ const trailStyle = (sh: Shot) => {
 type Shell = Cuerpo & { fuse: number };
 type Puff = Cuerpo & { r: number; life: number; dark: boolean };
 type Shard = Cuerpo & { c: string };
+/** Something the player's missiles can lock on to: where it is and whether it's still alive. */
+type Fijable = { pos: () => Movil; vivo: () => boolean; r: number };
 type Crate = Cuerpo & { landed: number };
 type Pop = { x: number; y: number; t: number; text: string; c: string };
 type Junk = Cuerpo & { kind: 'chancla' | 'tomate' | 'macetero'; spin: number; fuse: number };
@@ -368,7 +390,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       A.R(sg, xi, row(h) + 1, 1, 2, P.d1);
     }
   }
-  const input: Controls = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false };
+  const input: Controls = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false };
   const keys = new Set<string>();
 
   const s = {
@@ -434,6 +456,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     cars: [] as Car[],
     shots: [] as Shot[],
     bombs: [] as Bomba[],
+    bullets: [] as (Cuerpo & { life: number })[],
+    heat: 0,
+    hot: false,
+    gunT: 0,
+    nitroT: 0,
+    nitroCd: 0,
+    lockCand: null as Fijable | null,
+    lockKey: null as object | null,
+    lockT: 0,
+    vaporT: 0,
     shells: [] as Shell[],
     flareBodies: [] as Cuerpo[],
     puffs: [] as Puff[],
@@ -455,6 +487,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     airMax: new Map<number, number>(),
     /** Mice of every size on the ground: bikes, foot soldiers, the armoured train, Ratonzilla. */
     gigantes: [] as G.Unidad[],
+    fighters: [] as CZ.Caza[],
+    fighterQueue: 0,
+    fighterT: 0,
     bigQueue: [] as G.TipoGrande[],
     /** The flying boss (cheese airship or UFO mothership), if one is here. */
     jefe: null as JF.Jefe | null,
@@ -579,6 +614,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.shells = [];
     s.flareBodies = [];
     s.puffs = [];
+    s.bullets = [];
+    s.heat = 0;
+    s.hot = false;
     s.shards = [];
     s.crates = [];
     s.pops = [];
@@ -592,6 +630,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.aereos = [];
     s.airQueue = [];
     s.gigantes = [];
+    s.fighters = [];
+    s.fighterQueue = 0;
     s.bigQueue = [];
     s.jefe = null;
     s.spaceT = 0;
@@ -678,6 +718,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.ckKills = s.kills;
     s.airQueue = AE.elegirAereos(s.wave, Math.random, s.plane.y);
     s.bigQueue = G.elegirGrandes(s.wave, Math.random);
+    s.fighterQueue = CZ.cuantos(s.wave);
+    s.fighterT = rand(7, 12);
     s.bigT = rand(3, 6);
     s.airT = rand(4, 7);
     s.phase = 'break';
@@ -793,7 +835,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const sh of s.shots) {
       if (!sh.enemy || sh.m.t < 0) continue;
       const m = sh.m;
-      if (Math.hypot(m.x - x, m.y - y) < ex.radio * 1.6 + MS.MISILES[m.tipo].radioChoque && MS.golpear(m)) {
+      // The player's blasts always finish an enemy missile; the others may only shake a heavy one.
+      if (Math.hypot(m.x - x, m.y - y) < ex.radio * 1.6 + MS.MISILES[m.tipo].radioChoque && MS.golpear(m, from === 'jugador' ? 9 : 1)) {
         m.t = -1;
         const e = MS.MISILES[m.tipo].energia * 0.6;
         window.setTimeout(() => blast(m.x, m.y, e, 'nadie', 0), 50);
@@ -815,6 +858,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     if (from === 'jugador') {
+      for (const f of s.fighters) {
+        const dmg = damage * ex.dano(Math.max(0, Math.hypot(f.a.x - x, f.a.y - y) - CZ.RADIO));
+        if (dmg >= 0.25) hurtFighter(f, dmg);
+      }
       for (const a of s.aereos) {
         if (a.hp <= 0) continue;
         const dmg = damage * ex.dano(Math.max(0, Math.hypot(a.x - x, a.y - y) - AE.radio(a)));
@@ -849,6 +896,24 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
   }
 
+  const flyingNow = () => s.mode === 'play' && !s.dead;
+
+  /** Damages a mouse fighter; at 0 it blows apart (scored only if the player did it). */
+  function hurtFighter(f: CZ.Caza, dmg: number, byPlayer = true) {
+    if (f.hp <= 0) return;
+    f.hp -= dmg;
+    f.flash = 0.1;
+    if (f.hp > 0) return;
+    const { x, y, vx, vy } = f.a;
+    if (byPlayer) {
+      award(CZ.PUNTOS, x, y);
+      const prize = maybePrize();
+      if (prize) releasePrize(prize, x, y + 10);
+    }
+    for (let i = 0; i < 3; i++) VFX.pieza(s.fx, x, y, vx * 0.4 + rand(-60, 60), vy * 0.4 + rand(20, 90), null, '#7a5ad0');
+    window.setTimeout(() => blast(x, y, FA.ENERGIA.vehiculo, 'jugador', 0.8), 30);
+  }
+
   function hurtCar(c: Car, dmg: number) {
     if (c.hp <= 0) return;
     c.hp -= dmg;
@@ -863,6 +928,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       window.setTimeout(() => blast(c.mid.x, c.mid.y, FA.ENERGIA.bomba, 'nadie', 0), 60);
     }
     award(spec.score, c.mid.x, c.mid.y);
+    // Fuel and ammo cook off: a few smaller blasts after the big one.
+    for (let i = 0; i < 3; i++) {
+      const ex = c.mid.x + rand(-14, 14), ey = c.mid.y + rand(0, 16);
+      window.setTimeout(() => blast(ex, ey, rand(0.8, 1.6), 'nadie', 0), 140 + i * 130 + rand(0, 80));
+    }
     releasePrize(s.carPrize.get(c.id), c.mid.x, c.y + A.VEH_LOOK[c.kind].h + 6);
     s.carPrize.delete(c.id);
     VFX.restos(s.fx, c.mid.x, ground(c.mid.x), A.VEH_LOOK[c.kind].w);
@@ -1150,6 +1220,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
 
   function spawnAir(list: AE.Aereo[]) {
+    // Flyers are a little fragile: their missiles are the hard part.
+    for (const a of list) a.hp = Math.max(1, Math.round(a.hp * 0.7 * 10) / 10);
     s.aereos.push(...list);
     for (const a of list) s.airMax.set(a.id, a.hp);
     // Drone swarms don't carry balloons; one per group otherwise.
@@ -1173,12 +1245,147 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   /* ── Firing ── */
 
+  /**
+   * Lock-on: keep the nose on one enemy (within ~11°, up to 420 px) for a
+   * second and it locks; the next missile homes on it.
+   */
+  function stepLock(dt: number) {
+    const p = s.plane;
+    let best: { key: object; f: Fijable } | null = null;
+    let bestA = 0.2;
+    const consider = (key: object, f: Fijable) => {
+      const q = f.pos();
+      const dx = q.x - p.x, dy = q.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 40 || d > 420) return;
+      const a = Math.abs(((Math.atan2(dy, dx) - p.rumbo + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (a < bestA) {
+        bestA = a;
+        best = { key, f };
+      }
+    };
+    for (const c of s.cars) if (c.hp > 0) consider(c, { pos: () => c.mid, vivo: () => c.hp > 0 && s.cars.includes(c), r: 8 });
+    for (const a of s.aereos) if (a.hp > 0) consider(a, { pos: () => a, vivo: () => a.hp > 0 && s.aereos.includes(a), r: 8 });
+    for (const u of s.gigantes) if (u.viva) consider(u, { pos: () => ({ x: u.x, y: u.y + 8, vx: u.vx, vy: 0 }), vivo: () => u.viva, r: 8 });
+    for (const f of s.fighters) if (f.hp > 0) consider(f, { pos: () => f.a, vivo: () => f.hp > 0 && s.fighters.includes(f), r: 8 });
+    const j = s.jefe;
+    if (j) consider(j, { pos: () => j, vivo: () => s.jefe === j, r: 30 });
+    const b = best as { key: object; f: Fijable } | null;
+    if (b && b.key === s.lockKey) {
+      const before = s.lockT;
+      s.lockT += dt;
+      s.lockCand = b.f;
+      if (before < LOCK_TIME && s.lockT >= LOCK_TIME) sfx.select();
+    } else if (b) {
+      s.lockKey = b.key;
+      s.lockCand = b.f;
+      s.lockT = 0;
+    } else {
+      s.lockT = Math.max(0, s.lockT - dt * 3);
+      if (s.lockT === 0) {
+        s.lockKey = null;
+        s.lockCand = null;
+      }
+    }
+  }
+
+  /** The machine gun: fast tracers from the nose, it overheats if held too long. */
+  function fireGun(dt: number) {
+    const p = s.plane;
+    s.gunT -= dt;
+    s.heat = Math.max(0, s.heat - dt * (s.hot ? 0.45 : 0.3));
+    if (s.hot && s.heat < 0.35) s.hot = false;
+    if (!input.gun || s.hot || s.gunT > 0) return;
+    s.gunT = 0.075;
+    s.heat += 0.045;
+    if (s.heat >= 1) {
+      s.hot = true;
+      pop(p.x, p.y + 16, '¡Metralla caliente!', P.r3);
+    }
+    const a = p.rumbo + rand(-0.035, 0.035);
+    const nose = s.spec.hit + 3;
+    s.bullets.push({ x: p.x + Math.cos(p.rumbo) * nose, y: p.y + Math.sin(p.rumbo) * nose, vx: p.vx + Math.cos(a) * 480, vy: p.vy + Math.sin(a) * 480, t: 0, life: 0.85 });
+    fx('antiaereo', sfx.step, { vol: 0.16, rate: rand(1.7, 1.95), dur: 0.07 });
+  }
+
+  /** Moves the tracers and hits whatever they touch. */
+  function stepBullets(dt: number) {
+    for (const b of s.bullets) {
+      b.t += dt;
+      b.vy -= FA.GRAVEDAD * 0.25 * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      let hit = false;
+      if (b.y <= ground(b.x)) {
+        hit = true;
+        puff(b.x, ground(b.x) + 1, 1, false, 0.4);
+      }
+      for (const c of s.cars) {
+        if (hit) break;
+        const look = A.VEH_LOOK[c.kind];
+        if (Math.abs(b.x - c.x) < look.w / 2 + 1 && b.y > c.y - 1 && b.y < c.y + look.h) {
+          hit = true;
+          hurtCar(c, 0.11);
+        }
+      }
+      for (const a of s.aereos) {
+        if (hit || a.hp <= 0) continue;
+        if (Math.hypot(a.x - b.x, a.y - b.y) < AE.radio(a) + 2) {
+          hit = true;
+          a.hp -= 0.18;
+          s.airFlash.set(a.id, 0.08);
+          if (a.hp <= 0) blast(a.x, a.y, 0.4, 'jugador', 1);
+        }
+      }
+      for (const u of s.gigantes) {
+        if (hit || !u.viva) continue;
+        const bx = G.caja(u);
+        if (b.x > bx.x0 && b.x < bx.x1 && b.y > bx.y0 && b.y < bx.y1) {
+          hit = true;
+          giantHit(u, G.golpear(u, b.x, b.y, 0.25));
+        }
+      }
+      for (const f of s.fighters) {
+        if (hit || f.hp <= 0) continue;
+        if (CZ.tocado(f, b.x, b.y, 1)) {
+          hit = true;
+          hurtFighter(f, 0.2);
+        }
+      }
+      for (const o of s.shots) {
+        if (hit || !o.enemy || o.m.t < 0) continue;
+        if (Math.hypot(o.m.x - b.x, o.m.y - b.y) < 4 + MS.MISILES[o.m.tipo].radioChoque) {
+          hit = true;
+          if (MS.golpear(o.m, 1)) {
+            o.m.t = -1;
+            blast(o.m.x, o.m.y, MS.MISILES[o.m.tipo].energia * 0.6, 'nadie', 0);
+            s.score += 50;
+            pop(o.m.x, o.m.y + 8, '¡Derribado! +50', P.gold);
+          }
+        }
+      }
+      if (!hit && s.jefe && JF.tocado(s.jefe, b.x, b.y, 1)) {
+        hit = true;
+        const h = JF.golpear(s.jefe, b.x, b.y, 0.22 * BOSS_MUL[s.spec.id]);
+        s.jefeFlash = 0.06;
+        if (h.derrotado) award(h.puntos ?? 0, b.x, b.y);
+      }
+      if (hit) {
+        b.t = b.life;
+        s.shards.push({ x: b.x, y: b.y, vx: rand(-40, 40), vy: rand(10, 60), t: 0, c: P.gold });
+      }
+    }
+    s.bullets = s.bullets.filter((b) => b.t < b.life);
+  }
+
   function firePlayer() {
     const p = s.plane;
     if (input.fire && s.ammo >= 1 && s.fireT <= 0) {
       const m = FA.misilJugador(p, s.wave);
       // No lock-on: the missile flies where the nose points.
-      s.shots.push({ m, enemy: false, tgt: null, trail: 0 });
+      // Held the nose on an enemy long enough: this missile homes on it.
+      const locked = s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo() ? s.lockCand : undefined;
+      s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked });
       s.ammo--;
       s.fireT = 0.22;
       fx('misil', sfx.launch, { vol: 0.4, rate: rand(0.95, 1.1), dur: 0.35 });
@@ -1192,13 +1399,23 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (input.flare && !s.flareWasDown && s.flares > 0 && s.flareCd <= 0) {
       s.flares--;
       s.flareCd = 0.6;
+      let fooled = 0;
       for (let i = 0; i < 3; i++) {
         const f = { x: p.x, y: p.y - 3, vx: p.vx * 0.5 + rand(-30, 30), vy: p.vy * 0.5 + rand(-10, 30), t: 0 };
         s.flareBodies.push(f);
         // Each seeker gets one look at each new flare: decoyed or not.
-        for (const sh of s.shots) if (sh.enemy && sh.tgt === p && sh.m.guiado && MS.engana(sh.m, f, p)) sh.tgt = f;
+        for (const sh of s.shots) {
+          if (sh.enemy && sh.tgt === p && sh.m.guiado && MS.engana(sh.m, f, p)) {
+            sh.tgt = f;
+            fooled++;
+          }
+        }
       }
       fx('bengalas', sfx.flare, { vol: 0.6 });
+      if (fooled) {
+        pop(p.x, p.y + 18, fooled > 1 ? `¡${fooled} misiles engañados!` : '¡Misil engañado!', P.gold);
+        sfx.star();
+      }
     }
     s.flareWasDown = input.flare;
   }
@@ -1258,6 +1475,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const wind = FV.viento(s.t, p.x, p.y);
     const top = ceiling();
 
+    // Touch flying: the plane turns toward the finger (screen point) while it's held.
+    if (aimAt && s.mode === 'play' && !s.dead) {
+      const dx = aimAt.x - (p.x - s.camX);
+      const dy = toS(p.y) - aimAt.y;
+      const d = Math.hypot(dx, dy);
+      touch.x = d > 6 ? dx / d : 0;
+      touch.y = d > 6 ? dy / d : 0;
+      syncInput();
+    }
+
     // The plane: the player flies it; in the menu it flies itself.
     if (s.mode === 'demo') {
       const dir = p.x > LEVEL - 400 ? -1 : p.x < 300 ? 1 : Math.cos(p.rumbo) >= 0 ? 1 : -1;
@@ -1271,9 +1498,23 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (p.x < 90 || p.x > LEVEL - 90) mando.y = Math.max(mando.y, 0);
       for (const ev of FV.pasoAvion(p, s.spec.id, mando, dt, ground, top)) {
         if (ev.tipo === 'toqueSuelo' && ev.velocidad > 35 && s.mode === 'play') {
-          hurtPlane(1, p.x, p.y - 8);
-          blast(p.x, p.y - 4, FA.ENERGIA.obus, 'nadie', 0);
+          // A hard crash into the ground blows the plane up at once; a scrape costs a part.
+          if (ev.velocidad > 60) {
+            s.inv = 0;
+            destroyPlane();
+          } else {
+            hurtPlane(1, p.x, p.y - 8);
+            blast(p.x, p.y - 4, FA.ENERGIA.obus, 'nadie', 0);
+          }
         }
+      }
+      // Super nitro: a hard shove along the nose, past the normal top speed.
+      if (s.nitroT > 0) {
+        s.nitroT -= dt;
+        p.vx += Math.cos(p.rumbo) * NITRO_ACC * dt;
+        p.vy += Math.sin(p.rumbo) * NITRO_ACC * dt;
+        if (Math.random() < dt * 40) puff(p.x - Math.cos(p.rumbo) * 12, p.y - Math.sin(p.rumbo) * 12, rand(1, 2.5), false, 0.6, -p.vx * 0.2, -p.vy * 0.2);
+        s.shake = Math.max(s.shake, 1.5);
       }
       // Stuck on the ground (too slow, too broken to take off): it's a crash.
       if (s.mode === 'play' && p.y - ground(p.x) < 14 && Math.hypot(p.vx, p.vy) < 30) {
@@ -1284,6 +1525,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       } else s.stuckT = 0;
       s.stallT = p.perdida ? 1.4 : Math.max(0, s.stallT - dt);
+      // Wingtip vapor when flying fast or pulling hard: white streaks behind the plane.
+      s.vaporT -= dt;
+      const speed = Math.hypot(p.vx, p.vy);
+      if (s.vaporT <= 0 && (speed > FV.PARAMS[s.spec.id].velMax * 0.8 || p.carga > 3.5) && p.y > ground(p.x) + 20) {
+        s.vaporT = 0.035;
+        const bx = -Math.cos(p.rumbo) * 7, by = -Math.sin(p.rumbo) * 7;
+        const nx = -Math.sin(p.rumbo) * 4, ny = Math.cos(p.rumbo) * 4;
+        puff(p.x + bx + nx, p.y + by + ny, 1, false, 0.7, p.vx * 0.1, p.vy * 0.1);
+        puff(p.x + bx - nx, p.y + by - ny, 1, false, 0.7, p.vx * 0.1, p.vy * 0.1);
+      }
       // Torn-off parts smoke: black and fiery from the engine, grey elsewhere.
       s.smokeT -= dt;
       if (s.lost.length && s.smokeT <= 0) {
@@ -1313,6 +1564,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.fireT -= dt;
       s.bombT -= dt;
       s.flareCd -= dt;
+      s.nitroCd = Math.max(0, s.nitroCd - dt);
       if (s.ammo < s.cap.misil) {
         s.reloadT += dt;
         if (s.reloadT >= s.spec.reload) {
@@ -1335,6 +1587,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
       firePlayer();
+      fireGun(dt);
+      stepLock(dt);
     }
 
     // Waves.
@@ -1376,6 +1630,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           spawnAir(AE.crear(tp, clamp(s.camX + (fromRight ? view.vw + 60 : -60), 40, LEVEL - 40), AE.alturaAparicion(tp, p.y, Math.random), Math.random, s.wave));
           s.airT = rand(5, 9) * Math.max(0.5, 1 - s.wave * 0.04);
         }
+        // Mouse fighters, from wave 3 on, one at a time from the edge of the view.
+        s.fighterT -= dt;
+        if (s.fighterQueue > 0 && s.fighterT <= 0 && !s.jefe) {
+          s.fighterQueue--;
+          const fromRight = Math.random() < 0.6;
+          s.fighters.push(CZ.crear(clamp(s.camX + (fromRight ? view.vw + 80 : -80), 40, LEVEL - 40), clamp(p.y + rand(-40, 120), 150, CEIL - 100), !fromRight, s.wave));
+          s.fighterT = rand(9, 15);
+          if (!s.banner) {
+            s.banner = '✈️ ¡Cazas ratón en el aire!';
+            window.setTimeout(() => {
+              if (s.banner.startsWith('✈️')) s.banner = '';
+            }, 2000);
+          }
+          sfx.warn();
+        }
         // Space is never empty: hang around up there and UFOs keep coming.
         if (!s.airQueue.length && s.airT <= 0 && p.y > AE.ALTURA_OVNI && s.aereos.filter((a) => a.tipo === 'ovni').length < 2) {
           spawnAir(AE.crear('ovni', clamp(s.camX + view.vw + 60, 40, LEVEL - 40), AE.alturaAparicion('ovni', p.y, Math.random), Math.random, s.wave));
@@ -1388,13 +1657,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
         const clear =
           !s.queue.length && !s.cars.length && !s.aereos.length && !s.airQueue.length && !s.bigQueue.length &&
-          !s.gigantes.some((u) => u.viva) && !s.jefe && s.overT === 0;
-        if (clear && s.jefeFor !== s.wave && (s.wave % 6 === 4 || s.wave % 6 === 0)) {
-          // Airship after wave 4 (10, 16…), mothership after wave 6 (12, 18…).
+          !s.gigantes.some((u) => u.viva) && !s.jefe && !s.fighters.length && !s.fighterQueue && s.overT === 0;
+        if (clear && s.jefeFor !== s.wave && (s.wave % 6 === 3 || s.wave % 6 === 0)) {
+          // Airship after wave 3 (9, 15…), mothership after wave 6 (12, 18…).
           s.jefeFor = s.wave;
-          spawnBoss(s.wave % 6 === 4 ? 'dirigible' : 'nodriza');
+          spawnBoss(s.wave % 6 === 3 ? 'dirigible' : 'nodriza');
         } else
-        if (clear && s.wave % BOSS_EVERY === 2 && s.bossFor !== s.wave) {
+        if (clear && s.wave % BOSS_EVERY === 1 && s.bossFor !== s.wave) {
           // The wave is clear… and here comes the neighbour.
           s.bossFor = s.wave;
           const v = FA.nuevoVehiculo(LEVEL + 40, ground, VEH.margarita.masa);
@@ -1577,6 +1846,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     s.aereos = s.aereos.filter((a) => a.hp > 0);
+    // Enemy fighters: fly, shoot, and crash if they hit the ground.
+    for (const f of s.fighters) {
+      const r = CZ.paso(f, p, flyingNow(), dt, ground, CEIL, s.wave);
+      for (const d of r.disparos) s.proy.push(AE.nuevoProyectil({ ...d, tipo: 'balin' }));
+      if (r.misil) {
+        for (const mm of MS.lanzar('buscador', f.a.x, f.a.y, p, s.wave, Math.random)) s.shots.push({ m: mm, enemy: true, tgt: p, trail: 0 });
+        fx('misil', sfx.enemyLaunch, { vol: 0.4, rate: 1.1 }, f.a.x);
+      }
+      f.a.x = clamp(f.a.x, 20, LEVEL - 20);
+      if (f.a.y <= ground(f.a.x) + 3) hurtFighter(f, 99, false);
+      if (f.hp > 0 && f.hp < f.hpMax * 0.5 && Math.random() < dt * 14) puff(f.a.x, f.a.y, rand(1, 2), true, 0.9);
+    }
+    s.fighters = s.fighters.filter((f) => f.hp > 0);
     for (const q of s.proy) {
       const st = AE.pasoProyectil(q, dt, ground, wind);
       if (s.mode === 'play' && !s.dead && Math.hypot(q.x - p.x, q.y - p.y) < s.spec.hit + AE.RADIO_PROYECTIL[q.tipo]) {
@@ -1612,6 +1894,30 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const em = sh.m;
         const F = MS.MISILES[em.tipo];
         const r = MS.paso(em, flying || sh.tgt !== p ? sh.tgt : null, dt, s.wave, ground);
+        // Outrunning: fast and not flying into it, the missile bleeds energy (it
+        // can't keep pulling lead); if the gap keeps growing it gives up.
+        if (flying && sh.tgt === p && em.t > 0.6 && !sh.perdido) {
+          const pv = Math.hypot(p.vx, p.vy);
+          const lx = p.x - em.x, ly = p.y - em.y;
+          const ld = Math.hypot(lx, ly) || 1;
+          const away = pv > 1 ? (p.vx * lx + p.vy * ly) / (pv * ld) : 0;
+          if (away > -0.2 && pv > FV.PARAMS[s.spec.id].velMax * 0.7) {
+            const ms = Math.hypot(em.vx, em.vy);
+            const cap = pv * (away > 0.5 ? 0.8 : 0.95);
+            if (ms > cap) {
+              const k = Math.max(cap / ms, 1 - dt * 1.5);
+              em.vx *= k;
+              em.vy *= k;
+            }
+            if (ld > (sh.gap ?? Infinity)) sh.cola = (sh.cola ?? 0) + dt;
+            if ((sh.cola ?? 0) > 0.8 && ld > 120) {
+              sh.perdido = true;
+              em.guiado = false;
+              pop(p.x, p.y + 18, '¡Lo dejaste atrás!', P.gold);
+            }
+          } else sh.cola = Math.max(0, (sh.cola ?? 0) - dt);
+          sh.gap = ld;
+        }
         if (r.estado === 'divide') {
           // The cluster opens: a pop and its bomblets carry on.
           em.t = -1;
@@ -1646,8 +1952,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       } else {
         // The player's rockets fly straight where the nose pointed.
-        const res = FA.pasoMisil(m, null, dt, FA.MISIL_JUGADOR, ground, true);
-        if (res === 'suelo' || m.t > 8) {
+        const lk = sh.lock && sh.lock.vivo() ? sh.lock.pos() : null;
+        const res = FA.pasoMisil(m, lk, dt, FA.MISIL_JUGADOR, ground, !lk);
+        // Out of fuel it keeps flying ballistic and, nose down, dives until it hits something.
+        if (res === 'suelo' || m.t > 30 || m.y > CEIL + 400) {
           m.t = -1;
           blast(m.x, Math.max(m.y, ground(m.x)), FA.ENERGIA.misilJugador, 'jugador', 2.5);
           continue;
@@ -1658,6 +1966,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             m.t = -1;
             blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
             break;
+          }
+        }
+        // …hit an enemy fighter…
+        if (m.t >= 0) {
+          for (const f of s.fighters) {
+            if (CZ.tocado(f, m.x, m.y, 3)) {
+              m.t = -1;
+              blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
+              break;
+            }
           }
         }
         // …hit the flying boss…
@@ -1692,7 +2010,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (m.t >= 0) {
           for (const o of s.shots) {
             if (!o.enemy || o.m.t < 0) continue;
-            if (Math.hypot(o.m.x - m.x, o.m.y - m.y) < 5 + MS.MISILES[o.m.tipo].radioChoque) {
+            if (Math.hypot(o.m.x - m.x, o.m.y - m.y) < 14 + MS.MISILES[o.m.tipo].radioChoque) {
               m.t = -1;
               blast(m.x, m.y, FA.ENERGIA.misilJugador, 'jugador', 2.5);
               pop(m.x, m.y + 10, '¡Derribado!', P.gold);
@@ -1747,6 +2065,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (Math.abs(b.x - c.x) < look.w / 2 && b.y < c.y + look.h && b.y > c.y) hit = true;
       }
       if (s.jefe && JF.tocado(s.jefe, b.x, b.y, 2)) hit = true;
+      // Bombs also catch enemy missiles on their way down.
+      for (const o of s.shots) if (o.enemy && o.m.t >= 0 && Math.hypot(o.m.x - b.x, o.m.y - b.y) < 12 + MS.MISILES[o.m.tipo].radioChoque) hit = true;
       for (const u of s.gigantes) {
         if (!u.viva) continue;
         const bx = G.caja(u);
@@ -1754,10 +2074,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       if (hit) {
         b.t = -1;
-        blast(b.x, Math.max(b.y, ground(b.x)), FA.ENERGIA.bomba, 'jugador', 4);
+        blast(b.x, Math.max(b.y, ground(b.x)), FA.ENERGIA.bombaJugador, 'jugador', 4);
       }
     }
     s.bombs = s.bombs.filter((b) => b.t >= 0 && b.x > 0 && b.x < LEVEL);
+    stepBullets(dt);
 
     // Flak shells burst when their fuse runs out.
     for (const sh of s.shells) {
@@ -1945,6 +2266,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       AE.dibujar(g, a, sx(a.x), sy(a.y), s.t, (s.airFlash.get(a.id) ?? 0) > 0);
       AE.dibujarRayo(g, a, sx(a.x), sy(a.y), s.t);
     }
+    for (const f of s.fighters) CZ.dibujar(g, f, sx(f.a.x), sy(f.a.y), s.t);
     if (s.jefe) JF.dibujar(g, s.jefe, sx(s.jefe.x), sy(s.jefe.y), s.t, s.jefeFlash > 0);
     for (const q of s.proy) AE.dibujarProyectil(g, q, sx(q.x), sy(q.y), s.t);
 
@@ -1953,6 +2275,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const h of s.puffs) A.drawPuff(g, sx(h.x), sy(h.y), h.r, h.dark, 1 - h.t / h.life);
     for (const f of s.flareBodies) A.drawFlare(g, sx(f.x), sy(f.y), s.t);
     for (const b of s.bombs) A.drawBomb(g, sx(b.x), sy(b.y), -b.rumbo);
+    // Machine-gun tracers: a bright head and a short orange tail.
+    for (const b of s.bullets) {
+      const v = Math.hypot(b.vx, b.vy) || 1;
+      const hx = sx(b.x), hy = sy(b.y);
+      for (let i = 1; i <= 3; i++) A.R(g, Math.round(hx - (b.vx / v) * i * 2), Math.round(hy + (b.vy / v) * i * 2), 1, 1, i === 1 ? P.gold : '#ff9a3c');
+      A.R(g, hx, hy, 2, 1, P.white);
+    }
     for (const sh of s.shells) A.drawShell(g, sx(sh.x), sy(sh.y));
     const tup: [number, number] = [0, 0];
     const toScreen = (x: number, y: number) => {
@@ -1976,7 +2305,31 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     VFX.dibujar(g, s.fx, (x, y) => [sx(x), sy(y)], s.t);
     const blink = s.inv > 0 && Math.floor(s.t * 14) % 2 === 0;
     if (!s.dead) A.drawPlane(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, p.alabeo, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
+    // The nitro flame: a long flickering jet out of the tail.
+    if (s.nitroT > 0 && !s.dead) {
+      const ux = Math.cos(p.rumbo), uy = -Math.sin(p.rumbo);
+      const bx = sx(p.x) - ux * (s.spec.hit + 2), by = sy(p.y) - uy * (s.spec.hit + 2);
+      const len = 14 + Math.floor(Math.random() * 6);
+      const cols = [P.white, P.white, '#bfe8ff', P.gold, P.gold, '#ff9a3c', '#ff9a3c', P.red];
+      for (let i = 0; i < len; i++) {
+        const w = i < 3 ? 3 : i < 9 ? 2 : 1;
+        A.R(g, Math.round(bx - ux * i - w / 2), Math.round(by - uy * i - w / 2), w, w, cols[Math.min(cols.length - 1, Math.floor((i / len) * cols.length))]);
+      }
+    }
     if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw);
+    // Where the finger is: a small ring the plane is heading for.
+    if (aimAt && s.mode === 'play' && !s.dead) {
+      const ax = Math.round(aimAt.x);
+      const ay = Math.round(aimAt.y);
+      const r = 5 + (Math.floor(s.t * 6) % 2);
+      g.globalAlpha = 0.85;
+      for (let a = 0; a < 16; a++) {
+        const t = (a / 16) * Math.PI * 2;
+        A.R(g, ax + Math.round(Math.cos(t) * r), ay + Math.round(Math.sin(t) * r), 1, 1, a % 2 ? P.white : '#3a2a6a');
+      }
+      A.R(g, ax, ay, 1, 1, P.white);
+      g.globalAlpha = 1;
+    }
 
     // A red flash when the plane is hit.
     if (s.hurtFlash > 0) {
@@ -2034,17 +2387,40 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
 
+    // Lock-on reticle: brackets close in on the target, red and blinking once locked.
+    if (s.mode === 'play' && !s.dead && s.lockCand && s.lockT > 0.1 && s.lockCand.vivo()) {
+      const q = s.lockCand.pos();
+      const cx = sx(q.x), cy = sy(q.y);
+      const k = Math.min(1, s.lockT / LOCK_TIME);
+      const locked = k >= 1;
+      if (!locked || Math.floor(s.t * 8) % 2) {
+        const r = Math.round(s.lockCand.r + 6 + (1 - k) * 14);
+        const col = locked ? P.red : P.gold;
+        for (const [ux, uy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+          A.R(g, cx + ux * r - (ux > 0 ? 3 : 0), cy + uy * r - (uy > 0 ? 0 : 0), 4, 1, col);
+          A.R(g, cx + ux * r - (ux > 0 ? 0 : 0), cy + uy * r - (uy > 0 ? 3 : 0), 1, 4, col);
+        }
+        if (locked) {
+          g.font = 'bold 7px "Fredoka", "Nunito", sans-serif';
+          g.textAlign = 'center';
+          g.fillStyle = P.red;
+          g.fillText('FIJADO', cx, cy - r - 3);
+        }
+      }
+    }
+
     // No enemy in view: an arrow at the edge points to the nearest one, with the distance.
     if (s.mode === 'play' && !s.dead) {
       const seen = (x: number, y: number) => sx(x) >= 0 && sx(x) < vw && sy(y) >= 0 && sy(y) < vh;
-      const foes: { x: number; y: number }[] = [...s.cars, ...s.aereos, ...s.gigantes.filter((u) => u.viva)];
+      const foes: { x: number; y: number }[] = [...s.cars, ...s.aereos, ...s.gigantes.filter((u) => u.viva), ...s.fighters.map((f) => f.a)];
       if (s.jefe) foes.push(s.jefe);
       if (foes.length && !foes.some((f) => seen(f.x, f.y))) {
         let best = foes[0];
         for (const f of foes) if (Math.hypot(f.x - p.x, f.y - p.y) < Math.hypot(best.x - p.x, best.y - p.y)) best = f;
         const right = best.x > p.x;
         const ax = right ? vw - 22 : 14;
-        const ay = clamp(sy(best.y), 40, vh - A.DIRT - 14);
+        // On phones the weapon buttons cover the lower right: keep the arrow above them.
+        const ay = clamp(sy(best.y), 40, view.touch ? Math.round(vh * 0.55) : vh - A.DIRT - 22);
         const bob = Math.round(Math.sin(s.t * 6) * 2) * (right ? 1 : -1);
         g.globalAlpha = 0.9;
         A.R(g, ax - 9 + bob, ay - 5, 18, 10, '#3a2a6a');
@@ -2080,21 +2456,65 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       A.R(g, ax - 2, altY(p.y) - 1, 6, 3, P.gold);
     }
 
-    // Radar along the bottom: the pantry, the mice, the plane and the view.
-    const rx = 8;
-    const rw = vw - 16;
-    const ry = vh - 6;
-    const at = (x: number) => rx + Math.round((x / LEVEL) * rw);
-    g.globalAlpha = 0.55;
-    A.R(g, rx - 1, ry - 2, rw + 2, 6, '#3a2a6a');
-    g.globalAlpha = 1;
-    A.R(g, at(s.camX), ry - 2, Math.max(2, Math.round((vw / LEVEL) * rw)), 6, 'rgba(255,255,255,0.25)');
-    A.R(g, at(PANTRY.x0), ry - 1, 4, 5, P.b2);
-    for (const c of s.cars) A.R(g, at(c.x), ry, 2, 3, P.p1);
-    for (const a of s.aereos) A.R(g, at(a.x), ry - 2, 2, 2, P.p0);
-    for (const u of s.gigantes) if (u.viva) A.R(g, at(u.x), ry, u.tipo === 'tren' || u.tipo === 'ratonzilla' ? 4 : 1, 3, P.r2);
-    for (const sh of s.shots) if (sh.enemy) A.R(g, at(sh.m.x), ry - 1, 1, 1, P.red);
-    A.R(g, at(p.x) - 1, ry, 3, 3, P.gold);
+    // Minimap along the bottom: the whole valley side-on, with the terrain,
+    // the pantry, every enemy at its height, missiles, the plane and the view.
+    {
+      const H = 13;
+      const rx = 8;
+      const rw = vw - 24;
+      const top = vh - H - 3;
+      const at = (x: number) => rx + Math.round((x / LEVEL) * rw);
+      // Height on a square-root scale: the low sky, where the fight is, gets more room.
+      const ht = (alt: number) => top + H - 1 - Math.round(Math.sqrt(clamp(alt, 0, CEIL) / CEIL) * (H - 2));
+      g.globalAlpha = 0.72;
+      A.R(g, rx - 2, top - 2, rw + 4, H + 4, '#3a2a6a');
+      g.globalAlpha = 1;
+      A.R(g, rx - 1, top - 1, rw + 2, H + 2, '#262048');
+      for (const z of [500, 1300, 1900]) A.R(g, rx, ht(z), rw, 1, 'rgba(255,255,255,0.08)');
+      // Terrain silhouette, sampled once per column.
+      for (let c = 0; c < rw; c++) {
+        const gy = ht(Math.max(0, ground(((c + 0.5) / rw) * LEVEL)));
+        A.R(g, rx + c, gy, 1, top + H - gy, '#4f8a5a');
+        A.R(g, rx + c, gy, 1, 1, '#8fd48a');
+      }
+      // The view the camera shows.
+      const v0 = at(s.camX);
+      const vwid = Math.max(3, Math.round((vw / LEVEL) * rw));
+      const vt = ht(s.camY - A.DIRT + vh);
+      const vb = ht(Math.max(0, s.camY - A.DIRT));
+      g.globalAlpha = 0.18;
+      A.R(g, v0, vt, vwid, Math.max(2, vb - vt + 1), '#ffffff');
+      g.globalAlpha = 0.6;
+      A.R(g, v0, vt, vwid, 1, '#ffffff');
+      A.R(g, v0, vb, vwid, 1, '#ffffff');
+      A.R(g, v0, vt, 1, vb - vt + 1, '#ffffff');
+      A.R(g, v0 + vwid - 1, vt, 1, vb - vt + 1, '#ffffff');
+      g.globalAlpha = 1;
+      // The pantry, with its fish left.
+      const px0 = at(PANTRY.x0);
+      A.R(g, px0, ht(ground(PANTRY.x0)) - 3, 4, 3, P.b2);
+      for (let i = 0; i < s.meta; i++) A.R(g, px0 + 5 + i * 2, ht(ground(PANTRY.x0)) - 2, 1, 1, '#9ad8ff');
+      // Enemies: ground ones lilac, flyers pink, big ones and bosses bigger.
+      const blink = Math.floor(s.t * 4) % 2 === 0;
+      for (const c of s.cars) A.R(g, at(c.x) - 1, ht(c.y) - 2, c.kind === 'margarita' ? 4 : 2, c.kind === 'margarita' ? 3 : 2, c.kind === 'margarita' ? (blink ? P.red : P.r3) : '#c9b4ff');
+      for (const u of s.gigantes) if (u.viva) A.R(g, at(u.x) - 1, ht(u.y) - 2, u.tipo === 'tren' || u.tipo === 'ratonzilla' ? 4 : 1, 2, P.r2);
+      for (const a of s.aereos) A.R(g, at(a.x), ht(a.y), 2, 1, P.p1);
+      for (const f of s.fighters) A.R(g, at(f.a.x) - 1, ht(f.a.y) - 1, 3, 2, '#ff6ad5');
+      if (s.jefe) {
+        const jx = at(s.jefe.x) - 2;
+        const jy = ht(s.jefe.y) - 1;
+        A.R(g, jx, jy, 5, 3, blink ? P.red : P.gold);
+      }
+      for (const q of s.prizes) A.R(g, at(q.x), ht(q.y), 1, 1, P.gold1);
+      for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) A.R(g, at(sh.m.x), ht(sh.m.y), 1, 1, sh.tgt === p ? P.red : '#ff9a3c');
+      // The plane: a little arrow showing where it heads.
+      const ppx = at(p.x);
+      const ppy = ht(p.y);
+      const dir = Math.cos(p.rumbo) >= 0 ? 1 : -1;
+      A.R(g, ppx - 1, ppy - 1, 3, 3, '#3a2a6a');
+      A.R(g, ppx - 1, ppy, 3, 1, P.gold);
+      A.R(g, ppx + dir, ppy - 1, 1, 3, P.gold);
+    }
   }
 
   /* ── HUD ── */
@@ -2112,6 +2532,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       meta: s.meta,
       metaMax: META_MAX,
       ammo: s.ammo,
+      heat: Math.round(s.heat * 20) / 20,
+      hot: s.hot,
+      nitro: s.nitroT > 0 ? 'activo' : s.nitroCd > 0 ? 'carga' : 'listo',
+      nitroK: s.nitroCd > 0 ? Math.round((1 - s.nitroCd / NITRO_CD) * 20) / 20 : 1,
       rack: s.cap.misil,
       flares: s.flares,
       flareMax: s.cap.bengala,
@@ -2143,10 +2567,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   const CODES: Record<string, string> = {
     ArrowLeft: 'l', KeyA: 'l', ArrowRight: 'r', KeyD: 'r', ArrowUp: 'u', KeyW: 'u', ArrowDown: 'd', KeyS: 'd',
-    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyL: 'flare',
+    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyL: 'flare', KeyH: 'gun', KeyF: 'gun',
     KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
   };
-  const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false };
+  const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false };
+  /** The held finger in canvas pixels (touch flying), or null. */
+  let aimAt: { x: number; y: number } | null = null;
   function syncInput() {
     const kx = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
     const ky = (keys.has('u') ? 1 : 0) - (keys.has('d') ? 1 : 0);
@@ -2156,6 +2582,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     input.fire = keys.has('fire') || touch.fire;
     input.bomb = keys.has('bomb') || touch.bomb;
     input.flare = keys.has('flare') || touch.flare;
+    input.gun = keys.has('gun') || touch.gun;
   }
   const onKey = (e: KeyboardEvent) => {
     const k = CODES[e.code];
@@ -2167,10 +2594,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (e.type === 'keydown' && !e.repeat) zoom();
       return;
     }
+    if (e.type === 'keydown' && !e.repeat && k === 'acc') tapAccel();
     if (e.type === 'keydown') keys.add(k);
     else keys.delete(k);
     syncInput();
   };
+  /** Two taps on accelerate in quick succession fire the super nitro. */
+  let lastAcc = -1e9;
+  function tapAccel() {
+    const now = performance.now();
+    if (now - lastAcc < 350 && s.nitroT <= 0 && s.nitroCd <= 0 && s.mode === 'play' && !s.dead) {
+      s.nitroT = NITRO_T;
+      s.nitroCd = NITRO_CD;
+      pop(s.plane.x, s.plane.y + 18, '¡SUPER NITRO!', '#7ad8ff');
+      fx('misil', sfx.launch, { vol: 0.6, rate: 0.6, dur: 0.9 });
+      lastAcc = -1e9;
+      return;
+    }
+    lastAcc = now;
+  }
   const onHide = () => {
     if (document.visibilityState === 'hidden') save();
   };
@@ -2241,6 +2683,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     demo,
     /** Touch controls write here; the keyboard is merged in. */
     touch(t: Partial<typeof touch>) {
+      if (t.gas === 1 && touch.gas !== 1) tapAccel();
       Object.assign(touch, t);
       syncInput();
     },
@@ -2271,6 +2714,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.hudKey = '';
     },
     /** Touch screens lift the ground above the on-screen buttons. */
+    /** Touch flying: a finger at client (x, y) steers the plane toward it; null lets go. */
+    aim(pt: { x: number; y: number } | null) {
+      if (!pt) {
+        aimAt = null;
+        touch.x = touch.y = 0;
+        syncInput();
+        return;
+      }
+      const r = canvas.getBoundingClientRect();
+      aimAt = { x: ((pt.x - r.left) / r.width) * view.vw, y: ((pt.y - r.top) / r.height) * view.vh };
+    },
     setTouch(t: boolean) {
       view.touch = t;
     },

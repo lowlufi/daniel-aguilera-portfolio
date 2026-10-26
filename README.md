@@ -44,6 +44,7 @@ src/
 │   ├── ia.ts            ← Cerebro de los vehículos ratón: esquivar bombas, dispersarse, salvas coordinadas
 │   ├── aereos.ts        ← Ratones voladores: helicóptero, enjambre de drones abejorro, globo con minas, ovnis
 │   ├── gigantes.ts      ← Enemigos de tierra de todos los tamaños: motos, infantería con fusil o bazuca, tren blindado, Ratonzilla
+│   ├── cazas.ts         ← Cazas ratón (desde la oleada 3): persiguen con la misma física de vuelo, ráfagas y misiles
 │   ├── jefes.ts         ← Jefes voladores por piezas: Dirigible Gran Queso y Nave nodriza del Emperador Ratón
 │   ├── efectos.ts       ← Explosiones en capas, onda expansiva, escombros, fuego, piezas que caen, restos ardiendo
 │   ├── audio-batalla.ts ← Silbido doppler de los misiles que persiguen, alarma, motor dañado, fuego, viento, ambiente por altura, avisos de jefe
@@ -101,10 +102,13 @@ public/
 - **Misiles enemigos:** seis tipos, cada uno con su forma de esquivarlo; dos misiles que chocan explotan, las explosiones revientan en cadena a los cercanos y los tuyos pueden derribarlos.
 - **Espacio aéreo hasta el espacio:** se puede subir unos 10 km; el fondo pasa del valle al mar de nubes, la estratosfera y el espacio con ovnis. El botón 🌄 cambia el cielo (automático, día, tarde, noche). Los enemigos solo disparan cuando se ven en pantalla, y una flecha en el borde indica dónde están.
 - **Recompensas y puentes:** se empieza con pocos misiles, bombas y bengalas; algunos enemigos llevan globos que, al derribarlos, quedan flotando y suman un puesto de esa arma. Con el avión muy dañado aparecen globos de reparación 🔧. Si el terreno queda muy roto, los ratones se bajan y arman puentes.
-- **Enemigos de todos los tamaños y jefes:** motos, infantería que salta de los vehículos destruidos, tren blindado, Ratonzilla; el Dirigible Gran Queso y la Nave nodriza llegan cada pocas oleadas y se rompen por piezas.
+- **Enemigos de todos los tamaños y jefes:** motos, infantería que salta de los vehículos destruidos, tren blindado, Ratonzilla; el Dirigible Gran Queso llega al terminar las oleadas 3, 9… y la Nave nodriza en la 6, 12… (o si te quedas mucho en el espacio); se rompen por piezas.
 - **Al perder:** desde la oleada 3 se puede seguir desde la misma oleada (puntaje a 0).
+- **Armas del jugador:** misil que va donde apunta la nariz (si mantienes la nariz 1 s sobre un enemigo, se **fija** y el misil lo persigue; disparado al cielo se queda sin combustible y cae en picada), bombas de gran radio, **metralla** que se calienta si la mantienes, y bengalas que se recargan cada 4 s y engañan a la mayoría de los misiles. Misiles y bombas derriban misiles enemigos.
+- **Super nitro:** apretar acelerar dos veces seguidas da un empujón de 2,5 s por sobre la velocidad máxima (se recarga en 9 s). Volando rápido y alejándote, los misiles se quedan atrás.
+- **Choques:** estrellarse fuerte contra el suelo destruye el avión al instante; un roce cuesta una pieza.
 - **Sonido:** sin música de fondo; efectos grabados reales con licencia CC0 (motores en loop, misiles, explosiones, antiaéreo, alarma), en estéreo según la posición.
-- **Controles (siempre en pantalla):** flechas o WASD pilotear, E/Shift acelerar, Q/Ctrl frenar (aerofrenos), Espacio/J misil, K bomba, L bengalas, Z o rueda zoom, Esc pausa. En celular, joystick a la izquierda y botones con nombre a la derecha.
+- **Controles (siempre en pantalla):** flechas o WASD pilotear, E/Shift acelerar (dos veces: super nitro), Q/Ctrl frenar (aerofrenos), Espacio/J misil, K bomba, L bengalas, H/F metralla, Z o rueda zoom, Esc pausa. En celular, se mantiene el dedo en el cielo y el avión vuela hacia ese punto; botones con nombre a la derecha.
 
 ## Features del sitio clásico
 

@@ -201,35 +201,25 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     };
   }, [togglePause, play, phase, paused]);
 
-  /* Touch: a floating stick on the left half, buttons on the right. */
-  const stick = useRef<{ id: number; x: number; y: number } | null>(null);
-  const [knob, setKnob] = useState<{ x: number; y: number; dx: number; dy: number } | null>(null);
-  const onStickDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    stick.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  /* Touch: hold a finger anywhere on the sky and the plane flies toward it; buttons on the right. */
+  const finger = useRef<number | null>(null);
+  const [flying, setFlying] = useState(false);
+  const onSkyDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (finger.current !== null) return;
+    finger.current = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setKnob({ x: e.clientX, y: e.clientY, dx: 0, dy: 0 });
+    game.current?.aim({ x: e.clientX, y: e.clientY });
+    setFlying(true);
   };
-  const onStickMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const st = stick.current;
-    if (!st || st.id !== e.pointerId) return;
-    const R = 46;
-    let dx = e.clientX - st.x;
-    let dy = e.clientY - st.y;
-    const len = Math.hypot(dx, dy);
-    if (len > R) {
-      dx = (dx / len) * R;
-      dy = (dy / len) * R;
-    }
-    // Only the direction matters: the plane points its nose that way.
-    const n = len > 6 ? 1 / len : 0;
-    game.current?.touch({ x: dx * n, y: -dy * n });
-    setKnob({ x: st.x, y: st.y, dx, dy });
+  const onSkyMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (finger.current !== e.pointerId) return;
+    game.current?.aim({ x: e.clientX, y: e.clientY });
   };
-  const onStickUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (stick.current?.id !== e.pointerId) return;
-    stick.current = null;
-    game.current?.touch({ x: 0, y: 0 });
-    setKnob(null);
+  const onSkyUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (finger.current !== e.pointerId) return;
+    finger.current = null;
+    game.current?.aim(null);
+    setFlying(false);
   };
   const throttle = (v: number) => ({
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
@@ -277,7 +267,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       }
       return !v;
     });
-  const hold = (key: 'fire' | 'bomb' | 'flare') => ({
+  const hold = (key: 'fire' | 'bomb' | 'flare' | 'gun') => ({
     onPointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
       game.current?.touch({ [key]: true });
@@ -345,6 +335,25 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <Slots icon="bomba" n={hud.bombs} max={hud.bombMax} />
                   <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
                   <Slots icon="bengala" n={hud.flares} max={hud.flareMax} />
+                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
+                  <span
+                    title="Super nitro: aprieta acelerar dos veces seguidas"
+                    className={`rounded-full px-1.5 text-[10px] font-black ${
+                      hud.nitro === 'activo' ? 'animate-pulse bg-[#7ad8ff] text-[#1a3a6a]' : hud.nitro === 'listo' ? 'bg-[#ffe3a3] text-[#e8742a]' : 'bg-[#ead6b3] text-[#a08060]'
+                    }`}
+                  >
+                    🔥{hud.nitro === 'carga' ? ` ${Math.round(hud.nitroK * 100)}%` : ''}
+                  </span>
+                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
+                  <span
+                    className="relative h-2.5 w-8 overflow-hidden rounded-full bg-[#ead6b3]"
+                    title="Metralla: si la mantienes mucho se calienta y debe enfriarse"
+                  >
+                    <span
+                      className={`absolute inset-y-0 left-0 ${hud.hot ? 'animate-pulse bg-[#ff4a5a]' : hud.heat > 0.7 ? 'bg-[#ff9a3c]' : 'bg-[#7ccf8a]'}`}
+                      style={{ width: `${Math.round((hud.hot ? 1 : hud.heat) * 100)}%` }}
+                    />
+                  </span>
                 </span>
               </>
             )
@@ -442,10 +451,12 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <ul className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
                 <Key k="← ↑ → ↓" label="Pilotear (o WASD)" />
                 <Key k="E · Shift" label="Acelerar" on={hud?.throttle === 1} />
+                <Key k="E E (dos veces)" label="Super nitro" on={hud?.nitro === 'activo'} />
                 <Key k="Q · Ctrl" label="Frenar" on={hud?.throttle === -1} />
                 <Key k="Espacio" label="Misil (sale por la nariz)" />
                 <Key k="K" label="Bomba" />
                 <Key k="L" label="Bengalas" />
+                <Key k="H · F" label="Metralla (se calienta)" />
                 <Key k="Z · rueda" label="Zoom" />
                 <Key k="Esc" label="Pausa" />
               </ul>
@@ -514,7 +525,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 {saved ? 'Nueva partida' : '¡A volar!'}
               </button>
               {touchUi ? (
-                <p className="text-center text-xs font-bold text-[#8a6e55]">Arrastra en la mitad izquierda para pilotear. A la derecha: acelerar, frenar, misil, bomba y bengalas.</p>
+                <p className="text-center text-xs font-bold text-[#8a6e55]">Mantén el dedo en el cielo donde quieras volar y el avión irá hacia allá. A la derecha: acelerar, frenar, misil, bomba y bengalas.</p>
               ) : (
                 <p className="text-center text-xs font-bold text-[#8a6e55]">
                   Flechas o WASD: pilotear · E: acelerar · Q: frenar · Espacio: misil · K: bomba · L: bengalas · Z: zoom · Esc: pausa
@@ -571,26 +582,26 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {phase === 'play' && touchUi && !paused && (
         <>
-          <div className="absolute bottom-0 left-0 top-16 z-10 w-1/2" onPointerDown={onStickDown} onPointerMove={onStickMove} onPointerUp={onStickUp} onPointerCancel={onStickUp}>
-            {!knob && (
-              <div className="pointer-events-none absolute bottom-8 left-8 grid h-24 w-24 place-items-center rounded-full bg-white/20 ring-2 ring-white/60 pb-[env(safe-area-inset-bottom)]">
-                <span className="text-center text-[10px] font-black leading-tight text-white drop-shadow">Arrastra<br />para pilotear</span>
-              </div>
-            )}
-            {knob && (
-              <div className="pointer-events-none absolute h-24 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/25 ring-2 ring-white/60" style={{ left: knob.x, top: knob.y - 64 }}>
-                <div className="absolute left-1/2 top-1/2 h-10 w-10 rounded-full bg-white/80 shadow" style={{ transform: `translate(calc(-50% + ${knob.dx}px), calc(-50% + ${knob.dy}px))` }} />
+          <div className="absolute inset-x-0 bottom-0 top-16 z-10 touch-none" onPointerDown={onSkyDown} onPointerMove={onSkyMove} onPointerUp={onSkyUp} onPointerCancel={onSkyUp}>
+            {!flying && (
+              <div className="pointer-events-none absolute bottom-8 left-6 rounded-full bg-[#3a2a6a]/50 px-3 py-1.5 pb-[env(safe-area-inset-bottom)]">
+                <span className="text-[11px] font-black text-white drop-shadow">👆 Toca el cielo donde quieras volar</span>
               </div>
             )}
           </div>
           <div className="absolute bottom-5 right-3 z-10 flex items-end gap-2 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
             <div className="flex flex-col gap-2">
-              <TouchButton label="Acelerar" active={hud?.throttle === 1} {...throttle(1)}>⏩</TouchButton>
+              <TouchButton label={hud?.nitro === 'listo' ? '×2 nitro' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+                {hud?.nitro === 'activo' ? '🔥' : '⏩'}
+              </TouchButton>
               <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>🛑</TouchButton>
             </div>
             <div className="flex flex-col gap-2">
               <TouchButton label="Bengalas" {...hold('flare')}>✨</TouchButton>
               <TouchButton label="Bomba" {...hold('bomb')}>💣</TouchButton>
+            </div>
+            <div className="flex flex-col gap-2">
+              <TouchButton label="Metralla" active={hud?.hot} {...hold('gun')}>💥</TouchButton>
             </div>
             <TouchButton label="Misil" big {...hold('fire')}>🚀</TouchButton>
           </div>

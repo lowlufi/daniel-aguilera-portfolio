@@ -567,7 +567,7 @@ export function solucionTiro(
  * obús 0,6 → 5 px · misil enemigo 2 → 7,6 px · misil jugador 4 → 9,5 px ·
  * bomba 10 → 13 px.
  */
-export const ENERGIA = { obus: 0.6, misilEnemigo: 2, misilJugador: 4, bomba: 10, vehiculo: 3 } as const;
+export const ENERGIA = { obus: 0.6, misilEnemigo: 2, misilJugador: 4, bomba: 10, bombaJugador: 24, vehiculo: 3 } as const;
 
 /**
  * Escalado de Hopkinson-Cranz: dos cargas producen los mismos efectos a la

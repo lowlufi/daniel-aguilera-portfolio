@@ -160,28 +160,28 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
   // Aerobatic single: light, big cambered wing, +7/-4 g, prop wash keeps the
   // elevator alive at low speed, snappy roll.
   avioneta: derivar({
-    masa: 1, velCrucero: 100, velMax: 145, clCrucero: 0.22, cl0: 0.2, clAlfa: 5.0,
-    alfaPerdida: 0.25, cd0: 0.028, kInducido: 0.07, cargaMax: 5.5, cargaMin: -3,
-    tpwCrucero: 0.5, tpwMax: 0.9, inercia: 0.5, accMando: 34, mandoMinimo: 0.35,
-    accRigidez: 25, accAmort: 3, accPerdida: 9, wCabeceo: 14, tiempoTonel: 0.35,
+    masa: 1, velCrucero: 100, velMax: 168, clCrucero: 0.22, cl0: 0.2, clAlfa: 7.5,
+    alfaPerdida: 0.25, cd0: 0.028, kInducido: 0.045, cargaMax: 9.5, cargaMin: -3.5,
+    tpwCrucero: 0.58, tpwMax: 1.05, inercia: 0.5, accMando: 48, mandoMinimo: 0.45,
+    accRigidez: 25, accAmort: 3, accPerdida: 9, wCabeceo: 19, tiempoTonel: 0.22,
     helice: true, panza: 5,
   }),
   // Jet fighter: fast, thin low-aspect wing (high induced drag), afterburner
   // T/W > 1, structural limit caps the turn at high speed → wide circles.
   caza: derivar({
-    masa: 1.6, velCrucero: 150, velMax: 230, clCrucero: 0.15, cl0: 0.05, clAlfa: 4.0,
-    alfaPerdida: 0.3, cd0: 0.018, kInducido: 0.12, cargaMax: 6, cargaMin: -2.5,
-    tpwCrucero: 0.6, tpwMax: 1.15, inercia: 1.2, accMando: 23, mandoMinimo: 0.12,
-    accRigidez: 18, accAmort: 2.5, accPerdida: 7, wCabeceo: 11, tiempoTonel: 0.5,
+    masa: 1.6, velCrucero: 150, velMax: 265, clCrucero: 0.15, cl0: 0.05, clAlfa: 5.0,
+    alfaPerdida: 0.3, cd0: 0.018, kInducido: 0.07, cargaMax: 11, cargaMin: -3,
+    tpwCrucero: 0.7, tpwMax: 1.35, inercia: 1.2, accMando: 33, mandoMinimo: 0.2,
+    accRigidez: 18, accAmort: 2.5, accPerdida: 7, wCabeceo: 15, tiempoTonel: 0.3,
     helice: false, panza: 5,
   }),
   // Heavy bomber: lots of mass and pitch inertia, low g limit, weak elevator,
   // slow roll. It cannot loop at cruise: reversals become stall turns.
   bombardero: derivar({
-    masa: 4, velCrucero: 85, velMax: 112, clCrucero: 0.4, cl0: 0.35, clAlfa: 4.8,
-    alfaPerdida: 0.24, cd0: 0.035, kInducido: 0.05, cargaMax: 3, cargaMin: -1,
-    tpwCrucero: 0.35, tpwMax: 0.55, inercia: 6, accMando: 10, mandoMinimo: 0.2,
-    accRigidez: 12, accAmort: 2.5, accPerdida: 5, wCabeceo: 6, tiempoTonel: 1.0,
+    masa: 4, velCrucero: 85, velMax: 130, clCrucero: 0.4, cl0: 0.35, clAlfa: 7,
+    alfaPerdida: 0.24, cd0: 0.035, kInducido: 0.035, cargaMax: 5.5, cargaMin: -1.5,
+    tpwCrucero: 0.4, tpwMax: 0.65, inercia: 6, accMando: 15, mandoMinimo: 0.3,
+    accRigidez: 12, accAmort: 2.5, accPerdida: 5, wCabeceo: 8.5, tiempoTonel: 0.6,
     helice: true, panza: 7,
   }),
 };
