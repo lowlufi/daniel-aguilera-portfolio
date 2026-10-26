@@ -1037,7 +1037,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <Key k="Q · Ctrl" label="Frenar (apaga el nitro)" on={hud?.throttle === -1} />
                 <Key k="Espacio" label="Misil (sale por la nariz)" />
                 <Key k="K" label="Bomba" />
-                <Key k="L" label="Bengalas" />
+                <Key k="L · Enter" label="Bengalas" />
                 <Key k="H · F" label="Metralla (se calienta)" />
                 <Key k="N" label="Bomba nuclear (de los ovnis)" />
                 <Key k="R" label="Tonel: esquiva misiles" />
