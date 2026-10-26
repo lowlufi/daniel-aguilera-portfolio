@@ -3806,6 +3806,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         continue;
       }
       if (s.jefe && JF.tocado(s.jefe, b.x, b.y, 2)) hit = true;
+      // Anything flying it runs into sets it off in mid-air.
+      if (!hit && s.aereos.some((q) => q.hp > 0 && Math.hypot(q.x - b.x, q.y - b.y) < AE.radio(q) + 3)) hit = true;
+      if (!hit && s.fighters.some((f) => f.hp > 0 && CZ.tocado(f, b.x, b.y, 3))) hit = true;
       // Bombs also catch enemy missiles on their way down.
       for (const o of s.shots) if (o.enemy && o.m.t >= 0 && Math.hypot(o.m.x - b.x, o.m.y - b.y) < 12 + MS.MISILES[o.m.tipo].radioChoque) hit = true;
       for (const u of s.gigantes) {
