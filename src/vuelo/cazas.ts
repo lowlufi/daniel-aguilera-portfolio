@@ -97,6 +97,10 @@ export type Amenaza = { x: number; y: number; vx: number; vy: number };
 const VEL_BALA = 330;
 export const PUNTOS = 350;
 export const RADIO = 8;
+/** Range the fighters like to fight from (they shoot from here), the one where they break off, and a hard floor. */
+const DIST_TIRO = 240;
+const DIST_MIN = 150;
+const DIST_DURA = 115;
 const G = GRAVEDAD;
 const PI = Math.PI;
 
@@ -225,6 +229,8 @@ export function paso(
   const jr = jugador as Movil & { rumbo?: number };
 
   const dx = jugador.x - a.x, dy = jugador.y - a.y;
+  // Where the two will be in a moment: at merge speeds the break has to start early.
+  const dFut = Math.hypot(dx + (jugador.vx - a.vx) * 0.6, dy + (jugador.vy - a.vy) * 0.6);
   const d = Math.hypot(dx, dy) || 1;
   const los = Math.atan2(dy, dx);
   const V = Math.hypot(a.vx, a.vy);
@@ -264,6 +270,8 @@ export function paso(
     c.decT = lerp(0.5, 0.12, h) * (0.75 + 0.5 * Math.random());
     const bajoAtaque = pAta < lerp(0.35, 0.55, h) && d < lerp(250, 400, h) && cola < 1.35;
     const sobrepaso = ata > 1.75 && d < 190;
+    // Too close for a real fighter pilot: break off and open the range before coming back.
+    const muyCerca = (d < DIST_MIN && cierre > -20) || dFut < DIST_MIN;
     const liderEnganchado = lider && Math.hypot(lider.a.x - jugador.x, lider.a.y - jugador.y) < 460 && ['ataque', 'reversa', 'yoyo'].includes(lider.modo);
     if (!vivo) poner(c, 'retirada', 1);
     else if (amenaza && amenaza.ttg < lerp(0.9, 1.8, h)) poner(c, 'evasion', 0.7);
@@ -278,6 +286,8 @@ export function paso(
       if (c.modo === 'extension' && d > lerp(320, 420, h) && c.modoT < 1.2) poner(c, 'ataque', 0);
       // Margarita's feint: a short extension that turns into a hard reversal.
       else if (c.modo === 'extension' && c.jefa && c.modoT < 0.05) poner(c, 'reversa', 1);
+    } else if (muyCerca && c.modo !== 'extension') {
+      poner(c, c.jefa && Math.random() < 0.4 ? 'reversa' : 'extension', lerp(1.8, 1.2, h));
     } else if (sobrepaso) {
       if (c.jefa) poner(c, Math.random() < 0.45 ? 'extension' : 'reversa', Math.random() < 0.45 ? 0.8 : 1.1);
       else if (h > 0.6 && V > vCorner * 0.9 && Math.random() < h - 0.3) poner(c, 'reversa', 1.1);
@@ -406,7 +416,7 @@ export function paso(
     default: {
       // Attack: lead / pure / lag by geometry and energy.
       const sol = d < 420 ? solucion(a, jugador) : null;
-      if (V < vCorner * 0.7 || (cierre > 110 && d < 230)) {
+      if (V < vCorner * 0.7 || (cierre > 90 && d < 300)) {
         const k = lerp(0.25, 0.4, h);
         th = Math.atan2(jugador.y - jugador.vy * k - a.y, jugador.x - jugador.vx * k - a.x);
         c.pers = 'lag';
@@ -424,7 +434,8 @@ export function paso(
       }
       // Throttle for a closure rate that fits the range: fast from afar, a
       // slow overtake in gun range (the better pilots manage it tighter).
-      const cierreObj = clamp((d - 140) * 0.7, 25, 260);
+      // They hold a stand-off range and shoot from there instead of ramming in.
+      const cierreObj = clamp((d - DIST_TIRO) * 0.7, -70, 260);
       gas = clamp((cierreObj - cierre) / lerp(110, 60, h), -1, 1);
       if (V < vCorner * 0.85) gas = 1;
     }
@@ -434,6 +445,13 @@ export function paso(
   if (V < vStall * 1.45 && c.modo !== 'evasion') {
     th = Math.atan2(alto > 140 ? -0.35 : 0.05, sx);
     gas = 1;
+  }
+
+  // Never fly into the player: inside the hard limit, steer away across the line of sight.
+  if (vivo && (d < DIST_DURA || dFut < DIST_DURA)) {
+    const lado = angDif(Math.atan2(dy, dx) - hdg) > 0 ? -1 : 1;
+    th = Math.atan2(dy, dx) + lado * 1.9;
+    gas = Math.max(gas, 0.6);
   }
 
   // ── Turn the commanded direction at a limited rate (no snaps) ──

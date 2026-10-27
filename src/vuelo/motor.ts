@@ -816,6 +816,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     fighterQueue: 0,
     /** The one-on-one duel with Margarita's fighter is on: nothing else spawns. */
     duelo: false,
+    /** Flares the enemy pops to shake off the player's missiles, and each flyer's cooldown (by object). */
+    bengalasR: [] as (Cuerpo & { t: number })[],
+    bengalaCd: new Map<object, number>(),
     /** Phones: the gun fires by itself at whatever is in the sights. */
     autoGun: false,
     /** The storm clears halfway through its wave: 0 = full storm, 1 = clear moonlit night. */
@@ -999,6 +1002,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.duelo = false;
     s.salva = null;
     s.nuke = null;
+    s.bengalasR = [];
+    s.bengalaCd.clear();
     s.bigQueue = [];
     s.jefe = null;
     s.spaceT = 0;
@@ -2390,6 +2395,37 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     p.perdida = false;
   }
 
+  /**
+   * An enemy (fighter, Margarita, helicopter) under attack pops flares when one of the
+   * player's missiles homes on it and is close. Each flare may pull the missile off:
+   * old rockets bite easily, modern seekers less (and may find the target again).
+   */
+  function defensaBengalas(quien: object, q: Movil, cd: number, n: number) {
+    if ((s.bengalaCd.get(quien) ?? 0) > 0) return;
+    let amenaza: Shot | null = null;
+    for (const sh of s.shots) {
+      if (sh.enemy || sh.m.t < 0 || !sh.lock || !sh.lock.vivo() || sh.lock.pos() !== q) continue;
+      const d = Math.hypot(sh.m.x - q.x, sh.m.y - q.y);
+      if (d < 210) amenaza = sh;
+    }
+    if (!amenaza) return;
+    s.bengalaCd.set(quien, cd + Math.random() * 0.6);
+    const sh = amenaza;
+    const moderno = !!(sh.k ?? s.spec.kit.misil).buscador;
+    let engano = false;
+    for (let i = 0; i < n; i++) {
+      const lado = i % 2 ? 1 : -1;
+      const b = { x: q.x, y: q.y - 2, vx: q.vx * 0.4 + lado * (50 + i * 18), vy: q.vy * 0.4 - 20 - i * 6, t: 0 };
+      s.bengalasR.push(b);
+      if (!engano && Math.random() < (moderno ? 0.28 : 0.55)) {
+        engano = true;
+        sh.lock = { pos: () => b as Movil, vivo: () => b.t < 2.4 && s.bengalasR.includes(b), r: 3 };
+      }
+    }
+    if (engano) pop(q.x, q.y + 14, '¡Bengalas! Misil engañado', '#ffb070');
+    if (!s.attract) fx('bengalas', sfx.flare, { vol: 0.35, rate: 0.9 }, q.x);
+  }
+
   /** A missile's own seeker: the nearest enemy inside a cone ahead of its nose. */
   function buscarBlanco(m: Misil): Fijable | null {
     let best: Fijable | null = null, bd = 300;
@@ -3507,6 +3543,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (f.hp > 0 && f.hp < f.hpMax * 0.5 && Math.random() < dt * 14) puff(f.a.x, f.a.y, rand(1, 2), true, 0.9);
     }
     s.fighters = s.fighters.filter((f) => f.hp > 0);
+    // Enemy flyers defend themselves: a player missile closing in gets a burst of flares.
+    for (const f of s.fighters) defensaBengalas(f.a, f.a, f.jefa ? 0.8 : 1.6, f.jefa ? 5 : 3);
+    for (const a of s.aereos) if (a.tipo === 'helicoptero' && a.hp > 0) defensaBengalas(a, a, 2.4, 3);
+    for (const b of s.bengalasR) {
+      FV.pasoBengala(b, dt, wind);
+      b.t += dt;
+      L.luz(s.luces, b.x, b.y, 16, '#ffb070', 0.06);
+      if (Math.random() < dt * 30) puff(b.x, b.y, rand(0.6, 1), false, 0.6, 0, 3);
+    }
+    s.bengalasR = s.bengalasR.filter((b) => b.t < 2.4 && b.y > ground(b.x));
+    for (const [k, v] of s.bengalaCd) if (v - dt <= 0) s.bengalaCd.delete(k); else s.bengalaCd.set(k, v - dt);
     for (const q of s.proy) {
       const st = AE.pasoProyectil(q, dt, ground, wind);
       if (s.mode === 'play' && !s.dead && Math.hypot(q.x - p.x, q.y - p.y) < s.spec.hit + AE.RADIO_PROYECTIL[q.tipo]) {
@@ -4304,6 +4351,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     for (const f of s.flareBodies) AD.drawBengalaTipo(g, f.tipo, sx(f.x), sy(f.y), s.t + f.t);
+    for (const b of s.bengalasR) AD.drawBengalaTipo(g, 'trampa', sx(b.x), sy(b.y), s.t + b.t);
     if (s.nuke) dibujarNuke(sx(s.nuke.x), sy(s.nuke.y), s.nuke.t);
     for (const b of s.bombs) {
       if (b.sub) AD.drawSubmunicion(g, sx(b.x), sy(b.y), -b.rumbo, s.t);
