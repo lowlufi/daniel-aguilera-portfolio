@@ -1,6 +1,7 @@
 import { P } from '../game/dulce';
 import { planeSprite } from './dibujo';
-import type { ModeloBase as ModeloAvion } from './fisica-tipos';
+import type { Piloto } from './fisica-tipos';
+import { CASA } from './pilotos';
 
 /*
  * Big pilot portraits for the character-select screen (Metal Slug style):
@@ -153,10 +154,13 @@ const BRONCE = { k0: '#8a5a1e', k1: '#d8a040', k2: '#ffe08a', ink: '#3a2414' };
 const CORREA = { k0: '#2e2026', k1: '#4a3634' };
 
 /** Each plane's paint (the scarf and the card use it). */
-const AVION: Record<ModeloAvion, Tono> = {
-  caza: { k0: '#c8481a', k1: '#f2662a', k2: '#ff9858', k3: '#ffcca0', ink: '#6a1e08' },
-  avioneta: { k0: '#e8a828', k1: '#ffd84a', k2: '#ffe880', k3: '#fff6c8', ink: '#8a5010' },
-  bombardero: { k0: '#5a9ae0', k1: '#9ad0ff', k2: '#c4e4ff', k3: '#eef8ff', ink: '#2a5a9a' },
+const AVION: Record<Piloto, Tono> = {
+  dui: { k0: '#c8481a', k1: '#f2662a', k2: '#ff9858', k3: '#ffcca0', ink: '#6a1e08' },
+  lulu: { k0: '#e8a828', k1: '#ffd84a', k2: '#ffe880', k3: '#fff6c8', ink: '#8a5010' },
+  almendrita: { k0: '#5a9ae0', k1: '#9ad0ff', k2: '#c4e4ff', k3: '#eef8ff', ink: '#2a5a9a' },
+  // The humans' cards: Naxo's CESFAM teal, Ñelo's Stuka olive.
+  naxo: { k0: '#2a8a94', k1: '#48b4bc', k2: '#7cd4d6', k3: '#c4f0ee', ink: '#185058' },
+  nelo: { k0: '#4a5a32', k1: '#6e8448', k2: '#94a868', k3: '#c4d49a', ink: '#26301a' },
 };
 
 type Pelo = { k0: string; k1: string; k2: string; k3: string; ink: string };
@@ -172,7 +176,7 @@ const GRIS = { k0: '#a0948e', k1: '#cfc6c0', k2: '#ebe5e0' };
 /* ── Animation state ─────────────────────────────────────────────────────── */
 
 type Boca = 'picara' | 'sonrisa' | 'mueca' | 'ladrido' | 'ladrido2' | 'firme' | 'o';
-type Brazo = 'nada' | 'alcanza' | 'baja' | 'pulgar' | 'saludo1' | 'saludo';
+type Brazo = 'nada' | 'alcanza' | 'baja' | 'pulgar' | 'saludo1' | 'saludo' | 'flexa1' | 'flexa' | 'visera';
 type Estado = {
   by: number; // body offset (breathing / crouch)
   hy: number; // head offset
@@ -184,16 +188,17 @@ type Estado = {
   bufanda: number; // scarf flutter phase 0..3
   vuelo: number; // 0 droops, 1 flies
   brazo: Brazo;
-  gafas: number; // 0 up on the cap, 1 halfway, 2 over the eyes
+  gafas: number; // 0 up on the cap, 1 halfway, 2 over the eyes (Ñelo's sunglasses: 0 on, 1 lowered)
   boca: Boca;
   ceja: 'nada' | 'picara' | 'firme' | 'timida';
   cola: number; // Lulu's tail: 0 hidden, 1 rising, 2 up, 3 up with a curl
 };
 const BASE: Estado = { by: 0, hy: 0, hx: 0, blink: false, squint: false, brillo: 0, oreja: 0, bufanda: 0, vuelo: 0, brazo: 'nada', gafas: 0, boca: 'sonrisa', ceja: 'nada', cola: 0 };
 
-function estado(m: ModeloAvion, pose: Pose, f: number): Estado {
-  const boca: Boca = m === 'caza' ? 'picara' : 'sonrisa';
-  const ceja = m === 'caza' ? 'picara' : m === 'avioneta' ? 'timida' : 'nada';
+function estado(m: Piloto, pose: Pose, f: number): Estado {
+  if (m === 'naxo' || m === 'nelo') return estadoHumano(m, pose, f);
+  const boca: Boca = m === 'dui' ? 'picara' : 'sonrisa';
+  const ceja = m === 'dui' ? 'picara' : m === 'lulu' ? 'timida' : 'nada';
   const b: Estado = { ...BASE, boca, ceja };
   if (pose === 'quieto') {
     return (<Estado[]>[
@@ -204,13 +209,13 @@ function estado(m: ModeloAvion, pose: Pose, f: number): Estado {
     ])[f % 4];
   }
   if (pose === 'elegido') {
-    const e: Estado = { ...b, by: 1, hy: 3, brillo: 1 + (f % 2), vuelo: 1, bufanda: f % 2 ? 2 : 0, oreja: m === 'bombardero' ? 1 : 0 };
-    e.boca = m === 'caza' ? 'mueca' : m === 'avioneta' ? 'o' : 'ladrido2';
-    if (m === 'avioneta') e.ceja = 'nada';
+    const e: Estado = { ...b, by: 1, hy: 3, brillo: 1 + (f % 2), vuelo: 1, bufanda: f % 2 ? 2 : 0, oreja: m === 'almendrita' ? 1 : 0 };
+    e.boca = m === 'dui' ? 'mueca' : m === 'lulu' ? 'o' : 'ladrido2';
+    if (m === 'lulu') e.ceja = 'nada';
     return e;
   }
   f = Math.min(3, f);
-  if (m === 'caza') {
+  if (m === 'dui') {
     return (<Estado[]>[
       { ...b, by: 1, hy: 1, brazo: 'alcanza', boca: 'mueca', bufanda: 1 },
       { ...b, by: 0, hy: 0, brazo: 'baja', gafas: 1, boca: 'mueca', bufanda: 2, vuelo: 0.5 },
@@ -218,7 +223,7 @@ function estado(m: ModeloAvion, pose: Pose, f: number): Estado {
       { ...b, by: -1, hy: -1, brazo: 'pulgar', gafas: 2, boca: 'mueca', ceja: 'firme', bufanda: 0, vuelo: 1, brillo: 2 },
     ])[f];
   }
-  if (m === 'avioneta') {
+  if (m === 'lulu') {
     return (<Estado[]>[
       { ...b, by: 2, hy: 3, squint: true, boca: 'firme', ceja: 'firme', cola: 1, oreja: -1 },
       { ...b, by: 0, hy: 0, brazo: 'saludo1', boca: 'firme', ceja: 'firme', cola: 2, bufanda: 1 },
@@ -239,7 +244,7 @@ function estado(m: ModeloAvion, pose: Pose, f: number): Estado {
 type Cuerpo = { top: number; wt: number; wb: number; pecho: (g: G, x0: number, y0: number, x1: number, y1: number) => void; ink: string };
 
 /** Leather flight jacket with a sheepskin collar, open over the pilot's chest fur. */
-function chaqueta(g: G, m: ModeloAvion, c: Cuerpo, by: number) {
+function chaqueta(g: G, m: Piloto, c: Cuerpo, by: number) {
   const top = c.top + by, J = CHAQUETA, A = AVION[m];
   capa(g, J.ink, (q) => {
     ell(q, 48, top + 12, c.wt + 4, 13, J.k1);
@@ -290,7 +295,7 @@ function chaqueta(g: G, m: ModeloAvion, c: Cuerpo, by: number) {
 }
 
 /** The scarf around the neck: a band, a knot and a tail that droops or flies. */
-function bufanda(g: G, m: ModeloAvion, c: Cuerpo, e: Estado, side: 1 | -1) {
+function bufanda(g: G, m: Piloto, c: Cuerpo, e: Estado, side: 1 | -1) {
   const A = AVION[m], top = c.top + e.by;
   const kx = 48 + side * (c.wt * 0.35), ky = top + 6;
   // Tail: a ribbon along a wavy path.
@@ -484,7 +489,7 @@ function chispas(g: G, x: number, y: number, f: number) {
 /* ── Dui: a fat orange tabby, cheeky ─────────────────────────────────────── */
 
 function pintaDui(g: G, e: Estado) {
-  const m: ModeloAvion = 'caza';
+  const m: Piloto = 'dui';
   const HX = 48 + e.hx, HY = 40 + e.hy, F = DUI;
   const cuerpo: Cuerpo = {
     top: 62, wt: 32, wb: 50, ink: F.ink,
@@ -666,7 +671,7 @@ function bigotes(g: G, x: number, y: number, x0: number, x1: number, c: string) 
 /* ── Lulu: a small black cat with huge yellow eyes ───────────────────────── */
 
 function pintaLulu(g: G, e: Estado) {
-  const m: ModeloAvion = 'avioneta';
+  const m: Piloto = 'lulu';
   const HX = 48 + e.hx, HY = 44 + e.hy, F = LULU;
   const cuerpo: Cuerpo = {
     top: 68, wt: 21, wb: 30, ink: F.ink,
@@ -740,7 +745,7 @@ function pintaLulu(g: G, e: Estado) {
 /* ── Almendrita: a tiny, proud, senior Yorkshire (brown with a black saddle) ── */
 
 function pintaAlmendrita(g: G, e: Estado) {
-  const m: ModeloAvion = 'bombardero';
+  const m: Piloto = 'almendrita';
   const HX = 48 + e.hx, HY = 46 + e.hy, F = TAN;
   const cuerpo: Cuerpo = {
     top: 70, wt: 20, wb: 28, ink: F.ink,
@@ -888,13 +893,488 @@ function pintaAlmendrita(g: G, e: Estado) {
   if (e.brillo && e.brazo === 'nada') chispas(g, HX, HY, e.brillo);
 }
 
+/* ── The humans: Naxo and Ñelo ───────────────────────────────────────────── */
+
+/** Brown skin, short black hair, Naxo's CESFAM scrubs, Ñelo's black hoodie, tattoo ink. */
+const PIEL: Tono = { k0: '#6a381a', k1: '#93562c', k2: '#b2703e', k3: '#cc8c58', ink: '#2e160a' };
+const PELO = { k0: '#0e0a08', k1: '#221814', k2: '#3a2a22', k3: '#56402f', ink: '#060404' };
+const SCRUB: Tono = { k0: '#1f6a74', k1: '#2f949e', k2: '#56bcc2', k3: '#92dcdc', ink: '#0e3640' };
+const POLERON: Tono = { k0: '#0e0c12', k1: '#1e1c24', k2: '#302e3a', k3: '#4a4856', ink: '#040306' };
+const TINTA = '#2a3866';
+
+function estadoHumano(m: 'naxo' | 'nelo', pose: Pose, f: number): Estado {
+  const b: Estado = { ...BASE };
+  if (pose === 'quieto') {
+    // Naxo breathes deep; Ñelo nods along to the cumbia in his head.
+    if (m === 'naxo') {
+      return (<Estado[]>[
+        { ...b, bufanda: 0 },
+        { ...b, by: -1, hy: -1, bufanda: 1 },
+        { ...b, by: -1, bufanda: 2 },
+        { ...b, bufanda: 3, ceja: 'picara' },
+      ])[f % 4];
+    }
+    return (<Estado[]>[
+      { ...b, bufanda: 0 },
+      { ...b, hy: 1, hx: 1, bufanda: 1 },
+      { ...b, bufanda: 2 },
+      { ...b, hy: 1, hx: -1, bufanda: 3 },
+    ])[f % 4];
+  }
+  if (pose === 'elegido') {
+    // Leans in: Naxo grins under the mustache, Ñelo lowers the shades to look at you.
+    return { ...b, by: 1, hy: 3, brillo: 1 + (f % 2), bufanda: f % 2 ? 2 : 0, boca: 'mueca', ceja: 'picara', gafas: m === 'nelo' ? 1 : 0 };
+  }
+  f = Math.min(3, f);
+  if (m === 'naxo') {
+    // Anticipation, then the double-biceps pose: tattoos out.
+    return (<Estado[]>[
+      { ...b, by: 2, hy: 2, boca: 'firme', ceja: 'firme' },
+      { ...b, by: 0, hy: 0, brazo: 'flexa1', boca: 'firme', ceja: 'firme', bufanda: 1 },
+      { ...b, by: -1, hy: -2, brazo: 'flexa', boca: 'mueca', ceja: 'firme', bufanda: 2, brillo: 1 },
+      { ...b, by: -1, hy: -1, brazo: 'flexa', boca: 'mueca', ceja: 'firme', bufanda: 3, brillo: 2 },
+    ])[f];
+  }
+  // Ñelo touches the visor, then a thumbs up.
+  return (<Estado[]>[
+    { ...b, by: 2, hy: 2, boca: 'firme' },
+    { ...b, by: 0, hy: 0, brazo: 'visera', boca: 'sonrisa', bufanda: 1 },
+    { ...b, by: -1, hy: -2, brazo: 'pulgar', boca: 'mueca', bufanda: 2, brillo: 1 },
+    { ...b, by: -1, hy: -1, brazo: 'pulgar', boca: 'mueca', bufanda: 3, brillo: 2 },
+  ])[f];
+}
+
+/** Point and unit direction at fraction k (0…1) of the way along a polyline. */
+function enCamino(pts: Pt[], k: number): [number, number, number, number] {
+  const L: number[] = [];
+  let tot = 0;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    L.push(l);
+    tot += l;
+  }
+  let d = Math.max(0, Math.min(1, k)) * tot;
+  for (let i = 0; i < L.length; i++) {
+    if (d <= L[i] || i === L.length - 1) {
+      const l = L[i] || 1, t = Math.min(1, d / l);
+      const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+      return [ax + (bx - ax) * t, ay + (by - ay) * t, (bx - ax) / l, (by - ay) / l];
+    }
+    d -= L[i];
+  }
+  return [pts[0][0], pts[0][1], 1, 0];
+}
+/** The stretch of a polyline between fractions a and b. */
+function tramo(pts: Pt[], a: number, b: number, n = 8): Pt[] {
+  const out: Pt[] = [];
+  for (let i = 0; i <= n; i++) {
+    const [x, y] = enCamino(pts, a + ((b - a) * i) / n);
+    out.push([x, y]);
+  }
+  return out;
+}
+
+/** Naxo's tattoos along an arm: an anchor (San Antonio is a port), a wave band and a star. */
+function tatuar(q: G, pts: Pt[], r: number) {
+  {
+    const [x, y, ux, uy] = enCamino(pts, 0.34);
+    const nx = -uy, ny = ux;
+    const at = (a: number, b: number): [number, number] => [x + ux * a + nx * b, y + uy * a + ny * b];
+    // Ring, stem, stock and the curved arms of the anchor.
+    const [rx, ry] = at(-4, 0);
+    R(q, rx, ry, 1, 1, TINTA);
+    line(q, ...at(-3, 0), ...at(3, 0), TINTA);
+    line(q, ...at(-2, -2), ...at(-2, 2), TINTA);
+    line(q, ...at(3, 0), ...at(1, -3), TINTA);
+    line(q, ...at(3, 0), ...at(1, 3), TINTA);
+  }
+  {
+    // A wavy band round the forearm.
+    const [x, y, ux, uy] = enCamino(pts, 0.62);
+    const nx = -uy, ny = ux;
+    for (let i = -r + 1; i <= r - 1; i++) {
+      const w = i % 2 ? 1 : -1;
+      R(q, x + nx * i + ux * w, y + ny * i + uy * w, 1, 1, TINTA);
+      R(q, x + nx * i + ux * (w + 2), y + ny * i + uy * (w + 2), 1, 1, TINTA);
+    }
+  }
+  {
+    // A little star near the wrist.
+    const [x, y] = enCamino(pts, 0.82);
+    R(q, x - 1, y, 3, 1, TINTA);
+    R(q, x, y - 1, 1, 3, TINTA);
+    R(q, x - 2, y - 2, 1, 1, TINTA);
+    R(q, x + 2, y + 2, 1, 1, TINTA);
+  }
+}
+
+type ManoH = 'puno' | 'pulgar' | 'abierta';
+/**
+ * A human arm through `pts`: skin all along, the sleeve over the first `manga`
+ * of it (1 = a long sleeve down to a cuff), then a hand at the end. `biceps`
+ * bulges the upper arm upwards (Naxo flexing).
+ */
+function brazoHumano(g: G, pts: Pt[], r: number, ropa: Tono, manga: number, mano: ManoH | null, opt: { tatuajes?: boolean; biceps?: number; k?: number } = {}) {
+  const F = PIEL, k = opt.k ?? 1, bi = opt.biceps ?? 0;
+  // A long sleeve leaves only the wrist bare.
+  const piel = manga < 1 ? pts : tramo(pts, 0.88, 1, 2);
+  capa(g, F.ink, (q) => {
+    tubo(q, piel, r, F.k1);
+    if (bi) {
+      const [x, y] = enCamino(pts, 0.3);
+      ell(q, x, y - bi * 0.6, r + bi * 0.5, r + bi * 0.4, F.k1);
+    }
+  }, (q) => {
+    R(q, 0, 0, S, S, F.k0);
+    tubo(q, piel, r - 1, F.k1, -1, -1);
+    tubo(q, piel, Math.max(1, r * 0.35), F.k2, -r * 0.45, -r * 0.45);
+    if (bi) {
+      const [x, y] = enCamino(pts, 0.3);
+      ell(q, x - 1, y - bi * 0.6 - 1, r + bi * 0.3, r + bi * 0.2, F.k1);
+      ell(q, x - 2, y - bi * 0.6 - 3, r * 0.6, 1.5, F.k3);
+    }
+    if (opt.tatuajes) tatuar(q, pts, r);
+  });
+  if (manga > 0) {
+    const tr = tramo(pts, 0, Math.min(manga, 0.9));
+    const rm = manga < 1 ? r + 1.5 : r + 0.5;
+    capa(g, ropa.ink, (q) => tubo(q, tr, rm, ropa.k1), (q) => {
+      R(q, 0, 0, S, S, ropa.k0);
+      tubo(q, tr, rm - 1.5, ropa.k1, -1, -1);
+      tubo(q, tr, 1.5, ropa.k2, -2, -2);
+      // Hem (short sleeve) or ribbed cuff (long one).
+      const [x, y, ux, uy] = enCamino(tr, 1);
+      for (let i = -rm; i <= rm; i++) R(q, x - ux * 2 - uy * i, y - uy * 2 + ux * i, 1, 1, manga < 1 ? ropa.k0 : ropa.k2);
+    });
+  }
+  if (!mano) return;
+  const [bx, by] = pts[pts.length - 1];
+  capa(g, F.ink, (q) => {
+    if (mano === 'pulgar') {
+      ell(q, bx, by, 6 * k, 5 * k, F.k1);
+      ell(q, bx + 1, by - 7 * k, 2.5 * k, 4 * k, F.k1);
+    } else ell(q, bx, by, 5 * k, 4.5 * k, F.k1);
+  }, (q) => {
+    R(q, 0, 0, S, S, F.k1);
+    ell(q, bx + 2, by + 2, 5 * k, 4 * k, F.k0);
+    ell(q, bx - 1, by - 2, 2.5 * k, 1.5 * k, F.k2);
+    if (mano === 'pulgar') {
+      for (const d of [-2, 0, 2]) R(q, bx - 5 * k, by + d * k, 6 * k, 1, F.k0);
+      R(q, bx, by - 10 * k, 1, 3, F.k2);
+    } else if (mano === 'puno') {
+      for (const d of [-3, -1, 1, 3]) R(q, bx + d * k, by - 4 * k, 1, 3 * k, F.k0);
+    } else {
+      for (const d of [-2, 1]) R(q, bx + d * k, by - 4 * k, 1, 4 * k, F.k0);
+    }
+  });
+}
+
+/** A wide grin with teeth (both humans), a calm smile, or a firm line. */
+function bocaHumana(g: G, x: number, y: number, b: Boca, ink: string) {
+  if (b === 'mueca') {
+    poly(g, [x - 8, y, x + 8, y, x + 6, y + 5, x - 6, y + 5], '#4a1418');
+    poly(g, [x - 4, y + 3, x + 4, y + 3, x + 3, y + 5, x - 3, y + 5], '#e0607a');
+    R(g, x - 7, y, 15, 2, P.white);
+    R(g, x - 7, y + 1, 15, 1, '#e8e0d8');
+    line(g, x - 9, y - 1, x - 8, y, ink);
+    line(g, x + 9, y - 1, x + 8, y, ink);
+    return;
+  }
+  if (b === 'firme') {
+    R(g, x - 4, y + 1, 9, 1, ink);
+    return;
+  }
+  for (let i = -5; i <= 5; i++) R(g, x + i, y + 1 - Math.round(((i * i) / 25) * 2), 1, 1, ink);
+  R(g, x - 3, y + 2, 7, 1, '#a8584a');
+}
+
+/** Face, ears and (optionally) a double chin: the round brown head both humans share. */
+function cabezaHumana(g: G, HX: number, HY: number, ancho: number, papada: number) {
+  const F = PIEL;
+  capa(g, F.ink, (q) => {
+    ell(q, HX, HY, ancho, 19, F.k1);
+    ell(q, HX, HY + 8, ancho, 12, F.k1);
+    ell(q, HX, HY + 15, ancho - 6, 6, F.k1);
+    if (papada) ell(q, HX, HY + 20, ancho - 9, papada, F.k1);
+    for (const s of [-1, 1]) ell(q, HX + s * ancho, HY + 2, 4, 6, F.k1);
+  }, (q) => {
+    R(q, 0, 0, S, S, F.k0);
+    ell(q, HX - 1, HY - 1, ancho - 1, 18, F.k1);
+    ell(q, HX - 1, HY + 8, ancho - 2, 11, F.k1);
+    ell(q, HX - 1, HY + 14, ancho - 7, 5, F.k1);
+    if (papada) {
+      ell(q, HX - 1, HY + 20, ancho - 10, papada - 1, F.k1);
+      for (let i = -8; i <= 8; i++) R(q, HX + i, HY + 19 + Math.round((i * i) / 40), 1, 1, F.k0);
+    }
+    ell(q, HX - 8, HY - 6, 8, 6, F.k2);
+    R(q, HX - 11, HY - 8, 4, 1, F.k3);
+    ell(q, HX - ancho + 6, HY + 7, 5, 3, F.k2);
+    for (const s of [-1, 1]) ell(q, HX + s * ancho, HY + 2, 2, 3.5, F.k0);
+    // Warm cheeks.
+    R(q, HX - ancho + 4, HY + 9, 4, 2, '#b85a40');
+    R(q, HX + ancho - 8, HY + 9, 4, 2, '#b85a40');
+  });
+  // A broad nose.
+  capa(g, '#5a2e14', (q) => ell(q, HX, HY + 6, 4.5, 3.5, F.k1), (q) => {
+    R(q, 0, 0, S, S, F.k1);
+    ell(q, HX - 1, HY + 5, 2, 1.5, F.k2);
+    R(q, HX - 3, HY + 8, 2, 1, F.k0);
+    R(q, HX + 2, HY + 8, 2, 1, F.k0);
+  });
+}
+
+/* ── Naxo: CESFAM nurse, short, stocky and strong, mustache and Ozzy glasses ── */
+
+function pintaNaxo(g: G, e: Estado) {
+  const HX = 48 + e.hx, HY = 42 + e.hy, F = PIEL, T = SCRUB, top = 66 + e.by;
+  const wt = 30, wb = 44;
+  // Thick neck.
+  capa(g, F.ink, (q) => ell(q, 48, top - 4, 13, 9, F.k1), (q) => {
+    R(q, 0, 0, S, S, F.k0);
+    ell(q, 46, top - 6, 11, 6, F.k1);
+  });
+  // Scrub top: wide shoulders, a round belly, V-neck, pocket with pens and an ID card.
+  capa(g, T.ink, (q) => {
+    ell(q, 48, top + 10, wt + 2, 12, T.k1);
+    poly(q, [48 - wt - 2, top + 10, 48 + wt + 2, top + 10, 48 + wb, S + 2, 48 - wb, S + 2], T.k1);
+    ell(q, 48, S + 2, wb - 4, 14, T.k1);
+  }, (q) => {
+    poly(q, [48 + wt - 6, top, S, top, S, S, 48 + wb - 10, S], T.k0);
+    ell(q, 48 - wt + 4, top + 7, 9, 5, T.k2);
+    R(q, 48 - wt, top + 4, 6, 2, T.k3);
+    // The belly's curve and a couple of folds.
+    for (let i = -18; i <= 18; i++) R(q, 48 + i, S - 12 + Math.round((i * i) / 60), 1, 1, T.k0);
+    ell(q, 42, S - 6, 10, 3, T.k2);
+    line(q, 48 + 14, top + 30, 48 + 20, top + 26, T.k0);
+    // V-neck showing the chest.
+    poly(q, [48 - 10, top - 4, 48 + 10, top - 4, 48, top + 12], F.k1);
+    poly(q, [48 + 2, top - 4, 48 + 10, top - 4, 48, top + 12], F.k0);
+    for (const [x, y] of [[-2, 4], [1, 6], [-1, 8], [2, 2]]) R(q, 48 + x, top + y, 1, 1, PELO.k1);
+    line(q, 48 - 11, top - 4, 48, top + 13, T.k0);
+    line(q, 48 + 11, top - 4, 48, top + 13, T.k0);
+    // Chest pocket with a red and a blue pen.
+    R(q, 48 + 10, top + 18, 13, 1, T.k0);
+    R(q, 48 + 10, top + 29, 13, 1, T.k0);
+    R(q, 48 + 13, top + 13, 2, 7, '#d83a3a');
+    R(q, 48 + 13, top + 13, 2, 1, '#ff8a8a');
+    R(q, 48 + 17, top + 12, 2, 8, '#3a6ad8');
+    R(q, 48 + 17, top + 12, 2, 1, '#8ab0ff');
+    R(q, 48 + 18, top + 14, 1, 4, '#dce4ec');
+    // The CESFAM ID card on a clip: white, a blue band, a tiny photo.
+    R(q, 48 - 26, top + 14, 11, 14, '#f4f8f8');
+    R(q, 48 - 26, top + 14, 11, 3, '#2a6ad0');
+    R(q, 48 - 24, top + 19, 4, 5, F.k1);
+    R(q, 48 - 24, top + 19, 4, 1, PELO.k1);
+    R(q, 48 - 19, top + 20, 3, 1, '#9aa8b8');
+    R(q, 48 - 19, top + 22, 3, 1, '#9aa8b8');
+    R(q, 48 - 25, top + 26, 9, 1, '#2aa860');
+    R(q, 48 - 21, top + 12, 1, 3, P.metal);
+  });
+  // The stethoscope over the shoulders, swaying a little.
+  const sw = e.bufanda % 2 ? 1 : 0;
+  const izq = curva([48 - 13, top - 2], [48 - 19, top + 14], [48 - 9 + sw, top + 24], 10);
+  const der = curva([48 + 13, top - 2], [48 + 17, top + 10], [48 + 9 + sw, top + 16], 8);
+  capa(g, '#14141c', (q) => {
+    tubo(q, izq, 1.5, '#3a3a4a');
+    tubo(q, der, 1.5, '#3a3a4a');
+    ell(q, 48 - 9 + sw, top + 27, 3.5, 3.5, '#c8d0dc');
+    ell(q, 48 + 9 + sw, top + 18, 1.5, 1.5, '#c8d0dc');
+  }, (q) => {
+    tubo(q, izq, 0.5, '#5a5a6e', -1, 0);
+    tubo(q, der, 0.5, '#5a5a6e', -1, 0);
+    R(q, 48 - 11 + sw, top + 25, 2, 1, P.white);
+    ell(q, 48 - 8 + sw, top + 28, 2, 2, '#8a96a8');
+  });
+  // Arms: hanging at the sides, or up flexing.
+  const lado = (s: 1 | -1, pts: Pt[], mano: ManoH | null, bi = 0) =>
+    brazoHumano(g, pts.map(([x, y]) => [48 + s * (x - 48), y] as Pt), 7, T, 0.22, mano, { tatuajes: true, biceps: bi, k: 1.2 });
+  for (const s of [-1, 1] as const) {
+    if (e.brazo === 'flexa') lado(s, [[20, top + 6], [7, top - 2], [11, top - 22]], 'puno', 4);
+    else if (e.brazo === 'flexa1') lado(s, [[20, top + 6], [8, top + 10], [8, top - 6]], 'puno', 2);
+    else lado(s, [[19, top + 8], [13, top + 24], [13, S + 8]], null);
+  }
+  // Head.
+  cabezaHumana(g, HX, HY, 19, 0);
+  // Stubble on the jaw.
+  for (let i = 0; i < 26; i++) {
+    const a = Math.PI * (0.15 + 0.7 * hash(i * 5 + 3)), d = 0.75 + 0.25 * hash(i * 5 + 4);
+    R(g, HX + Math.cos(a) * 16 * d, HY + 8 + Math.sin(a) * 11 * d, 1, 1, '#6a3e22');
+  }
+  // Short black hair, flat on top, with sideburns.
+  capa(g, PELO.ink, (q) => {
+    ell(q, HX, HY - 8, 20, 13, PELO.k1);
+    mechones(q, HX, HY - 8, 20, 13, -Math.PI * 0.9, -Math.PI * 0.1, 7, 1, PELO.k1);
+    q.clearRect(0, HY - 11, S, S);
+    for (const s of [-1, 1]) R(q, HX + s * 17 - (s < 0 ? 0 : 3), HY - 11, 3, 10, PELO.k1);
+  }, (q) => {
+    R(q, 0, 0, S, S, PELO.k1);
+    ell(q, HX - 6, HY - 18, 8, 3, PELO.k2);
+    R(q, HX - 9, HY - 20, 3, 1, PELO.k3);
+    for (let x = -14; x <= 14; x += 4) line(q, HX + x, HY - 20, HX + x + 2, HY - 12, PELO.k0);
+  });
+  // Thick eyebrows over the glasses.
+  const cy = HY - 8;
+  if (e.ceja === 'firme') {
+    line(g, HX - 14, cy - 1, HX - 4, cy + 1, PELO.k1, 2);
+    line(g, HX + 14, cy - 1, HX + 4, cy + 1, PELO.k1, 2);
+  } else {
+    line(g, HX - 14, cy, HX - 4, cy - 1, PELO.k1, 2);
+    const sube = e.ceja === 'picara' ? 2 : 0;
+    line(g, HX + 4, cy - 1 - sube, HX + 14, cy - sube, PELO.k1, 2);
+  }
+  // Mouth, then the big mustache over it.
+  bocaHumana(g, HX, HY + 14, e.boca, '#3a1a10');
+  capa(g, PELO.ink, (q) => {
+    poly(q, [HX - 4, HY + 9, HX + 4, HY + 9, HX + 12, HY + 12, HX + 13, HY + 17, HX + 9, HY + 15, HX, HY + 14, HX - 9, HY + 15, HX - 13, HY + 17, HX - 12, HY + 12], PELO.k1);
+  }, (q) => {
+    R(q, 0, 0, S, S, PELO.k1);
+    for (const s of [-1, 1]) {
+      line(q, HX + s * 2, HY + 10, HX + s * 9, HY + 12, PELO.k2);
+      line(q, HX + s * 5, HY + 12, HX + s * 11, HY + 14, PELO.k0);
+    }
+    R(q, HX - 5, HY + 10, 3, 1, PELO.k3);
+  });
+  // The round dark glasses on a thin wire.
+  const gl = e.bufanda % 2;
+  for (const s of [-1, 1]) line(g, HX + s * 14, HY - 2, HX + s * 19, HY - 1, '#b0a080');
+  R(g, HX - 2, HY - 3, 4, 1, '#b0a080');
+  for (const s of [-1, 1]) {
+    const x = HX + s * 8, y = HY - 1;
+    ell(g, x, y, 6.5, 6.5, '#2a2018');
+    ell(g, x, y, 5.5, 5.5, '#d0b880');
+    ell(g, x, y, 4.5, 4.5, '#1c1426');
+    ell(g, x + 1, y + 1, 3, 3, '#2a2040');
+    line(g, x - 3 + gl, y - 1, x - 1 + gl, y - 3, '#8a8ab8');
+    R(g, x + 2, y + 2, 1, 1, '#6a6a9a');
+    if (e.brillo) {
+      const sx = x + (e.brillo === 1 ? -2 : 2), sy = y + (e.brillo === 1 ? -2 : 1);
+      R(g, sx - 1, sy, 3, 1, P.white);
+      R(g, sx, sy - 1, 1, 3, P.white);
+    }
+  }
+  if (e.brillo && e.brazo !== 'flexa1') chispas(g, HX, HY, e.brillo);
+}
+
+/* ── Ñelo: a bit taller and rounder, black cap, black shades, black hoodie ── */
+
+/** A pixel «Ñ» for the cap's front (7 rows, 5 wide). */
+const LETRA_N = ['.##.#', '#.##.', '#...#', '##..#', '#.#.#', '#..##', '#...#'];
+
+function pintaNelo(g: G, e: Estado) {
+  const HX = 48 + e.hx, HY = 38 + e.hy, F = PIEL, K = POLERON, top = 62 + e.by;
+  const wt = 30, wb = 48;
+  // The hood lying on the shoulders, behind the neck.
+  capa(g, K.ink, (q) => ell(q, 48, top - 1, 27, 11, K.k1), (q) => {
+    R(q, 0, 0, S, S, K.k0);
+    ell(q, 46, top - 4, 23, 6, K.k1);
+    ell(q, 38, top - 6, 10, 2, K.k2);
+  });
+  capa(g, F.ink, (q) => ell(q, 48, top - 2, 13, 8, F.k1), (q) => {
+    R(q, 0, 0, S, S, F.k0);
+    ell(q, 46, top - 5, 11, 5, F.k1);
+  });
+  // The hoodie: big and round, kangaroo pocket, a little wave print.
+  capa(g, K.ink, (q) => {
+    ell(q, 48, top + 10, wt + 2, 12, K.k1);
+    poly(q, [48 - wt - 2, top + 10, 48 + wt + 2, top + 10, 48 + wb, S + 2, 48 - wb, S + 2], K.k1);
+    ell(q, 48, S + 2, wb - 2, 16, K.k1);
+  }, (q) => {
+    poly(q, [48 + wt - 6, top, S, top, S, S, 48 + wb - 10, S], K.k0);
+    ell(q, 48 - wt + 4, top + 7, 9, 5, K.k2);
+    R(q, 48 - wt, top + 4, 6, 2, K.k3);
+    for (let i = -20; i <= 20; i++) R(q, 48 + i, S - 14 + Math.round((i * i) / 70), 1, 1, K.k0);
+    ell(q, 40, S - 9, 10, 3, K.k2);
+    // Neck opening.
+    ell(q, 48, top + 1, 12, 4, K.k0);
+    // Kangaroo pocket.
+    poly(q, [48 - 18, S - 6, 48 + 18, S - 6, 48 + 23, S + 2, 48 - 23, S + 2], K.k0);
+    line(q, 48 - 18, S - 7, 48 + 18, S - 7, K.k2);
+    line(q, 48 - 18, S - 6, 48 - 23, S + 1, K.k2);
+    // A small print on the chest: a white wave.
+    for (let i = 0; i < 9; i++) R(q, 48 - 22 + i, top + 18 + Math.round(Math.sin(i * 0.9) * 1.5), 1, 2, i % 3 ? '#e8e8f0' : '#a8a8b8');
+  });
+  // White drawstrings with metal tips, swinging.
+  const sw = [0, 1, 0, -1][e.bufanda % 4];
+  for (const s of [-1, 1]) {
+    const a: Pt = [48 + s * 5, top + 3], b: Pt = [48 + s * 6 + sw, top + 21];
+    capa(g, '#5a5a6a', (q) => tubo(q, [a, b], 1, '#ececf4'), (q) => tubo(q, [a, b], 0.4, '#b8b8c8', 1, 0));
+    R(g, b[0] - 1, b[1] + 1, 2, 3, P.metal);
+    R(g, b[0] - 1, b[1] + 1, 1, 1, P.white);
+  }
+  // Arms in long black sleeves, hanging (the raised one goes on last, over the face).
+  const sube = e.brazo === 'visera' || e.brazo === 'pulgar';
+  brazoHumano(g, [[78, top + 10], [84, top + 26], [84, S + 8]], 7, K, 1, null);
+  if (!sube) brazoHumano(g, [[18, top + 10], [12, top + 26], [12, S + 8]], 7, K, 1, null);
+  // Head: round, with a double chin.
+  cabezaHumana(g, HX, HY, 20, 4.5);
+  bocaHumana(g, HX, HY + 12, e.boca, '#3a1a10');
+  // The jockey cap: crown, front panel with the «Ñ», button, and the visor.
+  capa(g, K.ink, (q) => {
+    ell(q, HX, HY - 10, 21, 14, K.k1);
+    q.clearRect(0, HY - 6, S, S);
+  }, (q) => {
+    R(q, 0, 0, S, S, K.k1);
+    ell(q, HX + 6, HY - 6, 18, 10, K.k0);
+    ell(q, HX - 7, HY - 17, 9, 4, K.k2);
+    R(q, HX - 10, HY - 19, 3, 1, K.k3);
+    for (const s of [-1, 1]) line(q, HX + s * 7, HY - 23, HX + s * 13, HY - 7, K.k0);
+    ell(q, HX, HY - 24, 2, 1, K.k3);
+  });
+  LETRA_N.forEach((fila, y) => [...fila].forEach((c, x) => {
+    if (c === '#') R(g, HX - 2 + x, HY - 19 + y, 1, 1, '#f0f0f4');
+  }));
+  capa(g, K.ink, (q) => ell(q, HX + 1, HY - 5, 23, 4.5, K.k1), (q) => {
+    R(q, 0, 0, S, S, K.k1);
+    ell(q, HX + 1, HY - 3, 22, 2.5, K.k0);
+    line(q, HX - 18, HY - 7, HX + 10, HY - 8, K.k3);
+  });
+  if (e.gafas === 1) {
+    // Shades down: the eyes peek out under the visor.
+    for (const s of [-1, 1]) {
+      const x = HX + s * 8, y = HY + 1;
+      ell(g, x, y, 4.5, 3, F.ink);
+      ell(g, x, y, 3.5, 2.5, '#fff8f0');
+      ell(g, x - s * 0.5, y + 0.5, 1.5, 2, '#2a140c');
+      R(g, x - 1, y - 1, 1, 1, P.white);
+      if (e.brillo === 2) R(g, x, y + 1, 1, 1, P.white);
+    }
+  } else {
+    // A shadow from the visor on the forehead.
+    for (let i = -15; i <= 15; i++) if ((i + HY) % 2 === 0) R(g, HX + i, HY - 1, 1, 1, F.k0);
+  }
+  // Black sunglasses (down on the nose when lowered).
+  // Lowered, they ride down the nose and show tilted (thinner).
+  const gy = HY + (e.gafas === 1 ? 6 : 0), k = e.gafas === 1 ? 0.6 : 1;
+  capa(g, '#000000', (q) => {
+    for (const s of [-1, 1]) poly(q, [HX + s * 2, gy - 3 * k, HX + s * 15, gy - 4 * k, HX + s * 14, gy + 3 * k, HX + s * 9, gy + 5 * k, HX + s * 3, gy + 3 * k], '#141220');
+    R(q, HX - 3, gy - 3 * k, 6, 2, '#141220');
+  }, (q) => {
+    R(q, 0, 0, S, S, '#141220');
+    for (const s of [-1, 1]) ell(q, HX + s * 9, gy + 2 * k, 5, 2 * k, '#22203a');
+  });
+  for (const s of [-1, 1]) {
+    line(g, HX + s * 15, gy - 3 * k, HX + s * 20, gy - 2, '#0a0a0e');
+    const x = HX + s * 9 + (e.bufanda % 2) - 2;
+    line(g, x - 2, gy + k, x + 1, gy - 2 * k, '#6a7aa8');
+    R(g, x + 3, gy - 2 * k, 1, 1, '#8a9ac8');
+  }
+  if (e.brillo && e.gafas === 0) {
+    const sx = HX + (e.brillo === 1 ? -12 : 6), sy = gy - 3;
+    R(g, sx - 2, sy, 5, 1, P.white);
+    R(g, sx, sy - 2, 1, 5, P.white);
+  }
+  if (e.brazo === 'visera') brazoHumano(g, [[20, top + 8], [6, top - 6], [HX - 14, HY - 9]], 7, K, 1, 'abierta');
+  if (e.brazo === 'pulgar') brazoHumano(g, [[20, S + 6], [14, top + 20], [24, top + 6]], 7, K, 1, 'pulgar', { k: 1.3 });
+  if (e.brillo && e.brazo !== 'visera') chispas(g, HX, HY, e.brillo);
+}
+
 /* ── Public API ──────────────────────────────────────────────────────────── */
 
-const PINTA: Record<ModeloAvion, (g: G, e: Estado) => void> = { caza: pintaDui, avioneta: pintaLulu, bombardero: pintaAlmendrita };
+const PINTA: Record<Piloto, (g: G, e: Estado) => void> = { dui: pintaDui, lulu: pintaLulu, almendrita: pintaAlmendrita, naxo: pintaNaxo, nelo: pintaNelo };
 const cache = new Map<string, HTMLCanvasElement>();
 
 /** A pilot's 96×96 portrait for the select screen (transparent background, cached). */
-export function retrato(m: ModeloAvion, pose: Pose, frame: number): HTMLCanvasElement {
+export function retrato(m: Piloto, pose: Pose, frame: number): HTMLCanvasElement {
   const f = ((Math.floor(frame) % FRAMES[pose]) + FRAMES[pose]) % FRAMES[pose];
   const key = `${m}|${pose}|${f}`;
   let c = cache.get(key);
@@ -906,7 +1386,7 @@ export function retrato(m: ModeloAvion, pose: Pose, frame: number): HTMLCanvasEl
 }
 
 /** A decorative pixel backdrop for a pilot's card: stripes, speed lines, the plane's silhouette, a riveted frame. */
-export function fondoTarjeta(m: ModeloAvion, w: number, h: number): HTMLCanvasElement {
+export function fondoTarjeta(m: Piloto, w: number, h: number): HTMLCanvasElement {
   const key = `fondo|${m}|${w}|${h}`;
   let c = cache.get(key);
   if (c) return c;
@@ -921,7 +1401,7 @@ export function fondoTarjeta(m: ModeloAvion, w: number, h: number): HTMLCanvasEl
   R(g, 0, h - bh - 2, w, 2, A.k3);
   R(g, 0, h - bh, w, 1, A.ink);
   // The plane, big and faded.
-  const sp = planeSprite(m);
+  const sp = planeSprite(CASA[m]);
   const k = Math.max(2, Math.floor((w * 0.9) / sp.width));
   const t = lienzo(sp.width * k, sp.height * k), tq = ctx(t);
   tq.imageSmoothingEnabled = false;

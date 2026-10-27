@@ -1,7 +1,7 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
 import { LOOKS, R, drawPlane, miniHead, ovniGlow, ovniLuces, pilotoActual, spriteParaDibujar, type Parte } from './dibujo';
-import type { ModeloAvion, ModeloBase } from './fisica-tipos';
+import type { ModeloAvion, Piloto } from './fisica-tipos';
 
 /*
  * Roll and hard-pull frames for every player plane. The cockpit always shows
@@ -121,8 +121,31 @@ const sideHead = (g: Ctx, x: number, y: number) => miniHead(g, pilotoActual(), x
  * The pilot's head seen from above, facing +x; (x, y) is the head's centre.
  * `tilt` (0 or 1) lets the 60° frame show a sliver of the face's flank.
  */
-function topHead(g: Ctx, x: number, y: number, tilt: number, m: ModeloBase = pilotoActual()) {
-  if (m === 'avioneta') {
+function topHead(g: Ctx, x: number, y: number, tilt: number, m: Piloto = pilotoActual()) {
+  if (m === 'naxo') {
+    // Naxo: short dark hair, ears to both sides, the round dark lenses and the mustache in front.
+    const S = '#9a5c30', S0 = '#6e3e1e';
+    R(g, x - 1, y - 4, 2, 1, S0);
+    R(g, x - 1, y + 4, 2, 1, S0);
+    D.disc(g, x, y, 3, '#2a1e1a');
+    R(g, x - 1, y - 1, 2, 1, '#4a3a32');
+    R(g, x + 2, y - 2, 2, 5, S);
+    R(g, x + 2, y - 2, 1, 2, '#1c1622');
+    R(g, x + 2, y + 1, 1, 2, '#1c1622');
+    R(g, x + 4, y, 1, 1, S);
+    if (tilt) R(g, x + 3, y + 2, 2, 1, '#2a1e1a');
+  } else if (m === 'nelo') {
+    // Ñelo: the black cap from above, its visor forward, the hood behind.
+    const C = '#1e1c24';
+    R(g, x - 5, y - 2, 2, 5, '#26242c');
+    R(g, x - 1, y - 4, 2, 1, '#6e3e1e');
+    R(g, x - 1, y + 4, 2, 1, '#6e3e1e');
+    D.disc(g, x, y, 3, C);
+    R(g, x + 3, y - 2, 2, 5, C);
+    R(g, x + 5, y - 1, 1, 3, C);
+    R(g, x - 1, y - 1, 2, 2, '#3e3c4a');
+    if (tilt) R(g, x + 2, y + 3, 2, 1, '#9a5c30');
+  } else if (m === 'lulu') {
     // Lulu: black cat, ears to both sides, goggles strap across the brow.
     const K = '#2e2840', K1 = '#4e4668';
     R(g, x - 2, y - 4, 2, 2, K);
@@ -136,7 +159,7 @@ function topHead(g: Ctx, x: number, y: number, tilt: number, m: ModeloBase = pil
     R(g, x + 2, y + 1, 1, 2, P.gl1);
     if (tilt) R(g, x + 2, y + 2, 2, 1, '#ffd23a');
     R(g, x + 4, y, 1, 1, P.p1);
-  } else if (m === 'caza') {
+  } else if (m === 'dui') {
     // Dui: orange tabby, goggles strap and lens.
     R(g, x - 2, y - 4, 2, 2, P.o1);
     R(g, x - 2, y + 3, 2, 2, P.o1);

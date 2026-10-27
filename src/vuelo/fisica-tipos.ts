@@ -12,8 +12,13 @@ export type Movil = Vec & { vx: number; vy: number };
 /** Ground altitude at a given x (the terrain is a height field). */
 export type Suelo = (x: number) => number;
 
-/** The three home planes; each one is also its pilot's id (Lulu, Dui, Almendrita). */
+/** The three planes built at home (Lulu's, Dui's and Almendrita's). */
 export type ModeloBase = 'avioneta' | 'caza' | 'bombardero';
+/**
+ * Who flies. Any pilot can take any plane; each one has a home plane
+ * (pilotos.ts). Old saves stored the pilot as their home plane's ModeloBase.
+ */
+export type Piloto = 'dui' | 'lulu' | 'almendrita' | 'naxo' | 'nelo';
 /** Every plane in the hangar: the home ones plus the iconic jets and the saucer. */
 export type ModeloAvion = ModeloBase | 'raptor' | 'sukhoi' | 'b2' | 'ovni' | 'tomcat' | 'a10' | 'spitfire' | 'stuka' | 'mustang' | 'corsair' | 'f16' | 'mig29';
 /** Bomb loads: plain, cluster, white phosphorus, gas, and the saucer's plasma charge. */

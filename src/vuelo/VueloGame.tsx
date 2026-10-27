@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, menu } from '../game/audio';
 import { cargarSonidos } from './sonido';
 import * as AD from './armas-dibujo';
-import { PLANES, createVuelo, dibujo, readSave, type Hud, type Mejorable, type Result, type SavedGame, type Vuelo } from './motor';
-import type { BombaTipo, ModeloBase as ModeloAvion, ModeloAvion as Avion } from './fisica-tipos';
+import { ESCUADRON, createVuelo, dibujo, readSave, type Hud, type Mejorable, type Result, type SavedGame, type Vuelo } from './motor';
+import type { BombaTipo, ModeloAvion as Avion, Piloto } from './fisica-tipos';
+import { CASA } from './pilotos';
 import * as HG from './hangar';
 import * as AB from './audio-batalla';
 import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
@@ -40,6 +41,8 @@ const ELENCO = [
   ['Dui', 'el gato naranja, piloto del Caza Mandarina'],
   ['Lulu', 'la gatita negra de ojos amarillos, Avioneta Mostaza'],
   ['Almendrita', 'la yorkshire, Bombardero Nube'],
+  ['Naxo', 'enfermero del CESFAM, Mustang'],
+  ['Ñelo', 'de Juanaspe, Stuka'],
   ['Vecina Margarita', 'ella misma (y su portaaviones)'],
   ['Los ratones', 'muchos, muchísimos ratones'],
 ];
@@ -226,7 +229,7 @@ function iconoDe(t: string): PxIcon | null {
 }
 
 /** A big pilot portrait, animated at the pose's own pace (pixel art scaled with CSS). */
-function Retrato({ m, pose, className }: { m: ModeloAvion; pose: Pose; className?: string }) {
+function Retrato({ m, pose, className }: { m: Piloto; pose: Pose; className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = ref.current;
@@ -256,14 +259,14 @@ function Retrato({ m, pose, className }: { m: ModeloAvion; pose: Pose; className
 }
 
 /** The card's pixel backdrop in the pilot's colours. */
-function FondoTarjeta({ m }: { m: ModeloAvion }) {
+function FondoTarjeta({ m }: { m: Piloto }) {
   const src = useMemo(() => fondoTarjeta(m, 120, 160).toDataURL(), [m]);
   return <img src={src} alt="" className="absolute inset-0 h-full w-full object-cover" style={{ imageRendering: 'pixelated' }} />;
 }
 
 /** Hangar thumbnails per pilot, made once per session (toDataURL is slow on phones). */
-const MINIS = new Map<ModeloAvion, Record<Avion, string>>();
-function miniaturas(piloto: ModeloAvion) {
+const MINIS = new Map<Piloto, Record<Avion, string>>();
+function miniaturas(piloto: Piloto) {
   let out = MINIS.get(piloto);
   if (!out) {
     // The pilot is global to the sprite painter: borrow it for the thumbnails and give it back.
@@ -282,7 +285,7 @@ function miniaturas(piloto: ModeloAvion) {
  * Locked ones show what unlocks them.
  */
 function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClose }: {
-  piloto: ModeloAvion; avion: Avion; bomba: BombaTipo; libres: Avion[]; bombas: BombaTipo[];
+  piloto: Piloto; avion: Avion; bomba: BombaTipo; libres: Avion[]; bombas: BombaTipo[];
   onAvion: (a: Avion) => void; onBomba: (b: BombaTipo) => void; onClose: () => void;
 }) {
   const sprites = useMemo(() => miniaturas(piloto), [piloto]);
@@ -527,7 +530,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   // Intro beats: 0 «presenta» (waits for a key), 1 pilots, 2 logo slam, 3 «press start».
   const [introStep, setIntroStep] = useState(0);
   const [saved, setSaved] = useState<SavedGame | null>(readSave);
-  const [plane, setPlane] = useState<ModeloAvion>(() => readSave()?.pilot ?? 'caza');
+  const [quien, setQuien] = useState<Piloto>(() => readSave()?.pilot ?? 'dui');
   const [hud, setHud] = useState<Hud | null>(null);
   // Installable web app: the game's manifest and offline cache while on /aviones,
   // and the browser's install prompt (Android/desktop) or iOS instructions.
@@ -648,8 +651,14 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   }, []);
 
   const thumbs = useMemo(() => {
-    const out = {} as Record<ModeloAvion, { plane: string; pilot: string }>;
-    for (const p of PLANES) out[p.id] = { plane: dibujo.planeSprite(p.id).toDataURL(), pilot: dibujo.pilotPortrait(p.id).toDataURL() };
+    const out = {} as Record<Piloto, { plane: string; pilot: string }>;
+    // Each pilot in their own plane (the painter's pilot is borrowed and given back).
+    const antes = dibujo.pilotoActual();
+    for (const p of ESCUADRON) {
+      dibujo.fijarPiloto(p.id);
+      out[p.id] = { plane: dibujo.planeSprite(p.avion).toDataURL(), pilot: dibujo.pilotPortrait(p.id).toDataURL() };
+    }
+    dibujo.fijarPiloto(antes);
     return out;
   }, []);
   // The mice for the intro: a jeep, a frigate and Margarita on her cart.
@@ -706,16 +715,16 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setPaused(false);
     game.current?.setPaused(false);
     const from = resume ? readSave() : null;
-    if (from) setPlane(from.pilot);
-    game.current?.start(from ? from.pilot : plane, from, false, avion ?? undefined, bomba ?? undefined);
+    if (from) setQuien(from.pilot);
+    game.current?.start(from ? from.pilot : quien, from, false, avion ?? undefined, bomba ?? undefined);
     setSaved(null);
     setPhase('play');
-  }, [muted, plane, avion, bomba]);
+  }, [muted, quien, avion, bomba]);
 
   // Character select: who is confirmed (playing their pose) before take-off.
-  const [confirmado, setConfirmado] = useState<ModeloAvion | null>(null);
-  const elegir = useCallback((m: ModeloAvion) => {
-    setPlane(m);
+  const [confirmado, setConfirmado] = useState<Piloto | null>(null);
+  const elegir = useCallback((m: Piloto) => {
+    setQuien(m);
     setAvion(null);
     setBomba(null);
     menu.aceptar();
@@ -733,7 +742,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const confirmar = useCallback(() => {
     if (confirmado || confirmando.current) return;
     confirmando.current = true;
-    setConfirmado(plane);
+    setConfirmado(quien);
     jingleStart();
     confirmTimer.current = window.setTimeout(() => {
       confirmando.current = false;
@@ -742,18 +751,18 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       if (HI.vista('prologo')) play();
       else setCine({ guion: 'prologo', luego: () => play() });
     }, 1300);
-  }, [confirmado, plane, play]);
+  }, [confirmado, quien, play]);
   useEffect(() => {
     if (phase !== 'menu') return;
     const onKey = (e: KeyboardEvent) => {
       if (confirmado) return;
-      const i = PLANES.findIndex((p) => p.id === plane);
-      if (e.code === 'ArrowLeft' || e.code === 'KeyA') elegir(PLANES[(i + PLANES.length - 1) % PLANES.length].id);
-      else if (e.code === 'ArrowRight' || e.code === 'KeyD') elegir(PLANES[(i + 1) % PLANES.length].id);
+      const i = ESCUADRON.findIndex((p) => p.id === quien);
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA') elegir(ESCUADRON[(i + ESCUADRON.length - 1) % ESCUADRON.length].id);
+      else if (e.code === 'ArrowRight' || e.code === 'KeyD') elegir(ESCUADRON[(i + 1) % ESCUADRON.length].id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, plane, confirmado, elegir]);
+  }, [phase, quien, confirmado, elegir]);
 
   // «Menos movimiento», remembered on this device.
   const [calma, setCalma] = useState(() => {
@@ -1111,7 +1120,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     luego?.();
   }, [cine]);
 
-  const spec = PLANES.find((p) => p.id === plane)!;
+  const elegido = ESCUADRON.find((p) => p.id === quien)!;
+  const spec = elegido.spec;
 
   return (
     <div className="pixel-isla fixed inset-0 overflow-hidden select-none font-cozy text-[#5b4636] touch-none">
@@ -1336,7 +1346,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         <div className="pointer-events-none absolute inset-x-0 top-[14%] z-[45] flex justify-center px-4 [@media(max-height:500px)]:top-2">
           <div className="w-full max-w-sm animate-[aparece_0.35s_ease-out] overflow-auto rounded-[1.6rem] bg-[#fff8e7]/95 p-4 text-center [@media(max-height:500px)]:pointer-events-auto [@media(max-height:500px)]:max-h-[calc(100dvh-1rem)] [@media(max-height:500px)]:p-2 shadow-[0_6px_0_rgba(91,70,54,0.2)] ring-4 ring-[#ead6b3]">
             <div className="flex items-center justify-center gap-3">
-              <img src={thumbs[plane].pilot} alt="" className="h-12 w-12 animate-bounce rounded-full bg-white p-0.5 ring-2 ring-[#f0a45d]" style={{ imageRendering: 'pixelated' }} />
+              <img src={thumbs[quien].pilot} alt="" className="h-12 w-12 animate-bounce rounded-full bg-white p-0.5 ring-2 ring-[#f0a45d]" style={{ imageRendering: 'pixelated' }} />
               <h2 className="text-xl font-black text-[#e8742a]">¡Oleada {hud.resumen.oleada} superada!</h2>
             </div>
             <div className="mt-3 grid grid-cols-5 gap-1.5 text-[#6b4f3a]">
@@ -1562,7 +1572,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <div className="flex w-full max-w-3xl flex-col items-center px-4 text-center">
               {/* The squadron flies in from the left… */}
               <div className="flex items-end justify-center gap-4 sm:gap-8">
-                {PLANES.map((p, i) => (
+                {ESCUADRON.map((p, i) => (
                   <div key={p.id} className="intro-vuela flex flex-col items-center" style={{ animationDelay: `${i * 0.25}s` }}>
                     <img src={thumbs[p.id].pilot} alt="" className="h-12 w-12 rounded-full bg-[#fff8e7] p-1 ring-4 ring-[#f0a45d] sm:h-16 sm:w-16" style={{ imageRendering: 'pixelated' }} />
                     <img src={thumbs[p.id].plane} alt="" className="mt-1 h-8 w-auto sm:h-12" style={{ imageRendering: 'pixelated' }} />
@@ -1730,17 +1740,17 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
 
-      {/* Character select, arcade style: three framed pilots, the chosen one big and animated; confirm and they strike a pose. */}
+      {/* Character select, arcade style: five framed pilots, the chosen one big and animated; confirm and they strike a pose. */}
       {phase === 'menu' && (
         <div role="dialog" aria-modal="true" aria-label="Elige tu piloto" className={`absolute inset-0 ${hangar ? 'z-[45]' : 'z-30'} flex flex-col items-center justify-center gap-3 overflow-y-auto bg-[#120c24]/70 p-3 pt-16 [@media(max-height:500px)]:gap-1.5 [@media(max-height:500px)]:pt-12`}>
-          <div className="flex w-full max-w-4xl items-center justify-between gap-2">
+          <div className="flex w-full max-w-5xl items-center justify-between gap-2">
             <button type="button" onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${BTN} h-9`} disabled={!!confirmado}>← Volver</button>
             <h1 className="logo-dui text-3xl font-black sm:text-5xl [@media(max-height:500px)]:text-2xl">ELIGE TU PILOTO</h1>
             <span className="w-20" />
           </div>
-          <div className="grid w-full max-w-4xl grid-cols-3 gap-2 sm:gap-4">
-            {PLANES.map((p) => {
-              const sel = plane === p.id;
+          <div className="grid w-full max-w-5xl grid-cols-5 gap-1.5 sm:gap-3">
+            {ESCUADRON.map((p) => {
+              const sel = quien === p.id;
               const pose: Pose = confirmado === p.id ? 'listo' : sel ? 'elegido' : 'quieto';
               return (
                 <button
@@ -1749,20 +1759,20 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   disabled={!!confirmado}
                   onClick={() => (sel ? confirmar() : elegir(p.id))}
                   aria-pressed={sel}
-                  aria-label={`${p.pilot}, ${p.name}`}
+                  aria-label={`${p.pilot}, ${p.spec.name}`}
                   className={`tarjeta-piloto relative overflow-hidden rounded-xl text-center transition-transform duration-200 ${
                     sel ? 'z-10 scale-[1.04] ring-4 ring-[#ffd84a] shadow-[0_0_24px_rgba(255,216,74,0.6)]' : 'opacity-70 ring-2 ring-[#3a2a6a] hover:opacity-90'
                   } ${confirmado === p.id ? 'tarjeta-confirmada' : ''}`}
                 >
                   <FondoTarjeta m={p.id} />
                   {sel && !confirmado && <span className="absolute left-1.5 top-1.5 z-10 rounded bg-[#ff4a5a] px-1.5 text-[10px] font-black text-white">P1</span>}
-                  <div className="relative z-10 flex flex-col items-center px-1 pb-2 pt-2">
-                    <Retrato m={p.id} pose={pose} className="h-24 w-24 sm:h-48 sm:w-48 [@media(max-height:500px)]:h-20 [@media(max-height:500px)]:w-20" />
-                    <span className="mt-1 text-lg font-black text-white drop-shadow-[0_2px_0_#3a2a6a] sm:text-2xl [@media(max-height:500px)]:text-sm">{p.pilot.toUpperCase()}</span>
-                    <span className="text-[11px] font-black text-[#ffe3a3] drop-shadow sm:text-sm [@media(max-height:500px)]:text-[10px]">{p.name}</span>
+                  <div className="relative z-10 flex flex-col items-center px-0.5 pb-2 pt-2 sm:px-1">
+                    <Retrato m={p.id} pose={pose} className="aspect-square w-full max-w-[10rem] [@media(max-height:500px)]:max-w-[4.5rem]" />
+                    <span className="mt-1 max-w-full truncate text-[11px] font-black text-white drop-shadow-[0_2px_0_#3a2a6a] sm:text-xl [@media(max-height:500px)]:text-xs">{p.pilot.toUpperCase()}</span>
+                    <span className="text-[9px] font-black leading-tight text-[#ffe3a3] drop-shadow sm:text-sm [@media(max-height:500px)]:text-[10px]">{p.spec.name}</span>
                     <img src={thumbs[p.id].plane} alt="" className="mt-1 h-6 w-auto sm:h-10 [@media(max-height:500px)]:hidden" style={{ imageRendering: 'pixelated' }} />
                   </div>
-                  {confirmado === p.id && <span className="sello-listo absolute inset-x-0 top-1/3 z-20 text-3xl font-black text-[#ffd84a] sm:text-5xl">¡LISTO!</span>}
+                  {confirmado === p.id && <span className="sello-listo absolute inset-x-0 top-1/3 z-20 text-lg font-black text-[#ffd84a] sm:text-4xl">¡LISTO!</span>}
                 </button>
               );
             })}
@@ -1780,11 +1790,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           <div className="flex flex-wrap items-center justify-center gap-2">
             {saved && (
               <button type="button" disabled={!!confirmado} onClick={() => play(true)} className={`${BTN} h-12`}>
-                ▶ Continuar · {PLANES.find((p) => p.id === saved.pilot)?.pilot}, oleada {saved.wave}
+                ▶ Continuar · {ESCUADRON.find((p) => p.id === saved.pilot)?.pilot}, oleada {saved.wave}
               </button>
             )}
             <button type="button" disabled={!!confirmado} onClick={() => { menu.aceptar(); setHangar(true); }} className={`${BTN} h-12`}>
-              🛩️ Hangar · {HG.especDe(avion ?? plane).real ?? HG.especDe(avion ?? plane).name}
+              🛩️ Hangar · {HG.especDe(avion ?? CASA[quien]).real ?? HG.especDe(avion ?? CASA[quien]).name}
             </button>
             <button type="button" autoFocus disabled={!!confirmado} onClick={confirmar} className={GO}>
               ✈️ ¡A volar con {spec.pilot}!
@@ -1796,11 +1806,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           {portrait && <p className="text-center text-xs font-black text-[#ffe3a3]">📱 Gira el teléfono para jugar más cómodo.</p>}
           {hangar && (
             <Hangar
-              piloto={plane}
-              avion={avion ?? plane}
-              bomba={bomba ?? HG.especDe(avion ?? plane).bomba}
-              libres={HG.HANGAR.filter((a) => HG.avionLibre(a.id)).map((a) => a.id)}
-              bombas={HG.TIPOS_BOMBA.filter((b) => HG.bombaLibre(b, avion ?? plane))}
+              piloto={quien}
+              avion={avion ?? CASA[quien]}
+              bomba={bomba ?? HG.especDe(avion ?? CASA[quien]).bomba}
+              libres={HG.HANGAR.filter((a) => HG.avionLibrePara(a.id, quien)).map((a) => a.id)}
+              bombas={HG.TIPOS_BOMBA.filter((b) => HG.bombaLibre(b, avion ?? CASA[quien]))}
               onAvion={(a) => {
                 setAvion(a);
                 setBomba(null);
@@ -1812,7 +1822,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
 
-      {cine && <Cinematica key={cine.guion} guion={cine.guion} piloto={plane} calma={calma} alTerminar={finCine} />}
+      {cine && <Cinematica key={cine.guion} guion={cine.guion} piloto={quien} calma={calma} alTerminar={finCine} />}
 
       {phase === 'over' && result && (
         <div role="dialog" aria-modal="true" aria-label="Fin del vuelo" className="absolute inset-0 z-50 grid place-items-center overflow-y-auto p-4 [@media(max-height:500px)]:p-2">

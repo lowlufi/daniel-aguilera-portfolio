@@ -33,7 +33,8 @@ import { drawPlaneGiro, framePara } from './giro';
 import { GRAVEDAD } from './fisica-armas';
 import { lineaLibre } from './ia';
 import { P } from '../game/dulce';
-import type { Avion, ModeloAvion, ModeloBase, Movil } from './fisica-tipos';
+import type { Avion, ModeloAvion, Movil } from './fisica-tipos';
+import { PILOTOS } from './pilotos';
 
 type Ctx = CanvasRenderingContext2D;
 type Suelo = (x: number) => number;
@@ -596,7 +597,6 @@ export function tocado(c: Caza, x: number, y: number, m = 2): boolean {
 
 /* ── Drawing ────────────────────────────────────────────────────────────── */
 
-const PILOTOS: ModeloBase[] = ['avioneta', 'caza', 'bombardero'];
 const OW = 88, OH = 72, OX = OW / 2, OY = OH / 2;
 let lienzo: HTMLCanvasElement | null = null;
 function trabajo(): CanvasRenderingContext2D {
