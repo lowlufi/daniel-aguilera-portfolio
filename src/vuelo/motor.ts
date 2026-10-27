@@ -816,6 +816,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     fighterQueue: 0,
     /** The one-on-one duel with Margarita's fighter is on: nothing else spawns. */
     duelo: false,
+    /** Phones: the gun fires by itself at whatever is in the sights. */
+    autoGun: false,
     /** The storm clears halfway through its wave: 0 = full storm, 1 = clear moonlit night. */
     despeje: 0,
     tormentaTot: 0,
@@ -2866,11 +2868,22 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const top = ceiling();
 
     // Touch turning: holding the left half turns the nose counterclockwise, the
-    // right half clockwise (commanding 90° off the nose: the tightest turn).
+    // right half clockwise. It starts gentle (a tap nudges the nose) and tightens
+    // while held, up to 90° off the nose: the tightest turn.
     if (turn && s.mode === 'play' && !s.dead) {
-      touch.x = Math.cos(p.rumbo + turn * 1.45);
-      touch.y = Math.sin(p.rumbo + turn * 1.45);
+      turnK = Math.min(1, turnK + dt / 0.4);
+      const off = turn * (0.35 + 1.1 * turnK * turnK);
+      touch.x = Math.cos(p.rumbo + off);
+      touch.y = Math.sin(p.rumbo + off);
       syncInput();
+    } else turnK = 0;
+    // Phones: the machine gun fires by itself whenever an enemy sits in the sights.
+    if (s.autoGun && s.mode === 'play' && !s.dead && !s.attract) {
+      const enMira = enemigoEnMira(p);
+      if (enMira !== touch.gun) {
+        touch.gun = enMira;
+        syncInput();
+      }
     }
 
     // The plane: the player flies it; in the menu it flies itself.
@@ -4904,8 +4917,27 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
   };
   const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false };
-  /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none. */
+  /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none; and how far into the hold (0…1). */
   let turn = 0;
+  let turnK = 0;
+  /** True if an enemy is right in front of the nose, within gun range (the auto gun on phones). */
+  function enemigoEnMira(p: Avion) {
+    const cx = Math.cos(p.rumbo), cy = Math.sin(p.rumbo);
+    const ok = (x: number, y: number, r: number) => {
+      const dx = x - p.x, dy = y - p.y;
+      const along = dx * cx + dy * cy;
+      if (along < 20 || along > 520) return false;
+      // Within the target's size (plus a little) of the line of fire.
+      return Math.abs(dx * cy - dy * cx) < r + 6 + along * 0.03;
+    };
+    for (const c of s.cars) if (c.hp > 0 && ok(c.mid.x, c.mid.y, 10)) return true;
+    for (const a of s.aereos) if (a.hp > 0 && ok(a.x, a.y, AE.radio(a))) return true;
+    for (const f of s.fighters) if (f.hp > 0 && ok(f.a.x, f.a.y, CZ.RADIO)) return true;
+    for (const u of s.gigantes) if (u.viva && ok(u.x, u.y + 8, 10)) return true;
+    if (s.jefe && ok(s.jefe.x, s.jefe.y, 30)) return true;
+    for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0 && ok(sh.m.x, sh.m.y, 4)) return true;
+    return false;
+  }
   function syncInput() {
     const kx = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
     const ky = (keys.has('u') ? 1 : 0) - (keys.has('d') ? 1 : 0);
@@ -5127,6 +5159,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         fit();
       }
       view.touch = t;
+      s.autoGun = t;
     },
   };
 }

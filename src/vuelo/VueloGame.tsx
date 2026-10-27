@@ -1325,38 +1325,47 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {phase === 'play' && touchUi && !paused && (
         <>
           <div className="absolute inset-x-0 bottom-0 top-16 z-10 flex touch-none" onPointerDown={onSkyDown} onPointerUp={onSkyUp} onPointerCancel={onSkyUp} onLostPointerCapture={onSkyUp}>
-            {/* Each half lights up while held; big round arrows say which way the nose turns. */}
-            <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === 1 ? 'bg-white/10' : ''}`}>
-              <span className={`absolute bottom-6 left-4 grid h-11 w-11 place-items-center rounded-full text-xl font-black text-white ring-2 ring-white/60 drop-shadow ${turning === 1 ? 'bg-white/40' : 'bg-white/15'}`}>⟲</span>
+            {/* Two invisible halves: hold one to turn. Only a soft glow on that edge, and a small arrow, show it. */}
+            <div className="pointer-events-none relative h-full w-1/2">
+              <div className={`absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white/25 to-transparent transition-opacity duration-150 ${turning === 1 ? 'opacity-100' : 'opacity-0'}`} />
+              <span className={`absolute left-2 top-1/2 -translate-y-1/2 text-2xl font-black text-white drop-shadow transition-opacity ${turning === 1 ? 'opacity-90' : 'opacity-30'}`}>⟲</span>
             </div>
-            <div className={`pointer-events-none relative h-full w-1/2 transition-colors ${turning === -1 ? 'bg-white/10' : ''}`}>
-              <span className={`absolute bottom-[7.5rem] right-4 grid h-11 w-11 place-items-center rounded-full text-xl font-black text-white ring-2 ring-white/60 drop-shadow ${turning === -1 ? 'bg-white/40' : 'bg-white/15'}`}>⟳</span>
+            <div className="pointer-events-none relative h-full w-1/2">
+              <div className={`absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-white/25 to-transparent transition-opacity duration-150 ${turning === -1 ? 'opacity-100' : 'opacity-0'}`} />
+              <span className={`absolute right-2 top-[38%] -translate-y-1/2 text-2xl font-black text-white drop-shadow transition-opacity ${turning === -1 ? 'opacity-90' : 'opacity-30'}`}>⟳</span>
             </div>
             {turns < 3 && !hud?.enTierra && (
-              <span className="pointer-events-none absolute bottom-20 left-4 rounded-full bg-[#3a2a6a]/50 px-2.5 py-0.5 text-[10px] font-black text-white">
-                Mantén izquierda o derecha para girar · doble toque: 🔥 nitro
+              <span className="pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 rounded-full bg-[#3a2a6a]/55 px-3 py-1 text-center text-[11px] font-black text-white">
+                Mantén un lado para girar · la metralla dispara sola · doble toque: 🔥 nitro
               </span>
             )}
           </div>
-          <div className="absolute bottom-3 right-3 z-10 flex items-end gap-1.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
-            <div className="flex flex-col gap-1.5">
-              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2🔥' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
-                {hud?.nitro === 'activo' ? '🔥' : '⏩'}
-              </TouchButton>
-              <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>🛑</TouchButton>
+          {/* Left thumb: throttle in the corner. */}
+          <div className="absolute bottom-10 left-3 z-10 flex flex-col gap-2 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
+            <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2🔥' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+              {hud?.nitro === 'activo' ? '🔥' : '⏩'}
+            </TouchButton>
+            <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>🛑</TouchButton>
+          </div>
+          {/* Right thumb: the missile big in the corner, the rest in an arc around it. */}
+          <div className="absolute bottom-7 right-0 z-10 h-48 w-48 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] [@media(max-height:420px)]:h-40 [@media(max-height:420px)]:w-40">
+            <div className="absolute bottom-3 right-3">
+              <TouchButton label="Misil" big {...hold('fire')}>🚀</TouchButton>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <TouchButton label="Bengalas" {...hold('flare')}>✨</TouchButton>
+            <div className="absolute bottom-3 right-[6.2rem] [@media(max-height:420px)]:right-[5.4rem]">
               <TouchButton label="Bomba" {...hold('bomb')}>💣</TouchButton>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <TouchButton label="Tonel" {...hold('tonel')}>🌀</TouchButton>
-              <TouchButton label="Metralla" active={hud?.hot} {...hold('gun')}>💥</TouchButton>
-              {!!hud?.nukes && (
-                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>☢️</TouchButton>
-              )}
+            <div className="absolute bottom-[4.6rem] right-[5.2rem] [@media(max-height:420px)]:bottom-[4rem] [@media(max-height:420px)]:right-[4.5rem]">
+              <TouchButton label="Bengalas" {...hold('flare')}>✨</TouchButton>
             </div>
-            <TouchButton label="Misil" big {...hold('fire')}>🚀</TouchButton>
+            <div className="absolute bottom-[6.2rem] right-3 [@media(max-height:420px)]:bottom-[5.4rem]">
+              <TouchButton label="Tonel" {...hold('tonel')}>🌀</TouchButton>
+            </div>
+            {!!hud?.nukes && (
+              <div className="absolute bottom-[9.4rem] right-3 [@media(max-height:420px)]:bottom-[8.4rem]">
+                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>☢️</TouchButton>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1369,13 +1378,22 @@ function TouchButton({ label, big, active, children, ...rest }: { label: string;
     <button
       type="button"
       aria-label={label}
-      className={`flex flex-col items-center justify-center rounded-full shadow-[0_3px_0_rgba(91,70,54,0.25)] ring-2 active:translate-y-0.5 active:opacity-100 ${
+      className={`flex flex-col items-center justify-center rounded-full shadow-[0_3px_0_rgba(91,70,54,0.25)] ring-2 active:scale-95 active:opacity-100 transition-transform ${
         active ? 'bg-[#ffe3a3] ring-[#f0a45d]' : 'bg-[#fff8e7]/70 ring-white/60'
-      } ${big ? 'h-16 w-16 text-2xl' : 'h-11 w-11 text-base'} opacity-80`}
+      } ${big ? 'h-20 w-20 text-3xl [@media(max-height:420px)]:h-[4.5rem] [@media(max-height:420px)]:w-[4.5rem]' : 'h-14 w-14 text-xl [@media(max-height:420px)]:h-12 [@media(max-height:420px)]:w-12'} opacity-85`}
       {...rest}
+      onPointerDown={(e) => {
+        // A short buzz under the thumb.
+        try {
+          navigator.vibrate?.(big ? 18 : 10);
+        } catch {
+          /* no vibration */
+        }
+        rest.onPointerDown?.(e);
+      }}
     >
       <span aria-hidden className="leading-none">{children}</span>
-      <span aria-hidden className="mt-0.5 text-[7px] font-black leading-none text-[#6b4f3a]">{label}</span>
+      <span aria-hidden className="mt-0.5 text-[8px] font-black leading-none text-[#6b4f3a]">{label}</span>
     </button>
   );
 }
