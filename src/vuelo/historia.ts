@@ -1,4 +1,4 @@
-import type { ModeloBase } from './fisica-tipos';
+import type { Piloto } from './fisica-tipos';
 
 /*
  * «Escuadrón Dui»: the story. Every cutscene is plain data (a `Guion`), played
@@ -11,13 +11,14 @@ import type { ModeloBase } from './fisica-tipos';
  *    their planes, leaves her gate open for the mice of the Imperio Ratón «so
  *    they take the noisy ones away». That night the mice empty the pantry: the
  *    Emperor wants the fish to trade it for all the cheese in Chile. At dawn
- *    the friends find the tracks, dust off their planes and take off.
+ *    the friends find the tracks, dust off their planes and take off, with
+ *    their human neighbours Naxo (the CESFAM nurse) and Ñelo (from Juanaspe).
  *  - Chapters on each new map (the sea, Valparaíso, the storm, back home).
  *  - A little epilogue after each boss beaten for the first time.
  */
 
-/** Who speaks: the three pilots, the villains, the narrator; 'piloto' is whoever the player picked. */
-export type Hablante = 'dui' | 'lulu' | 'almendrita' | 'piloto' | 'margarita' | 'raton' | 'emperador' | 'narrador';
+/** Who speaks: the pilots (by their id), the villains, the narrator; 'piloto' is whoever the player picked. */
+export type Hablante = Piloto | 'piloto' | 'margarita' | 'raton' | 'emperador' | 'narrador';
 
 /** The painted scenes (escenas.ts). */
 export type EscenaId =
@@ -53,13 +54,13 @@ export const HABLANTES: Record<Exclude<Hablante, 'piloto'>, { nombre: string; co
   dui: { nombre: 'Dui', color: '#ffb066' },
   lulu: { nombre: 'Lulu', color: '#ffd84a' },
   almendrita: { nombre: 'Almendrita', color: '#ff9ac4' },
+  naxo: { nombre: 'Naxo', color: '#7cd4d6' },
+  nelo: { nombre: 'Ñelo', color: '#c4d49a' },
   margarita: { nombre: 'Vecina Margarita', color: '#ff6a7a' },
   raton: { nombre: 'Ratón', color: '#c8b4ff' },
   emperador: { nombre: 'Emperador Ratón', color: '#b48aff' },
   narrador: { nombre: '', color: '#fff8e7' },
 };
-
-export const PILOTO_DE: Record<ModeloBase, Hablante> = { caza: 'dui', avioneta: 'lulu', bombardero: 'almendrita' };
 
 export const HISTORIA: Record<GuionId, Guion> = {
   prologo: {
@@ -118,6 +119,8 @@ export const HISTORIA: Record<GuionId, Guion> = {
           { quien: 'almendrita', texto: '¡Guau, guau! ¡La despensa está vacía! ¡No queda ni una espina!' },
           { quien: 'lulu', texto: 'Huellitas de ratón… ruedas de camión… y una chancla. Una chancla con florcitas.' },
           { quien: 'dui', texto: '¡Nuestro pescado! Esto ya es personal.' },
+          { quien: 'nelo', texto: 'Anoche pasó un camión lleno de pescado por fuera de la casa del Ñelo, allá en Juanaspe. Yo pensé que era la feria.' },
+          { quien: 'naxo', texto: 'Calma, cabros. Primero les tomo la presión a todos… y después vamos a buscar a esos ratones.' },
         ],
       },
       {
@@ -299,6 +302,8 @@ export const HISTORIA: Record<GuionId, Guion> = {
         hasta: [128, 76, 1.05],
         lineas: [
           { quien: 'margarita', texto: '…¿Con pebre? Bueno. Pero llego temprano, ah. ¡Ricachones! Los quiero. Un poquito. &%#' },
+          { quien: 'naxo', texto: 'Dui, un pescado no más. Te lo digo como enfermero del CESFAM. …Ya, dos.' },
+          { quien: 'nelo', texto: 'Y el próximo asado es en la casa del Ñelo. Yo pongo la parrilla y la cumbia, ¡bajita, vecina!' },
           { quien: 'narrador', texto: 'Y esa noche, en San Antonio, el único ruido fue el de las olas… y el de Dui masticando.' },
         ],
       },

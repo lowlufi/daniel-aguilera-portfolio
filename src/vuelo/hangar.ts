@@ -5,7 +5,8 @@
  */
 import * as FA from './fisica-armas';
 import type { MissileLook, Parte } from './dibujo';
-import type { BombaTipo, ModeloAvion, ModeloBase } from './fisica-tipos';
+import type { BombaTipo, ModeloAvion, Piloto } from './fisica-tipos';
+import { CASA } from './pilotos';
 
 const G = FA.GRAVEDAD;
 
@@ -289,8 +290,6 @@ export const HANGAR: PlaneSpec[] = [
 
 export const especDe = (id: ModeloAvion): PlaneSpec => HANGAR.find((p) => p.id === id) ?? HANGAR[1];
 
-/** Pilot names by their home plane. */
-export const PILOTO: Record<ModeloBase, string> = { avioneta: 'Lulu', caza: 'Dui', bombardero: 'Almendrita' };
 
 export type BombaInfo = { nombre: string; texto: string; desbloqueo?: Desbloqueo; soloOvni?: boolean };
 export const BOMBAS: Record<BombaTipo, BombaInfo> = {
@@ -346,6 +345,8 @@ const actual = () => (prog ??= leerProgreso());
 
 export const cumple = (d: Desbloqueo | undefined, p: Progreso = actual()) => !d || (d.tipo === 'oleada' ? p.oleada >= d.n : p.ovnis >= d.n);
 export const avionLibre = (id: ModeloAvion) => cumple(especDe(id).desbloqueo);
+/** Unlocked, or the pilot's own plane (Naxo has his Mustang from day one). */
+export const avionLibrePara = (id: ModeloAvion, p: Piloto) => CASA[p] === id || avionLibre(id);
 export const bombaLibre = (t: BombaTipo, avion: ModeloAvion) => (BOMBAS[t].soloOvni ? avion === 'ovni' : cumple(BOMBAS[t].desbloqueo));
 
 /**

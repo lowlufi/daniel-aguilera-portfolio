@@ -1,6 +1,6 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
-import type { ModeloAvion, ModeloBase } from './fisica-tipos';
+import type { ModeloAvion, Piloto } from './fisica-tipos';
 import { anchoLetrero, escribir } from './fondo';
 
 /*
@@ -90,6 +90,63 @@ function almendritaHead(g: Ctx, x: number, y: number) {
   R(g, x - 2, y - 9, 2, 2, P.r2);
   R(g, x + 1, y - 9, 2, 2, P.r2);
   R(g, x, y - 8, 1, 1, P.r0);
+}
+
+/** Brown skin for the two humans of the squadron: shadow, base, light. */
+const PIEL = ['#6e3e1e', '#9a5c30', '#c07c48'] as const;
+
+/**
+ * Naxo: CESFAM nurse, short dark hair, a big mustache and round dark
+ * Ozzy-style glasses on a thin wire. Looking forward (+x); (x, y) is the chin.
+ */
+function naxoHead(g: Ctx, x: number, y: number) {
+  const [S0, S, S1] = PIEL, H = '#2a1e1a', L = '#1c1622';
+  D.disc(g, x, y - 3, 4, S);
+  // Round cheeks: a bit of a chubby face.
+  D.oval(g, x + 1, y - 1, 5, 2, S);
+  R(g, x - 2, y - 2, 2, 2, S0);
+  R(g, x + 1, y - 6, 3, 1, S1);
+  // Short dark hair, faded at the back and over the ear.
+  R(g, x - 4, y - 8, 8, 2, H);
+  R(g, x - 3, y - 9, 6, 1, H);
+  R(g, x - 5, y - 7, 2, 4, H);
+  R(g, x - 2, y - 9, 3, 1, '#4a3a32');
+  R(g, x - 2, y - 5, 2, 2, S0);
+  // The round dark lens and its wire to the ear.
+  R(g, x - 1, y - 5, 2, 1, '#9a8a7a');
+  D.disc(g, x + 2, y - 4, 1, L);
+  R(g, x + 2, y - 5, 1, 1, '#6a6a8e');
+  // A broad nose and the mustache, drooping at the corner.
+  R(g, x + 4, y - 3, 2, 2, S);
+  R(g, x + 5, y - 2, 1, 1, S0);
+  R(g, x + 1, y - 1, 5, 1, H);
+  R(g, x + 1, y, 2, 1, H);
+  R(g, x + 3, y, 2, 1, '#5a2a24');
+}
+
+/** Ñelo: black jockey cap with the visor forward, black sunglasses, round cheeks, the hood behind. */
+function neloHead(g: Ctx, x: number, y: number) {
+  const [S0, S, S1] = PIEL, C = '#1e1c24', C1 = '#3e3c4a', N = '#0c0a10';
+  // The hoodie's hood bunched behind the neck.
+  D.oval(g, x - 3, y - 1, 3, 3, '#26242c');
+  D.disc(g, x, y - 3, 4, S);
+  D.oval(g, x + 1, y - 1, 5, 2, S);
+  D.oval(g, x + 1, y + 1, 3, 1, S);
+  R(g, x - 2, y - 2, 2, 2, S0);
+  R(g, x + 3, y - 2, 2, 1, S1);
+  // The cap: crown, a light seam and the visor sticking out in front.
+  R(g, x - 4, y - 9, 8, 3, C);
+  R(g, x - 3, y - 10, 6, 1, C);
+  R(g, x - 2, y - 9, 3, 1, C1);
+  R(g, x + 3, y - 7, 5, 1, C);
+  R(g, x + 3, y - 6, 4, 1, N);
+  R(g, x - 4, y - 6, 2, 1, C);
+  // Black sunglasses with a cold glint.
+  R(g, x - 2, y - 5, 2, 1, N);
+  R(g, x, y - 5, 5, 2, N);
+  R(g, x + 2, y - 5, 2, 1, '#6a7aa8');
+  R(g, x + 4, y - 3, 2, 2, S);
+  R(g, x + 2, y, 3, 1, '#5a2a24');
 }
 
 /* ── Planes ──────────────────────────────────────────────────────────────── */
@@ -184,21 +241,46 @@ export const LOOKS: Record<ModeloAvion, PlaneLook> = {
 
 /* ── Who's flying: any pilot can take any plane ─────────────────────────── */
 
-let piloto: ModeloBase = 'caza';
+let piloto: Piloto = 'dui';
 
 /** Sets the pilot drawn in every cockpit from now on (part of every sprite cache key). */
-export function fijarPiloto(p: ModeloBase) {
+export function fijarPiloto(p: Piloto) {
   piloto = p;
 }
 
 /** The pilot currently drawn in the cockpits. */
-export function pilotoActual(): ModeloBase {
+export function pilotoActual(): Piloto {
   return piloto;
 }
 
 /** Small pilot heads for the cockpit (the big ones are for the hangar portraits). (x, y) is the chin. */
-export function miniHead(g: Ctx, m: ModeloBase, x: number, y: number) {
-  if (m === 'caza') {
+export function miniHead(g: Ctx, m: Piloto, x: number, y: number) {
+  if (m === 'naxo') {
+    const [S0, S] = PIEL, H = '#2a1e1a';
+    D.disc(g, x, y - 3, 3, S);
+    R(g, x - 3, y - 7, 6, 2, H);
+    R(g, x - 4, y - 6, 2, 3, H);
+    R(g, x - 2, y - 4, 1, 2, S0);
+    R(g, x - 1, y - 4, 2, 1, '#9a8a7a');
+    R(g, x + 1, y - 5, 2, 2, '#1c1622');
+    R(g, x + 1, y - 5, 1, 1, '#6a6a8e');
+    R(g, x + 3, y - 3, 1, 2, S);
+    R(g, x + 1, y - 1, 4, 1, H);
+    R(g, x + 1, y, 1, 1, H);
+  } else if (m === 'nelo') {
+    const [S0, S] = PIEL, C = '#1e1c24';
+    D.disc(g, x, y - 3, 3, S);
+    D.oval(g, x + 1, y - 1, 4, 1, S);
+    R(g, x - 4, y - 3, 1, 3, '#26242c');
+    R(g, x - 2, y - 3, 1, 2, S0);
+    R(g, x - 3, y - 7, 6, 2, C);
+    R(g, x - 2, y - 8, 4, 1, C);
+    R(g, x - 1, y - 7, 2, 1, '#3e3c4a');
+    R(g, x + 3, y - 6, 3, 1, C);
+    R(g, x, y - 4, 4, 1, '#0c0a10');
+    R(g, x + 1, y - 4, 1, 1, '#6a7aa8');
+    R(g, x + 2, y - 1, 2, 1, '#5a2a24');
+  } else if (m === 'dui') {
     R(g, x - 3, y - 7, 2, 2, P.o1);
     R(g, x + 1, y - 7, 2, 2, P.o1);
     D.disc(g, x, y - 3, 3, P.o2);
@@ -208,7 +290,7 @@ export function miniHead(g: Ctx, m: ModeloBase, x: number, y: number) {
     R(g, x - 3, y - 4, 6, 1, P.k0);
     R(g, x + 1, y - 4, 2, 2, P.gl1);
     R(g, x + 2, y - 1, 1, 1, P.blush);
-  } else if (m === 'avioneta') {
+  } else if (m === 'lulu') {
     const K = '#2e2840';
     R(g, x - 3, y - 7, 2, 2, K);
     R(g, x + 1, y - 7, 2, 2, K);
@@ -1218,11 +1300,11 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
   g.restore();
 }
 
-const HEAD: Record<ModeloBase, (g: Ctx, x: number, y: number) => void> = { avioneta: luluHead, caza: duiHead, bombardero: almendritaHead };
-const INK: Record<ModeloBase, string> = { avioneta: '#1a1428', caza: P.o0, bombardero: '#7a4a1e' };
+const HEAD: Record<Piloto, (g: Ctx, x: number, y: number) => void> = { lulu: luluHead, dui: duiHead, almendrita: almendritaHead, naxo: naxoHead, nelo: neloHead };
+const INK: Record<Piloto, string> = { lulu: '#1a1428', dui: P.o0, almendrita: '#7a4a1e', naxo: '#3a1e0c', nelo: '#0a0810' };
 
 /** The pilot's head alone, for the hangar cards. */
-export function pilotPortrait(m: ModeloBase) {
+export function pilotPortrait(m: Piloto) {
   return D.outlined(`piloto|${m}`, INK[m], 16, 16, 7, 13, (g) => HEAD[m](g, 0, 0));
 }
 

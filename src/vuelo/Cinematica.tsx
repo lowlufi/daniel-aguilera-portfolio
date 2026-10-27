@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { menu } from '../game/audio';
-import type { ModeloBase } from './fisica-tipos';
+import type { Piloto } from './fisica-tipos';
+import { PILOTOS } from './pilotos';
 import { ESC_H, ESC_W, pintarEscena, retratoExtra } from './escenas';
-import { HABLANTES, HISTORIA, PILOTO_DE, marcarVista, type Guion, type GuionId, type Hablante } from './historia';
+import { HABLANTES, HISTORIA, marcarVista, type Guion, type GuionId, type Hablante } from './historia';
 import { FPS, FRAMES, retrato } from './retratos';
 
 /*
@@ -10,7 +11,7 @@ import { FPS, FRAMES, retrato } from './retratos';
  * a typewriter dialog box with the speaker's portrait, and the way out at any
  * moment («Saltar», Esc, or holding a finger down).
  *
- *   <Cinematica guion="prologo" piloto="caza" alTerminar={(como) => …} />
+ *   <Cinematica guion="prologo" piloto="dui" alTerminar={(como) => …} />
  *
  * Enter / Space / → / a tap: finish the line, then the next one.
  * Esc / «Saltar» / a long press: skip the whole scene.
@@ -23,7 +24,7 @@ type Props = {
   /** The script, or its id in HISTORIA. */
   guion: Guion | GuionId;
   /** The pilot the player picked: who «piloto» lines belong to and who's in front. */
-  piloto?: ModeloBase;
+  piloto?: Piloto;
   /** Called once, when the last line is done or the scene is skipped. */
   alTerminar: (como: FinCinematica) => void;
   /** «Menos movimiento»: no camera moves and no flashes (the system setting counts too). */
@@ -50,7 +51,7 @@ function Glifo({ i, s = 2, color = '#3a2a6a' }: { i: 'sig' | 'saltar'; s?: numbe
   );
 }
 
-export default function Cinematica({ guion, piloto = 'caza', alTerminar, calma, marcar = true }: Props) {
+export default function Cinematica({ guion, piloto = 'dui', alTerminar, calma, marcar = true }: Props) {
   const g = useMemo(() => (typeof guion === 'string' ? HISTORIA[guion] : guion), [guion]);
   const quieto = useMemo(() => !!calma || (typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches), [calma]);
   const [b, setB] = useState(0);
@@ -58,7 +59,7 @@ export default function Cinematica({ guion, piloto = 'caza', alTerminar, calma, 
   const [n, setN] = useState(0);
   const beat = g.beats[b];
   const linea = beat.lineas[l];
-  const quien: Exclude<Hablante, 'piloto'> = linea.quien === 'piloto' ? (PILOTO_DE[piloto] as Exclude<Hablante, 'piloto'>) : linea.quien;
+  const quien: Exclude<Hablante, 'piloto'> = linea.quien === 'piloto' ? piloto : linea.quien;
   const info = HABLANTES[quien];
   const texto = linea.texto;
   const escribiendo = n < texto.length;
@@ -159,8 +160,8 @@ export default function Cinematica({ guion, piloto = 'caza', alTerminar, calma, 
       // The speaker: the pilots' big portraits, or a small bust for the others.
       fg.clearRect(0, 0, face.width, face.height);
       const q = v.quien;
-      if (q === 'dui' || q === 'lulu' || q === 'almendrita') {
-        const m: ModeloBase = q === 'dui' ? 'caza' : q === 'lulu' ? 'avioneta' : 'bombardero';
+      if ((PILOTOS as string[]).includes(q)) {
+        const m = q as Piloto;
         const pose = v.escribiendo && !quieto ? 'elegido' : 'quieto';
         const f = quieto ? 0 : Math.floor(t * FPS[pose]) % FRAMES[pose];
         fg.drawImage(retrato(m, pose, f), 0, 0, face.width, face.height);

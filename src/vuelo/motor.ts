@@ -21,7 +21,8 @@ import * as FA from './fisica-armas';
 import * as MS from './misiles';
 import * as E from './estelas';
 import { dibujarFondo, nombreZona, precalentarFondo, zonaAltitud } from './fondo';
-import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, ModeloBase, Movil, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
+import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Piloto, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
+import { CASA, NOMBRE, PILOTOS, pilotoGuardado } from './pilotos';
 import * as HG from './hangar';
 import * as AD from './armas-dibujo';
 import { dibujarTransicion, precalentarTransicion, type MapaId } from './transiciones';
@@ -43,18 +44,22 @@ type Ctx = CanvasRenderingContext2D;
 export type PlaneSpec = HG.PlaneSpec;
 
 /** The pilots, each with the plane they fly from home (the character select). */
-const PRESENTA: Record<ModeloBase, string> = {
-  avioneta: 'Lulu, la gatita negra de ojos amarillos. Ágil: gira cerrado y suelta bombas seguido.',
-  caza: 'Dui, el gato naranja. El más veloz: deja atrás a los misiles y dispara más.',
-  bombardero: 'Almendrita, la yorkshire. Lenta pero blindada: suelta tres bombas de una vez.',
+const PRESENTA: Record<Piloto, string> = {
+  lulu: 'Lulu, la gatita negra de ojos amarillos. Ágil: gira cerrado y suelta bombas seguido.',
+  dui: 'Dui, el gato naranja. El más veloz: deja atrás a los misiles y dispara más.',
+  almendrita: 'Almendrita, la yorkshire. Lenta pero blindada: suelta tres bombas de una vez.',
+  naxo: 'Naxo, enfermero del CESFAM: bajito, guatoncito y puro músculo. Con las seis .50 de su Mustang no deja a nadie sin control.',
+  nelo: 'Ñelo, de Juanaspe: jockey, lentes negros y polerón. Se tira en picada con su Stuka y la bomba cae justo donde apunta.',
 };
-export const PLANES: (PlaneSpec & { id: ModeloBase })[] = (['avioneta', 'caza', 'bombardero'] as const).map((id) => ({ ...HG.especDe(id), id, blurb: PRESENTA[id] }));
+/** A pilot on the character select: who, their home plane, and that plane's numbers. */
+export type PilotoSel = { id: Piloto; pilot: string; avion: ModeloAvion; spec: PlaneSpec };
+export const ESCUADRON: PilotoSel[] = PILOTOS.map((id) => ({ id, pilot: NOMBRE[id], avion: CASA[id], spec: { ...HG.especDe(CASA[id]), pilot: NOMBRE[id], blurb: PRESENTA[id] } }));
 
 /** What the hangar shows: the plane and bomb picked, and what's unlocked. */
 export type HangarInfo = {
   avion: ModeloAvion;
   bomba: BombaTipo;
-  piloto: ModeloBase;
+  piloto: Piloto;
   libres: ModeloAvion[];
   bombas: BombaTipo[];
 };
@@ -329,6 +334,14 @@ const RADIO = {
   caido: ['¡Me dieron! ¡Me eyecto!', '¡Perdimos a uno! ¡Paracaídas abierto!', '¡Noooo, mi avioncito!', '¡Ratón al aire, repito, ratón al aire!', '¡Base, nos derriban!'],
   grito: ['¡Noooo!', '¡Noooooo!', '¡Mi quesito!', '¡Auxilio!', '¡Me eyecto!'],
 };
+/** What the mice say when they spot each pilot (mixed in with RADIO.llegan). */
+const RADIO_PILOTO: Record<Piloto, string[]> = {
+  dui: ['¡Es el gato naranja! ¡El guatón vuela rápido!'],
+  lulu: ['¡La gata negra! ¡No la miren a los ojos!'],
+  almendrita: ['¡La perrita del bombardero! ¡Cuidado con las bombas!'],
+  naxo: ['¡Es el enfermero de los lentes redondos! ¡Nos va a poner la vacuna!', '¡Ojo con el Mustang del bigotón! ¡Tiene los brazos tatuados!', '¡El del CESFAM! ¡Pidan hora y escapen!'],
+  nelo: ['¡Es el Ñelo! ¡El del jockey y los lentes negros!', '¡Ese Stuka viene de Juanaspe! ¡Suena la sirena!', '¡Cuidado! ¡El Ñelo se tira en picada!'],
+};
 
 const SAY = {
   intro: '¡¿Qué es tanto ruido?! ¡Ricachones $&#%"/&!',
@@ -358,6 +371,8 @@ const SAY = {
     '¡Les cobro el ascensor, gatitos!',
     '¡Mi chorrillana se enfría por su culpa!',
     '¡Feliz Año Nuevo… pero en silencio!',
+    '¡Oye, enfermero! ¡Todavía me debes la hora del CESFAM! &%#',
+    '¡Ñelo, bájale a la cumbia, que se escucha hasta Llolleo! #$%',
   ],
   /** What the mice shout now and then. */
   ratones: [
@@ -510,7 +525,8 @@ const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const SAVE_KEY = 'vuelo-partida';
 export type SavedGame = {
   v: 1;
-  pilot: ModeloBase;
+  /** Old saves have the pilot's home plane here ('caza' for Dui…): readSave turns it into the pilot. */
+  pilot: Piloto;
   wave: number;
   score: number;
   kills: number;
@@ -538,7 +554,10 @@ export function readSave(): SavedGame | null {
     if (!raw) return null;
     const g = JSON.parse(raw) as SavedGame;
     if (g && g.bomba !== undefined && !(g.bomba in HG.BOMBAS)) g.bomba = undefined;
-    if (g?.v !== 1 || !PLANES.some((p) => p.id === g.pilot) || (g.avion !== undefined && !HG.HANGAR.some((p) => p.id === g.avion)) || !(g.wave >= 1) || !(g.lives >= 1) || !(g.meta >= 1)) return null;
+    const pilot = pilotoGuardado(g?.pilot);
+    if (!pilot) return null;
+    g.pilot = pilot;
+    if (g.v !== 1 || (g.avion !== undefined && !HG.HANGAR.some((p) => p.id === g.avion)) || !(g.wave >= 1) || !(g.lives >= 1) || !(g.meta >= 1)) return null;
     return g;
   } catch {
     return null;
@@ -690,8 +709,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     mode: 'demo' as 'demo' | 'play' | 'over',
     paused: false,
     t: 0,
-    spec: PLANES[0] as PlaneSpec,
-    piloto: 'avioneta' as ModeloBase,
+    spec: HG.especDe('avioneta') as PlaneSpec,
+    piloto: 'lulu' as Piloto,
     bomba: 'comun' as BombaTipo,
     zonas: [] as Zona[],
     plane: FV.nuevoAvion('avioneta', 240, 120, true) as Avion,
@@ -1081,7 +1100,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.say = null;
   }
 
-  function start(id: ModeloBase, from?: SavedGame | null, autopiloto = false, avion?: ModeloAvion, bomba?: BombaTipo) {
+  function start(id: Piloto, from?: SavedGame | null, autopiloto = false, avion?: ModeloAvion, bomba?: BombaTipo) {
     resetWorld();
     // Set before the first wave so the title screen's game never saves over the player's.
     s.attract = autopiloto;
@@ -1116,9 +1135,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.tienda = false;
     s.piloto = id;
     A.fijarPiloto(id);
-    const quiere = avion ?? from?.avion ?? id;
-    const modelo = autopiloto || HG.avionLibre(quiere) ? quiere : id;
-    s.spec = { ...HG.especDe(modelo), pilot: HG.PILOTO[id] };
+    const quiere = avion ?? from?.avion ?? CASA[id];
+    const modelo = autopiloto || HG.avionLibrePara(quiere, id) ? quiere : CASA[id];
+    s.spec = { ...HG.especDe(modelo), pilot: NOMBRE[id] };
     const carga = bomba ?? (avion ? undefined : from?.bomba) ?? s.spec.bomba;
     s.bomba = HG.bombaLibre(carga, modelo) ? carga : s.spec.bomba;
     s.plane = FV.nuevoAvion(modelo, 220, Math.min(130, ceiling() - 30), true);
@@ -1239,9 +1258,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * sea, flown by an autopilot that never loses and never saves.
    */
   function attract() {
-    const ids: ModeloBase[] = ['caza', 'avioneta', 'bombardero'];
     const aviones = HG.HANGAR.map((a) => a.id);
-    start(ids[Math.floor(Math.random() * ids.length)], null, true, Math.random() < 0.5 ? undefined : aviones[Math.floor(Math.random() * aviones.length)]);
+    start(PILOTOS[Math.floor(Math.random() * PILOTOS.length)], null, true, Math.random() < 0.5 ? undefined : aviones[Math.floor(Math.random() * aviones.length)]);
     const mapas: Mapa[] = ['valle', 'oceano', 'valparaiso', 'tormenta'];
     cambiarMapa(mapas[Math.floor(Math.random() * mapas.length)]);
     s.wave = 2 + Math.floor(Math.random() * 3);
@@ -1623,10 +1641,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * place, keeping position and speed. A fresh plane: whole, with full racks.
    */
   function cambiarAvion(id: ModeloAvion, bomba?: BombaTipo) {
-    if (!HG.avionLibre(id)) return false;
+    if (!HG.avionLibrePara(id, s.piloto)) return false;
     if (id !== s.spec.id) {
       const viejo = s.spec;
-      s.spec = { ...HG.especDe(id), pilot: HG.PILOTO[s.piloto] };
+      s.spec = { ...HG.especDe(id), pilot: NOMBRE[s.piloto] };
       // Slots won from crates carry over; the rack itself is the new plane's.
       const extra = (k: Arma, base: number) => Math.max(0, s.cap[k] - base - s.niv.municion);
       s.cap = {
@@ -1657,7 +1675,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       avion: s.spec.id,
       bomba: s.bomba,
       piloto: s.piloto,
-      libres: HG.HANGAR.filter((a) => HG.avionLibre(a.id)).map((a) => a.id),
+      libres: HG.HANGAR.filter((a) => HG.avionLibrePara(a.id, s.piloto)).map((a) => a.id),
       bombas: HG.TIPOS_BOMBA.filter((b) => HG.bombaLibre(b, s.spec.id)),
     };
   }
@@ -3410,7 +3428,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.fighterQueue--;
           const fromRight = Math.random() < 0.6;
           s.fighters.push(CZ.crear(clamp(s.camX + (fromRight ? view.vw + 80 : -80), 40, LEVEL - 40), clamp(p.y + rand(-40, 120), tormenta ? 360 : 150, CEIL - 100), !fromRight, s.wave, tormenta));
-          radio('Ratón Líder', RADIO.llegan);
+          radio('Ratón Líder', Math.random() < 0.35 ? RADIO_PILOTO[s.piloto] : RADIO.llegan);
           s.fighterT = tormenta ? rand(2.5, 4) : rand(9, 15);
           if (!s.banner) {
             s.banner = '✈️ ¡Cazas ratón en el aire!';

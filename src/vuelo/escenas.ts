@@ -1,7 +1,8 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
 import * as A from './dibujo';
-import type { ModeloBase } from './fisica-tipos';
+import type { ModeloAvion, Piloto } from './fisica-tipos';
+import { CASA } from './pilotos';
 import type { EscenaId, Hablante } from './historia';
 
 /*
@@ -138,10 +139,10 @@ function manga(g: G, x: number, y: number, t: number) {
 
 const suaveK = (k: number) => k * k * (3 - 2 * k);
 
-/** Sprites borrowed from the game. */
-function avionDe(m: ModeloBase) {
+/** Sprites borrowed from the game: plane `m` with pilot `p` in the cockpit (their own plane by default). */
+function avionDe(p: Piloto, m: ModeloAvion = CASA[p]) {
   const antes = A.pilotoActual();
-  A.fijarPiloto(m);
+  A.fijarPiloto(p);
   const c = A.planeSprite(m);
   A.fijarPiloto(antes);
   return c;
@@ -170,7 +171,7 @@ function vehiculo(g: G, k: A.VehiculoTipo, x: number, y: number, f = 0, flip = f
 let suCaza: HTMLCanvasElement | null = null;
 function cazaMargarita() {
   if (suCaza) return suCaza;
-  const src = avionDe('caza');
+  const src = avionDe('dui');
   const c = lienzo(src.width, src.height);
   const g = c.getContext('2d')!;
   g.drawImage(src, 0, 0);
@@ -182,23 +183,86 @@ function cazaMargarita() {
   return c;
 }
 
-/** The three pilots on foot: a round little body and the game's own head. */
-const CUERPO: Record<ModeloBase, { c: string; s: string; raya?: string }> = {
-  caza: { c: P.o2, s: P.o1, raya: P.o1 },
-  avioneta: { c: '#3a3252', s: '#2a2440' },
-  bombardero: { c: '#b07a40', s: '#2a2030' },
+/** The animal pilots on foot: a round little body and the game's own head. */
+const CUERPO: Record<'dui' | 'lulu' | 'almendrita', { c: string; s: string; raya?: string }> = {
+  dui: { c: P.o2, s: P.o1, raya: P.o1 },
+  lulu: { c: '#3a3252', s: '#2a2440' },
+  almendrita: { c: '#b07a40', s: '#2a2030' },
 };
+const PIEL = '#9a5c30', PIEL0 = '#6e3e1e';
+/**
+ * The humans on foot, feet at (0, 0) facing +x; returns the chin's height.
+ * Naxo: short and stocky in his teal CESFAM scrubs, tattooed arms, white
+ * clogs. Ñelo: a little taller, black hoodie, grey track pants with a stripe,
+ * white sneakers.
+ */
+function humano(g: G, m: 'naxo' | 'nelo', t: number): number {
+  const paso = Math.floor(t * 3) % 2;
+  if (m === 'naxo') {
+    const T = '#3aa0aa', T0 = '#246a74', TA = '#2a3a5a';
+    R(g, -4, -1, 3, 1, '#f4f4f4');
+    R(g, 1, -1, 3, 1, '#f4f4f4');
+    R(g, -4, -5, 3, 4, T0);
+    R(g, 1, -5, 3, 4, T0);
+    D.oval(g, 0, -9, 6, 5, T0);
+    D.oval(g, 0, -9, 5, 4, T);
+    R(g, -1, -13, 3, 2, PIEL);
+    R(g, 0, -12, 1, 1, PIEL0);
+    // Pens in the pocket and the stethoscope round the neck.
+    R(g, 2, -11, 1, 2, '#e03a3a');
+    R(g, 3, -11, 1, 2, '#3a6ae0');
+    R(g, -3, -13, 1, 4, '#4a4a5a');
+    R(g, -3, -9, 2, 1, '#c8d0dc');
+    // Big tattooed arms out of short sleeves.
+    for (const sx of [-1, 1]) {
+      const ax = sx < 0 ? -8 : 6;
+      R(g, ax, -13, 3, 2, T);
+      R(g, ax, -11, 3, 5 - (sx > 0 ? paso : 0), PIEL);
+      R(g, ax + 1, -10, 1, 2, TA);
+      R(g, ax, -7, 1, 1, TA);
+    }
+    return -14;
+  }
+  const K = '#24222a', K0 = '#0e0c12', B = '#5a5a68';
+  R(g, -5, -2, 4, 2, '#f4f4f4');
+  R(g, 1, -2, 4, 2, '#f4f4f4');
+  R(g, -5, -1, 4, 1, '#c8c8d0');
+  R(g, 1, -1, 4, 1, '#c8c8d0');
+  R(g, -4, -8, 3, 6, B);
+  R(g, 1, -8, 3, 6, B);
+  R(g, -4, -8, 1, 6, '#e8e8f0');
+  R(g, 3, -8, 1, 6, '#e8e8f0');
+  D.oval(g, 0, -12, 7, 6, K0);
+  D.oval(g, 0, -12, 6, 5, K);
+  R(g, -3, -10, 7, 2, K0);
+  // Hood bunched behind the neck and the white drawstrings swinging.
+  R(g, -5, -18, 8, 2, K0);
+  const cuerda = Math.round(Math.sin(t * 5));
+  R(g, -1, -16, 1, 3 + cuerda, '#e8e8f0');
+  R(g, 2, -16, 1, 3 - cuerda, '#e8e8f0');
+  for (const ax of [-9, 7]) {
+    R(g, ax, -16, 3, 7 - (ax > 0 ? paso : 0), K);
+    R(g, ax, -9 - (ax > 0 ? paso : 0), 3, 2, PIEL);
+  }
+  return -17;
+}
 /** A pilot standing with feet at (x, y). `dir` -1 faces left; `salto` lifts them. */
-export function piloto(g: G, m: ModeloBase, x: number, y: number, t: number, dir: 1 | -1 = 1, salto = 0) {
-  const b = CUERPO[m];
+export function piloto(g: G, m: Piloto, x: number, y: number, t: number, dir: 1 | -1 = 1, salto = 0) {
   const bob = Math.round(Math.abs(Math.sin(t * 3)) * 1) + Math.round(salto);
   const X = Math.round(x), Y = Math.round(y) - bob;
   g.save();
   g.translate(X, Y);
   g.scale(dir, 1);
+  if (m === 'naxo' || m === 'nelo') {
+    const menton = humano(g, m, t);
+    g.drawImage(A.pilotPortrait(m), -7, menton - 13);
+    g.restore();
+    return;
+  }
+  const b = CUERPO[m];
   // Tail.
   const cola = Math.round(Math.sin(t * 4) * 2);
-  if (m === 'bombardero') {
+  if (m === 'almendrita') {
     R(g, -7, -9 + cola * 0.5, 2, 3, b.s);
   } else {
     R(g, -8, -6, 2, 2, b.s);
@@ -207,13 +271,13 @@ export function piloto(g: G, m: ModeloBase, x: number, y: number, t: number, dir
   }
   D.oval(g, 0, -5, 6, 5, b.s);
   D.oval(g, 0, -5, 5, 4, b.c);
-  if (m === 'caza') for (const dx of [-3, 0, 3]) R(g, dx, -9, 1, 3, P.o1);
-  if (m === 'bombardero') D.oval(g, -1, -7, 4, 2, b.s);
+  if (m === 'dui') for (const dx of [-3, 0, 3]) R(g, dx, -9, 1, 3, P.o1);
+  if (m === 'almendrita') D.oval(g, -1, -7, 4, 2, b.s);
   R(g, -3, -1, 2, 2, b.s);
   R(g, 2, -1, 2, 2, b.s);
   // Scarf.
-  R(g, -3, -10, 7, 2, m === 'caza' ? P.r1 : m === 'avioneta' ? '#8a5ad8' : '#e8e2d6');
-  R(g, -5 - Math.round(Math.sin(t * 6)), -10, 2, 2, m === 'caza' ? P.r2 : m === 'avioneta' ? '#b48af4' : P.white);
+  R(g, -3, -10, 7, 2, m === 'dui' ? P.r1 : m === 'lulu' ? '#8a5ad8' : '#e8e2d6');
+  R(g, -5 - Math.round(Math.sin(t * 6)), -10, 2, 2, m === 'dui' ? P.r2 : m === 'lulu' ? '#b48af4' : P.white);
   const head = A.pilotPortrait(m);
   g.drawImage(head, -7, -10 - 13);
   g.restore();
@@ -519,7 +583,12 @@ function fondoPaz(g: G) {
 
 /* ── Scenes (backdrop + animated layer) ─────────────────────────────────── */
 
-type Pinta = (g: G, t: number, p: ModeloBase, calma: boolean) => void;
+type Pinta = (g: G, t: number, p: Piloto, calma: boolean) => void;
+
+/** The three planes of a scene's squadron, the picked pilot last (in front). */
+function escuadra(p: Piloto): Piloto[] {
+  return (['lulu', 'dui', 'almendrita'] as Piloto[]).filter((m) => m !== p).slice(0, 2).concat(p);
+}
 
 const ESCENAS: Record<EscenaId, Pinta> = {
   atardecer(g, t) {
@@ -542,10 +611,10 @@ const ESCENAS: Record<EscenaId, Pinta> = {
     estrellas(g, 12, 50, 99, t);
     // Dui counting fish (and eating one), Lulu watching, Almendrita wagging.
     const salto = Math.max(0, Math.sin(t * 5)) * 3;
-    piloto(g, 'caza', 80, 128, t, 1, salto);
+    piloto(g, 'dui', 80, 128, t, 1, salto);
     if (Math.sin(t * 2.5) > 0) pez(g, 90, 108 - Math.round(salto), 1, '#ffb0b4');
-    piloto(g, 'avioneta', 186, 128, t * 0.5, -1);
-    piloto(g, 'bombardero', 164, 130, t * 1.6, -1);
+    piloto(g, 'lulu', 186, 128, t * 0.5, -1);
+    piloto(g, 'almendrita', 164, 130, t * 1.6, -1);
     if (Math.floor(t * 2) % 2) R(g, 150, 118, 2, 1, P.p1);
   },
   vecina(g, t) {
@@ -560,7 +629,7 @@ const ESCENAS: Record<EscenaId, Pinta> = {
       g.stroke();
     }
     g.globalAlpha = 1;
-    dibujarRot(g, avionDe('caza'), 40, 98, 0);
+    dibujarRot(g, avionDe('dui'), 40, 98, 0);
     // Margarita on her cart, rocking with anger.
     const f = Math.floor(t * 4) % 4;
     g.save();
@@ -590,9 +659,13 @@ const ESCENAS: Record<EscenaId, Pinta> = {
   },
   amanecer(g, t) {
     g.drawImage(fondo('amanecer', fondoAmanecer), 0, 0);
-    piloto(g, 'bombardero', 96, 132, t * 2, 1, Math.max(0, Math.sin(t * 8)) * 2);
-    piloto(g, 'avioneta', 196, 130, t * 0.6, -1);
-    piloto(g, 'caza', 160, 134, t, -1, Math.max(0, Math.sin(t * 4)) * 4);
+    piloto(g, 'almendrita', 96, 132, t * 2, 1, Math.max(0, Math.sin(t * 8)) * 2);
+    piloto(g, 'lulu', 186, 130, t * 0.6, -1);
+    piloto(g, 'dui', 160, 134, t, -1, Math.max(0, Math.sin(t * 4)) * 4);
+    // The neighbours come running: Naxo straight from his shift, Ñelo from Juanaspe.
+    const llega = Math.min(1, t / 2.5);
+    piloto(g, 'naxo', 30 + llega * 34, 133, t * (llega < 1 ? 3 : 1), 1);
+    piloto(g, 'nelo', 262 - llega * 50, 132, t * (llega < 1 ? 3 : 0.8), -1);
     // Exclamation marks over their heads.
     if (Math.floor(t * 2) % 2) {
       R(g, 159, 96, 2, 5, '#ff4a5a');
@@ -603,8 +676,8 @@ const ESCENAS: Record<EscenaId, Pinta> = {
   },
   hangar(g, t, p) {
     g.drawImage(fondo('hangar', fondoHangar), 0, 0);
-    // The three planes; the tarp slides off the picked pilot's one.
-    const orden: ModeloBase[] = ['avioneta', 'caza', 'bombardero'];
+    // Three planes, the picked pilot's in the middle; the tarp slides off theirs.
+    const orden: Piloto[] = p === 'naxo' || p === 'nelo' ? ['lulu', p, 'almendrita'] : ['lulu', 'dui', 'almendrita'];
     orden.forEach((m, i) => {
       const x = 52 + i * 76, y = 106;
       const img = avionDe(m);
@@ -647,8 +720,7 @@ const ESCENAS: Record<EscenaId, Pinta> = {
     }), 0, 0);
     for (let i = 0; i < 3; i++) nube(g, ((i * 100 - t * 10) % 300 + 300) % 300 - 30, 24 + i * 16, 12);
     // The squadron rolls and climbs away, the picked pilot in front.
-    const orden: ModeloBase[] = p === 'caza' ? ['avioneta', 'bombardero', 'caza'] : p === 'avioneta' ? ['caza', 'bombardero', 'avioneta'] : ['avioneta', 'caza', 'bombardero'];
-    orden.forEach((m, i) => {
+    escuadra(p).forEach((m, i) => {
       const k = Math.max(0, t - (2 - i) * 0.5) % 7;
       const x = 40 + k * 46 + i * 14;
       const sube = Math.max(0, x - 90);
@@ -779,7 +851,7 @@ const ESCENAS: Record<EscenaId, Pinta> = {
       A.drawWorker(g, x, y, t + i, false, 1);
     }
   },
-  nodriza(g, t) {
+  nodriza(g, t, p) {
     g.drawImage(fondo('nodriza', (c) => {
       cielo(c, [[0, '#0a0818'], [100, '#2a2060'], [144, '#4a3a7a']]);
       estrellas(c, 90, 140, 31);
@@ -789,10 +861,9 @@ const ESCENAS: Record<EscenaId, Pinta> = {
     const s = Math.max(1, Math.round(3 - t * 0.3));
     const y = Math.max(16, 80 - t * 9);
     ovni(g, 128 + Math.sin(t * 2) * 4, y, s, t, false);
-    for (let i = 0; i < 3; i++) {
-      const m = (['avioneta', 'caza', 'bombardero'] as ModeloBase[])[i];
-      dibujarRot(g, avionDe(m), 60 + i * 60, 118 - (i === 1 ? 8 : 0) + Math.sin(t * 2 + i) * 2, 0);
-    }
+    // The squadron below, the picked pilot in the middle.
+    const [a, b, c] = escuadra(p);
+    [a, c, b].forEach((m, i) => dibujarRot(g, avionDe(m), 60 + i * 60, 118 - (i === 1 ? 8 : 0) + Math.sin(t * 2 + i) * 2, 0));
   },
   paz(g, t) {
     g.drawImage(fondo('paz', fondoPaz), 0, 0);
@@ -814,15 +885,19 @@ const ESCENAS: Record<EscenaId, Pinta> = {
       D.disc(g, 165 + Math.sin(t * 2 + i) * 4, 102 - s * 40, 2 + Math.round(s * 4), '#d8d0e8');
     }
     g.globalAlpha = 1;
-    piloto(g, 'caza', 140, 128, t, 1, Math.max(0, Math.sin(t * 3)) * 2);
-    piloto(g, 'avioneta', 112, 128, t * 0.6, 1);
-    piloto(g, 'bombardero', 196, 128, t * 1.5, -1);
+    piloto(g, 'dui', 140, 128, t, 1, Math.max(0, Math.sin(t * 3)) * 2);
+    piloto(g, 'lulu', 112, 128, t * 0.6, 1);
+    piloto(g, 'almendrita', 206, 128, t * 1.5, -1);
+    // Ñelo at the grill with the tongs, Naxo keeping an eye on Dui's plate.
+    piloto(g, 'nelo', 188, 128, t * 0.8, -1);
+    R(g, 176 + (Math.floor(t * 2) % 2), 112, 5, 1, '#c8d0dc');
+    piloto(g, 'naxo', 88, 128, t * 0.7, 1);
     margaritaChica(g, 222, 128, t * 0.7);
   },
 };
 
 /** Paints scene `id` at time `t` (seconds) on a 256×144 context. */
-export function pintarEscena(g: G, id: EscenaId, t: number, p: ModeloBase, calma: boolean) {
+export function pintarEscena(g: G, id: EscenaId, t: number, p: Piloto, calma: boolean) {
   g.imageSmoothingEnabled = false;
   ESCENAS[id](g, t, p, calma);
 }
