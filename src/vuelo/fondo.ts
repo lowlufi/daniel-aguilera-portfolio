@@ -3325,25 +3325,57 @@ function lunaLlena() {
   return b.canvas();
 }
 
-/** A distant whale: its back with the dorsal fin, and its fluke. Plain and bioluminescent versions. */
+/**
+ * A distant humpback: its back rolling up (knobbly head, small dorsal hump,
+ * a moonlit sheen and a few barnacles), the fluke lifted as it dives (seen
+ * from behind: white underside, notch, ragged edge) and a calf's back.
+ * Plain and bioluminescent versions.
+ */
 function ballenaLejos(glow: boolean) {
-  const lomo = new Buf(26, 8);
-  const cuerpo = P(glow ? '#1e2a5a' : '#4a5a8a');
-  const luz = P(glow ? '#7af4ff' : '#9ab0d0');
-  lomo.oval(13, 7, 12, 4, cuerpo);
-  lomo.rect(16, 1, 2, 3, cuerpo);
-  lomo.rect(15, 2, 1, 2, cuerpo);
-  lomo.rect(6, 4, 12, 1, luz);
-  lomo.outline(P(glow ? '#3ad8f0' : '#2e3a68'));
-  const cola = new Buf(18, 14);
-  cola.rect(8, 6, 3, 8, cuerpo);
-  for (let i = 0; i < 7; i++) {
-    cola.rect(9 - i - 1, 5 - Math.round(i * 0.6), 2, 2, cuerpo);
-    cola.rect(9 + i, 5 - Math.round(i * 0.6), 2, 2, cuerpo);
+  const cuerpo = P(glow ? '#222a62' : '#4a5a8a');
+  const lado = P(glow ? '#2e3a88' : '#5a6a9a');
+  const luz = P(glow ? '#7af4ff' : '#b4c4e0');
+  const pale = P(glow ? '#d6e2fa' : '#e8eef8');
+  const borde = P(glow ? '#3ad8f0' : '#2e3a68');
+  const lomo = new Buf(34, 10);
+  // Back: long low arc, the head (right) flatter, a little hump and fin past the middle.
+  for (let x = 2; x <= 31; x++) {
+    const u = (x - 2) / 29;
+    const h = Math.round(1 + 5 * Math.pow(Math.sin(Math.min(1, u / 0.7) * Math.PI * 0.5), 0.8) * (u > 0.8 ? 1 - (u - 0.8) * 1.6 : 1));
+    for (let y = 9 - h; y < 10; y++) lomo.px(x, y, y === 9 - h ? lado : cuerpo);
+    if (u > 0.15 && u < 0.75) lomo.px(x, 10 - h, luz);
+    if (u > 0.78 && x % 2 === 1) lomo.px(x, 8 - h, lado);
   }
-  cola.rect(3, 1, 3, 1, luz);
-  cola.outline(P(glow ? '#3ad8f0' : '#2e3a68'));
-  return [lomo.canvas(), cola.canvas()];
+  lomo.rect(11, 2, 2, 2, cuerpo);
+  lomo.px(10, 2, cuerpo);
+  lomo.px(13, 3, cuerpo);
+  lomo.px(27, 5, pale);
+  lomo.px(29, 6, pale);
+  lomo.px(18, 4, pale);
+  lomo.outline(borde);
+  const cola = new Buf(22, 15);
+  // Fluke from behind: wings curling up at the tips, a notch, white underside with dark marks.
+  for (let dx = -9; dx <= 9; dx++) {
+    const a = Math.abs(dx) / 9;
+    const yt = 4 - Math.round(3 * a * a) + (Math.abs(dx) < 1 ? 1 : 0);
+    const yb = Math.max(yt + 1, 8 - Math.round(4 * Math.pow(a, 1.4)));
+    for (let y = yt; y <= yb; y++) cola.px(11 + dx, y, y >= yb ? cuerpo : (dx * 5 + y * 3) % 7 === 0 && Math.abs(dx) > 2 ? lado : pale);
+    if (Math.abs(dx) % 3 === 2) cola.px(11 + dx, yt, 0);
+  }
+  cola.rect(10, 8, 3, 7, cuerpo);
+  cola.px(10, 9, luz);
+  cola.outline(borde);
+  const cria = new Buf(20, 7);
+  for (let x = 2; x <= 17; x++) {
+    const u = (x - 2) / 15;
+    const h = Math.round(1 + 3 * Math.sin(Math.min(1, u / 0.7) * Math.PI * 0.5) * (u > 0.8 ? 1 - (u - 0.8) * 1.5 : 1));
+    for (let y = 6 - h; y < 7; y++) cria.px(x, y, y === 6 - h ? lado : cuerpo);
+  }
+  cria.px(7, 2, cuerpo);
+  cria.px(9, 3, luz);
+  cria.px(10, 3, luz);
+  cria.outline(borde);
+  return [lomo.canvas(), cola.canvas(), cria.canvas()];
 }
 
 type Tormenta = { techo: Cv; techo2: Cv; techoLuz: Cv; banco: Cv; bancoLuz: Cv; cortina: Cv; rayo: Cv; luna: Cv; ballenas: Cv[]; ballenasGlow: Cv[] };
@@ -3964,44 +3996,67 @@ function tormentaHorizonte(g: Ctx, o: OpcionesFondo, TO: Tormenta, t: number, yH
   g.globalAlpha = 1;
 }
 
-/** Whales far out at sea: a back rolling by, a spout, then the fluke going down. Glowing at night. */
+/** Whales far out at sea: a back rolling by (a calf beside one), a blow leaning in the wind, then the fluke going down. Glowing at night. */
 function ballenasLejos(g: Ctx, o: OpcionesFondo, TO: Tormenta, t: number, yH: number, yCerca: number) {
   const { vw, camX, ambiente: a } = o;
-  const [lomo, cola] = a === 'noche' ? TO.ballenasGlow : TO.ballenas;
+  const [lomo, cola, cria] = a === 'noche' ? TO.ballenasGlow : TO.ballenas;
   const k = 1 - K_TORM;
   if (k < 0.05) return;
+  const espuma = a === 'noche' ? '#7af4ff' : '#ffffff';
+  // Rising out of the water: draw only the top `h` rows, standing on the waterline.
+  const asoma = (c: Cv, x: number, y: number, v: number) => {
+    const h = Math.round(c.height * Math.sin(v * Math.PI));
+    if (h > 0) g.drawImage(c, 0, 0, c.width, h, x, y - h, c.width, h);
+    if (h > 1) {
+      g.fillStyle = espuma;
+      g.fillRect(x + 1, y - 1, c.width - 2, 1);
+      g.fillRect(x - 2, y, 3, 1);
+      g.fillRect(x + c.width - 1, y, 3, 1);
+    }
+  };
   g.globalAlpha = k;
   for (let i = 0; i < BALLENAS.length; i++) {
     const [X, d, PER, ph] = BALLENAS[i];
     const u = mod(t / PER + ph, 1);
     if (u > 0.5) continue;
     const x = Math.round(mod(X - camX * (0.09 + d * 0.3) - t * 2, 2600) - 200);
-    if (x < -30 || x > vw + 30) continue;
+    if (x < -40 || x > vw + 30) continue;
     const y = Math.round(yH + d * (yCerca - yH));
     if (u < 0.28) {
-      // The back rolls up and down again.
+      // The back rolls up and down again, the calf a beat behind.
       const v = u / 0.28;
-      const h = Math.round(lomo.height * Math.sin(v * Math.PI));
-      if (h > 0) g.drawImage(lomo, 0, 0, lomo.width, h, x - Math.round(v * 6), y - h, lomo.width, h);
+      asoma(lomo, x - Math.round(v * 6), y, v);
+      if (i === 1) {
+        const vc = (u - 0.03) / 0.26;
+        if (vc > 0 && vc < 1) asoma(cria, x - 16 - Math.round(vc * 5), y + 1, vc);
+      }
       if (v > 0.15 && v < 0.6) {
+        // A bushy blow that leans downwind and blooms at the top.
         const s = (v - 0.15) / 0.45;
-        const H = Math.round(14 * Math.sin(s * Math.PI));
+        const H = Math.round(16 * Math.sin(s * Math.PI));
         g.fillStyle = a === 'noche' ? '#9af6ff' : '#f4f8ff';
+        const hx = x + 22 - Math.round(v * 6);
         for (let j = 0; j < H; j += 2) {
-          const sp = Math.round((j / 14) * 3);
-          g.fillRect(x + 20 - sp, y - 6 - j, 1, 1);
-          g.fillRect(x + 20 + sp, y - 6 - j, 1, 1);
+          const sp = Math.round((j / 16) * 3);
+          const lean = Math.round((j / 16) * (j / 16) * 5);
+          g.fillRect(hx - sp - lean, y - 6 - j, 1, 1);
+          g.fillRect(hx + sp - lean, y - 6 - j, 1, 1);
+          if (j % 4 === 0) g.fillRect(hx - lean, y - 7 - j, 1, 1);
         }
-        g.fillRect(x + 19, y - 7 - H, 3, 1);
+        if (H > 3) {
+          g.fillRect(hx - 6, y - 7 - H, 4, 1);
+          g.fillRect(hx - 5, y - 8 - H, 2, 1);
+          g.fillRect(hx - 3, y - 6 - H, 2, 1);
+        }
       }
     } else if (u > 0.34 && u < 0.5) {
-      // The fluke lifts and slips under.
+      // The fluke lifts, water running off its edge, and slips under.
       const v = (u - 0.34) / 0.16;
-      const h = Math.round(cola.height * Math.sin(v * Math.PI));
-      if (h > 0) g.drawImage(cola, 0, 0, cola.width, h, x + 4, y - h, cola.width, h);
-      if (v > 0.5) {
-        g.fillStyle = a === 'noche' ? '#7af4ff' : '#ffffff';
-        g.fillRect(x + 4, y - 1, 18, 1);
+      asoma(cola, x + 4, y, v);
+      if (v > 0.3 && v < 0.8) {
+        g.fillStyle = espuma;
+        const h = Math.round(cola.height * Math.sin(v * Math.PI));
+        for (let j = 0; j < 4; j++) g.fillRect(x + 8 + j * 4, y - h + 5 + ((j + Math.floor(t * 6)) % 3), 1, 1);
       }
     }
   }

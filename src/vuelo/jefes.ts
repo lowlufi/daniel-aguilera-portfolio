@@ -169,6 +169,9 @@ export type Jefe = {
   cazaCd: number;
   /** >0 while a searchlight has the plane in its beam (flak aims better). */
   iluminado: number;
+  /** Where the plane was last step (zepelin: to light it up when a beam holds it). */
+  focoX?: number;
+  focoY?: number;
   crujeCd: number;
   charlaCd: number;
   /** -1 whole; otherwise seconds since the hull broke in two (death). */
@@ -1625,7 +1628,8 @@ export function dibujar(g: Ctx, j: Jefe, sx: number, sy: number, t: number, flas
   const angQ = Math.round(-j.ang / 0.03) * 0.03;
   const sacude = muriendo ? Math.round(Math.sin(t * 40) * 1.5) : 0;
   // Searchlight beams go under the hull.
-  if (j.tipo === 'zepelin' && !muriendo) hacesZepelin(g, j, x0, y0);
+  if (j.tipo === 'zepelin') hacesCosta(g, j, x0, y0, t);
+  if (j.tipo === 'zepelin' && !muriendo) hacesZepelin(g, j, x0, y0, t);
   g.save();
   g.translate(x0 + sacude, y0);
   g.rotate(angQ);
@@ -1678,6 +1682,7 @@ export function dibujar(g: Ctx, j: Jefe, sx: number, sy: number, t: number, flas
     }
   } else pintaCuerpo();
   g.restore();
+  if (j.tipo === 'zepelin' && !muriendo) brilloFocos(g, j, x0, y0, t);
 
   // Smoke from wounds and stumps (screen space: it always rises).
   const fuentes: { u: number; v: number; s: number; sem: number; osc: boolean }[] = [];
@@ -2311,23 +2316,37 @@ function pasoZepelin(j: Jefe, vista: Vista, dt: number, cazas: number): Resultad
   }
   j.ventana = Math.max(0, j.ventana - dt);
 
-  // Searchlights: sweep the sky below; once one catches the plane it follows it a while.
+  // Searchlights: the belly lamp sweeps the sky below; the nose lamp swings in slow
+  // arcs from below to forward and up into the sky. Once one catches the plane it
+  // follows it a while (within its own arc).
   let ilum = false;
+  j.focoX = av.x;
+  j.focoY = av.y;
+  const sgZ = j.giro < 0 ? -1 : 1;
   for (const p of vivas(j, 'reflector')) {
     const w = posParte(j, p);
     const dx = av.x - w.x, dy = av.y - w.y;
     const d = Math.hypot(dx, dy);
     const aAv = Math.atan2(dy, dx);
-    const dentro = d < ALCANCE_FOCO && dy < 0 && Math.abs(envolver(aAv - p.ang)) < HAZ + Math.atan2(rAv, Math.max(d, 1));
+    const proa = p.dx > 0;
+    // Allowed arc, as an angle from straight down (+ = towards world +x).
+    const lo = proa && sgZ < 0 ? -(Math.PI / 2 + 0.45) : -(Math.PI / 2 - 0.15);
+    const hi = proa && sgZ > 0 ? Math.PI / 2 + 0.45 : Math.PI / 2 - 0.15;
+    const dentro = d < ALCANCE_FOCO && Math.abs(envolver(aAv - p.ang)) < HAZ + Math.atan2(rAv, Math.max(d, 1));
     if (dentro) p.rafT = 1.4;
     if (p.rafT > 0) {
       p.rafT -= dt;
-      if (dy < 0) p.ang = girar(p.ang, aAv, lerp(0.7, 1, k) * dt);
+      p.ang = girar(p.ang, aAv, lerp(0.7, 1, k) * dt);
     } else {
-      const base = -Math.PI / 2 + Math.sin(j.t * 0.45 + p.dx * 0.05) * 1.05;
+      const base = proa
+        ? -Math.PI / 2 + sgZ * (0.3 + 1.6 * (0.5 + 0.5 * Math.sin(j.t * 0.26 + 1.2)))
+        : -Math.PI / 2 + Math.sin(j.t * 0.45 + p.dx * 0.05) * 1.05;
       p.ang = girar(p.ang, base, 0.55 * dt);
     }
-    p.ang = clamp(p.ang, -Math.PI + 0.15, -0.15);
+    // Keep it in its arc (eased back, so a turn of the ship doesn't snap the beam).
+    const rel = envolver(p.ang + Math.PI / 2);
+    const dentroArco = clamp(rel, lo, hi);
+    if (dentroArco !== rel) p.ang = girar(p.ang, dentroArco - Math.PI / 2, 1.6 * dt);
     if (dentro) ilum = true;
   }
   if (ilum && j.iluminado <= 0 && j.charlaCd <= 0) {
@@ -2783,9 +2802,16 @@ function vivoZepelin(g: Ctx, j: Jefe, t: number, angQ: number) {
       if (L > 2) R(g, px - 1, p.dy - L + 1, 1, L * 2 - 1, P.metal);
       D.disc(g, px + 1, p.dy, 2, P.metal0);
     } else if (p.clase === 'reflector' && vivo) {
+      // The lamp drum swivels after its beam: a dark barrel, a cooling-ribbed back, a blazing lens.
       const d = local(p.ang);
-      D.disc(g, p.dx + d.u * 2, p.dy + d.v * 2, 3, p.rafT > 0 && parpadeo(t, 8) ? P.white : P.gold1);
-      R(g, p.dx + d.u * 2, p.dy + d.v * 2 - 1, 1, 1, P.white);
+      lineaPx(g, p.dx - d.u * 2, p.dy - d.v * 2, p.dx + d.u * 4, p.dy + d.v * 4, '#2a1e3a', 5);
+      lineaPx(g, p.dx - d.u * 1, p.dy - d.v * 1, p.dx + d.u * 3, p.dy + d.v * 3, '#5a4e78', 3);
+      R(g, p.dx - d.u * 2 - 1, p.dy - d.v * 2 - 1, 2, 2, '#8478a4');
+      const lx = p.dx + d.u * 5, ly = p.dy + d.v * 5;
+      const fuerte = p.rafT > 0;
+      D.disc(g, lx, ly, 3, '#ffd870');
+      D.disc(g, lx, ly, 2, fuerte && parpadeo(t, 10) ? '#ffffff' : '#fff4c8');
+      R(g, lx - 1, ly - 1, 2, 1, P.white);
     }
   }
   // Burning cells: a row of flames along the top of each (upright whatever the tilt).
@@ -2829,25 +2855,186 @@ function bordeRoto(g: Ctx, lado: number, t: number) {
   }
 }
 
-/** Searchlight cones (screen space). */
-function hacesZepelin(g: Ctx, j: Jefe, x0: number, y0: number) {
+/* Searchlight beams: textures built once, then drawn as rotated strips. */
+type Haces = { haz: HTMLCanvasElement; nucleo: HTMLCanvasElement; brillo: HTMLCanvasElement };
+let HACES: Haces | null = null;
+const HAZ_LARGO = 448;
+
+/**
+ * A searchlight beam pointing right from its lamp at the left-middle: a cone of
+ * half-angle `semi`, soft edges, a brighter core, fading with distance, with
+ * dusty streaks and grain (2×2 px blocks for a chunky look).
+ */
+function texturaHaz(semi: number, fuerza: number, sem: number): HTMLCanvasElement {
+  const L = HAZ_LARGO;
+  const tg = Math.tan(semi);
+  const half = Math.ceil(L * tg * 1.3) + 6;
+  const W = half * 2;
+  const c = document.createElement('canvas');
+  c.width = L;
+  c.height = W;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(L, W);
+  const d = img.data;
+  for (let y = 0; y < W; y += 2)
+    for (let x = 0; x < L; x += 2) {
+      const q = Math.abs(y + 1 - half) / (x * tg + 2.5);
+      if (q > 1.3) continue;
+      const borde = q < 0.7 ? 1 : Math.max(0, 1 - (q - 0.7) / 0.6) ** 1.5;
+      const eje = 1 + 0.7 * Math.max(0, 1 - q * 2.4);
+      const largo = Math.min(1, (x + 4) / 16) * Math.pow(1 - x / L, 1.2);
+      const raya = 0.8 + 0.2 * Math.sin(q * 11 + sem + Math.sin(x * 0.011 + sem) * 2.2);
+      const n = Math.sin(x * 12.9898 + y * 78.233 + sem * 7) * 43758.5453;
+      const grano = n - Math.floor(n);
+      const a = Math.min(1, borde * eje * largo * raya * (0.86 + 0.28 * grano) * fuerza);
+      if (a < 0.02) continue;
+      const cal = Math.max(0, 1 - q * 1.6);
+      for (let yy = y; yy < y + 2 && yy < W; yy++)
+        for (let xx = x; xx < x + 2; xx++) {
+          const o = (yy * L + xx) * 4;
+          d[o] = 255;
+          d[o + 1] = Math.round(236 + 19 * cal);
+          d[o + 2] = Math.round(190 + 55 * cal);
+          d[o + 3] = Math.round(a * 255);
+        }
+    }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+function haces(): Haces {
+  if (HACES) return HACES;
+  const b = document.createElement('canvas');
+  b.width = b.height = 48;
+  const gb = b.getContext('2d')!;
+  const rg = gb.createRadialGradient(24, 24, 0, 24, 24, 24);
+  rg.addColorStop(0, 'rgba(255,250,220,0.95)');
+  rg.addColorStop(0.25, 'rgba(255,226,150,0.45)');
+  rg.addColorStop(1, 'rgba(255,200,120,0)');
+  gb.fillStyle = rg;
+  gb.fillRect(0, 0, 48, 48);
+  HACES = { haz: texturaHaz(HAZ * 1.12, 0.62, 1.3), nucleo: texturaHaz(HAZ * 0.4, 0.75, 4.1), brillo: b };
+  return HACES;
+}
+
+/** Draws a beam texture from (ox, oy) along screen angle `a`, `largo` px long, `ancho` × its own spread. */
+function haz(g: Ctx, tex: HTMLCanvasElement, ox: number, oy: number, a: number, largo: number, ancho: number, alfa: number) {
+  if (alfa <= 0.01) return;
+  const h = tex.height * (largo / tex.width) * ancho;
+  g.save();
+  g.translate(ox, oy);
+  g.rotate(a);
+  g.globalAlpha = alfa;
+  g.drawImage(tex, 0, -h / 2, largo, h);
+  g.restore();
+}
+
+/** Motes of dust drifting out along a beam (screen space). */
+function motas(g: Ctx, ox: number, oy: number, a: number, largo: number, semi: number, t: number, alfa: number, sem: number) {
+  const ux = Math.cos(a), uy = Math.sin(a);
+  g.fillStyle = '#fff8e0';
+  for (let i = 0; i < 14; i++) {
+    const f = frac(t * 0.05 + i * 0.0713 + sem);
+    const lat = Math.sin(i * 2.3 + t * 0.4 + sem) * 0.75 * f * largo * Math.tan(semi);
+    const x = ox + ux * f * largo - uy * lat, y = oy + uy * f * largo + ux * lat;
+    g.globalAlpha = alfa * (1 - f) * (0.5 + 0.5 * Math.sin(t * 3 + i));
+    g.fillRect(Math.round(x), Math.round(y), 1, 1);
+  }
+  g.globalAlpha = 1;
+}
+
+/**
+ * Searchlight beams from the coast and the ships below (screen space, behind
+ * everything): long, faint, slowly sweeping the sky and now and then coning
+ * the zeppelin, WWII-style. Purely scenery: they never look for the plane.
+ */
+function hacesCosta(g: Ctx, j: Jefe, x0: number, y0: number, t: number) {
+  const H = haces();
+  const vw = g.canvas.width;
+  const ySea = y0 + (j.y - 18);
+  const fin = j.muriendo >= 0 ? Math.max(0, 1 - j.muriendo / 2) : 1;
+  if (fin <= 0) return;
+  const SEP = 560;
+  const k0 = Math.floor((j.x - x0 - 400) / SEP), k1 = Math.ceil((j.x - x0 + vw + 400) / SEP);
+  for (let kk = k0; kk <= k1; kk++) {
+    const wx = kk * SEP + 140 + ((kk * 197) % 120);
+    const sx = x0 + (wx - j.x);
+    // Sweep slowly, then swing over to hold the zeppelin a while.
+    const barre = -Math.PI / 2 + Math.sin(t * 0.21 + kk * 1.9) * 0.55;
+    const hacia = Math.atan2(y0 - ySea, x0 - sx);
+    const mezcla = 0.5 + 0.5 * Math.sin(t * 0.12 + kk * 2.7);
+    const a = barre + envolver(hacia - barre) * mezcla * mezcla;
+    const alfa = 0.2 * fin * (0.9 + 0.1 * Math.sin(t * 5 + kk));
+    haz(g, H.haz, sx, ySea, a, 980, 0.62, alfa);
+    motas(g, sx, ySea, a, 520, HAZ * 0.7, t, alfa * 2.5, kk * 0.37);
+    g.globalAlpha = 0.6 * fin;
+    g.drawImage(H.brillo, sx - 8, ySea - 8, 16, 16);
+    g.globalAlpha = 1;
+  }
+}
+
+/** The zeppelin's searchlight beams (screen space, under the hull). */
+function hacesZepelin(g: Ctx, j: Jefe, x0: number, y0: number, t: number) {
+  const H = haces();
   for (const p of vivas(j, 'reflector')) {
     const w = posParte(j, p);
     const ox = x0 + (w.x - j.x), oy = y0 - (w.y - j.y);
-    const L = ALCANCE_FOCO;
-    const ux = Math.cos(p.ang), uy = -Math.sin(p.ang);
+    const a = -p.ang;
     const fuerte = p.rafT > 0;
-    const grad = g.createLinearGradient(ox, oy, ox + ux * L, oy + uy * L);
-    grad.addColorStop(0, fuerte ? 'rgba(255,246,190,0.42)' : 'rgba(255,246,210,0.24)');
-    grad.addColorStop(1, 'rgba(255,246,210,0)');
-    g.fillStyle = grad;
-    g.beginPath();
-    g.moveTo(ox, oy);
-    g.lineTo(ox + Math.cos(p.ang - HAZ) * L, oy - Math.sin(p.ang - HAZ) * L);
-    g.lineTo(ox + Math.cos(p.ang + HAZ) * L, oy - Math.sin(p.ang + HAZ) * L);
-    g.closePath();
-    g.fill();
+    const vibra = 0.93 + 0.07 * Math.sin(t * 7 + p.dx);
+    // A wide, faint scatter of light around the beam, then the beam itself.
+    haz(g, H.haz, ox, oy, a, ALCANCE_FOCO * 1.25, 2.4, (fuerte ? 0.24 : 0.16) * vibra);
+    haz(g, H.haz, ox, oy, a, ALCANCE_FOCO * 1.12, 1, (fuerte ? 0.95 : 0.6) * vibra);
+    if (fuerte) {
+      // Locked on: a hot white core and the plane lit up in the beam.
+      haz(g, H.nucleo, ox, oy, a, ALCANCE_FOCO * 1.12, 1, 0.75 * vibra);
+      if (j.focoX !== undefined && j.focoY !== undefined) {
+        const px = x0 + (j.focoX - j.x), py = y0 - (j.focoY - j.y);
+        const dd = Math.hypot(px - ox, py - oy);
+        if (dd < ALCANCE_FOCO * 1.1 && Math.abs(envolver(Math.atan2(py - oy, px - ox) - a)) < HAZ * 1.6) {
+          const r = 28 + (parpadeo(t, 6) ? 3 : 0);
+          g.globalCompositeOperation = 'lighter';
+          g.globalAlpha = 0.42;
+          g.drawImage(H.brillo, px - r, py - r, r * 2, r * 2);
+          g.globalCompositeOperation = 'source-over';
+          // Caught: a ring of light tightening around the plane.
+          const rr = 15 + Math.round(3 * (0.5 + 0.5 * Math.sin(t * 8)));
+          g.globalAlpha = 0.85;
+          g.fillStyle = '#fff4c8';
+          for (let i = 0; i < 16; i++) {
+            if (i % 4 === 3) continue;
+            const an = (i / 16) * Math.PI * 2 + t * 1.5;
+            g.fillRect(Math.round(px + Math.cos(an) * rr), Math.round(py + Math.sin(an) * rr), 2, 2);
+          }
+          g.globalAlpha = 1;
+        }
+      }
+    }
+    motas(g, ox, oy, a, ALCANCE_FOCO, HAZ, t, fuerte ? 0.9 : 0.6, p.dx * 0.01);
   }
+}
+
+/** Lamp glow on the hull, over the body (screen space). */
+function brilloFocos(g: Ctx, j: Jefe, x0: number, y0: number, t: number) {
+  const H = haces();
+  g.globalCompositeOperation = 'lighter';
+  for (const p of vivas(j, 'reflector')) {
+    const w = posParte(j, p);
+    const ox = x0 + (w.x - j.x) + Math.cos(-p.ang) * 5, oy = y0 - (w.y - j.y) + Math.sin(-p.ang) * 5;
+    const fuerte = p.rafT > 0;
+    const r = fuerte ? 18 : 13;
+    g.globalAlpha = (fuerte ? 0.8 : 0.5) * (0.9 + 0.1 * Math.sin(t * 9 + p.dx));
+    g.drawImage(H.brillo, ox - r, oy - r, r * 2, r * 2);
+    if (fuerte) {
+      // A little lens-flare streak.
+      g.globalAlpha = 0.55;
+      g.fillStyle = '#fff4c8';
+      g.fillRect(Math.round(ox) - 12, Math.round(oy), 25, 1);
+      g.fillRect(Math.round(ox), Math.round(oy) - 5, 1, 11);
+    }
+  }
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = 1;
 }
 
 /** Flak shells, their black puffs and the falling bombs (screen space). */
