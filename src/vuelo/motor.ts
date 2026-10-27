@@ -2188,7 +2188,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (!list || s.mode !== 'play' || s.dead) return;
     for (const d of list) {
       if (d.clase === 'misil') {
-        for (const m of MS.lanzar(d.tipo, d.x, d.y, p, s.wave, Math.random, d.desvio)) s.shots.push({ m, enemy: true, tgt: d.tipo === 'cohete' ? null : p, trail: 0 });
+        for (const m of MS.lanzar(d.tipo, d.x, d.y, p, s.wave, Math.random, d.desvio)) s.shots.push({ m, enemy: true, tgt: p, trail: 0 });
         fx('misil', sfx.enemyLaunch, { vol: 0.4, rate: 0.85 }, d.x);
       } else if (d.clase === 'proyectil') s.proy.push(AE.nuevoProyectil(d));
       else s.shells.push({ x: d.x, y: d.y, vx: d.vx, vy: d.vy, t: 0, fuse: d.fuse });
@@ -2970,7 +2970,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (tipo) {
       // The SAM fires a pair (one salvo of the swarm); the rest, one at a time.
       const salvos = (c.kind === 'sam' || c.kind === 'fragata') && tipo !== 'enjambre' ? [-0.3, 0.3] : [0];
-      for (const dv of salvos) for (const m of MS.lanzar(tipo, ox, oy + (c.kind === 'sam' ? 4 : 0), p, lvl, Math.random, dv)) s.shots.push({ m, enemy: true, tgt: tipo === 'cohete' ? null : p, trail: 0 });
+      for (const dv of salvos) for (const m of MS.lanzar(tipo, ox, oy + (c.kind === 'sam' ? 4 : 0), p, lvl, Math.random, dv)) s.shots.push({ m, enemy: true, tgt: p, trail: 0 });
       FA.retroceso(c, Math.PI / 2, c.kind === 'jeep' ? 4 : 7);
       fx('misil', sfx.enemyLaunch, { vol: 0.45, rate: tipo === 'dardo' ? 1.2 : tipo === 'pesado' ? 0.65 : 0.8 }, ox);
     } else {
@@ -3742,7 +3742,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }
         }
         // Outrunning: fast and not flying into it, the missile bleeds energy (it
-        // can't keep pulling lead); if the gap keeps growing it gives up.
+        // can't keep pulling lead) and falls behind — but it keeps chasing to the end.
         if (flying && sh.tgt === p && em.t > 0.6 && !sh.perdido) {
           const pv = Math.hypot(p.vx, p.vy);
           const lx = p.x - em.x, ly = p.y - em.y;
@@ -3756,13 +3756,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
               em.vx *= k;
               em.vy *= k;
             }
-            if (ld > (sh.gap ?? Infinity)) sh.cola = (sh.cola ?? 0) + dt;
-            if ((sh.cola ?? 0) > 0.8 && ld > 120) {
-              sh.perdido = true;
-              em.guiado = false;
-              pop(p.x, p.y + 18, '¡Lo dejaste atrás!', P.gold);
-            }
-          } else sh.cola = Math.max(0, (sh.cola ?? 0) - dt);
+            // It never gives up: outrun, it only falls behind and keeps chasing.
+          }
           sh.gap = ld;
         }
         if (r.estado === 'divide') {

@@ -202,7 +202,7 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
   },
   dardo: {
     nombre: 'Dardo',
-    opciones: ops({ navegacion: 3, cargaMax: 7, empujeG: 8, quemado: 1.2, vMax: 600, conoGrados: 22, vida: 20 }),
+    opciones: ops({ navegacion: 3, cargaMax: 7, empujeG: 8, quemado: 10, vMax: 600, conoGrados: 22, vida: 20 }),
     escala: { vMax: 60, cargaMax: 1.5, quemado: 0.3, vida: 2 },
     vida: 20,
     planeo: true,
@@ -220,7 +220,7 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
   },
   zigzag: {
     nombre: 'Zigzag',
-    opciones: ops({ navegacion: 3.5, cargaMax: 9, empujeG: 3, quemado: 5, vMax: 330, conoGrados: 80, vida: 25 }),
+    opciones: ops({ navegacion: 3.5, cargaMax: 9, empujeG: 3, quemado: 18, vMax: 330, conoGrados: 80, vida: 25 }),
     escala: { vMax: 30, cargaMax: 1.5, quemado: 1.5, vida: 2 },
     vida: 25,
     planeo: true,
@@ -256,7 +256,7 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
   },
   racimo: {
     nombre: 'Racimo',
-    opciones: ops({ navegacion: 3.5, cargaMax: 9, empujeG: 3.5, quemado: 3, vMax: 360, conoGrados: 70, vida: 20 }),
+    opciones: ops({ navegacion: 3.5, cargaMax: 9, empujeG: 3.5, quemado: 12, vMax: 360, conoGrados: 70, vida: 20 }),
     escala: { vMax: 30, cargaMax: 1, quemado: 0.5 },
     vida: 20,
     planeo: true,
@@ -274,7 +274,7 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
   },
   enjambre: {
     nombre: 'Enjambre',
-    opciones: ops({ navegacion: 3, cargaMax: 5, empujeG: 6, quemado: 1.1, vMax: 400, conoGrados: 45, vida: 8 }),
+    opciones: ops({ navegacion: 3, cargaMax: 5, empujeG: 6, quemado: 6, vMax: 400, conoGrados: 45, vida: 8 }),
     escala: { vMax: 20, cargaMax: 1, quemado: 0.1, vida: 0.4 },
     vida: 8,
     planeo: true,
@@ -329,9 +329,9 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
   },
   cohete: {
     nombre: 'Cohete',
-    opciones: ops({ navegacion: 0, cargaMax: 0, empujeG: 3.5, quemado: 1.5, vMax: 300, conoGrados: 0, vida: 4 }),
+    opciones: ops({ navegacion: 2.5, cargaMax: 6, empujeG: 3.5, quemado: 8, vMax: 300, conoGrados: 60, vida: 15 }),
     escala: { vMax: 30, cargaMax: 0 },
-    vida: 4,
+    vida: 15,
     planeo: false,
     vMinGuia: 1,
     seguimiento: 0,
@@ -340,7 +340,7 @@ export const MISILES: Record<TipoMisil, FichaMisil> = {
     radioChoque: 6,
     energia: 1.6,
     danio: 1,
-    engañable: 0,
+    engañable: 0.9,
     estela: { nucleo: '#fff3e0', brillo: '#ffb38a', humo: '#f5efe9', ancho: 2, largo: 14, chispas: 1 },
     color: { cuerpo: '#efe6dc', punta: '#ff8a5b', aletas: '#9c6b4e' },
     largo: 6,
@@ -424,7 +424,7 @@ function nuevo(tipo: TipoMisil, x: number, y: number, ang: number, v0: number, n
     rumbo: ang,
     t: 0,
     combustible: o.quemado,
-    guiado: tipo !== 'cohete',
+    guiado: true,
     tipo,
     hp: MISILES[tipo].hp,
     fase,
@@ -695,7 +695,7 @@ export function paso(
       m.combustible = PLANEO;
     }
     const guiadoAntes = m.guiado;
-    const res = pasoMisil(m, m.tipo === 'cohete' ? null : ob, h, local, suelo);
+    const res = pasoMisil(m, ob, h, local, suelo);
     if (planea) m.combustible = 0;
     if (enMotor && m.combustible <= 0) {
       // se acaba de apagar: `pasoMisil` lo deja ciego, pero si planea (o va a
