@@ -1284,6 +1284,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     s.bigQueue = s.mapa === 'oceano' ? [] : G.elegirGrandes(s.wave, Math.random);
     s.fighterQueue = s.mapa === 'oceano' ? Math.max(1, CZ.cuantos(s.wave)) : CZ.cuantos(s.wave);
+    // Later laps: extra fighters and a second air raid on top of the wave's own.
+    const vuelta = Math.floor((s.wave - 1) / 4);
+    if (vuelta > 0 && s.wave >= 3) s.fighterQueue += vuelta;
+    if (vuelta > 0) s.airQueue.push(...AE.elegirAereos(s.wave, Math.random, s.plane.y).slice(0, 2 * vuelta));
     s.fighterT = rand(7, 12);
     if (s.mapa === 'tormenta') prepararTormenta();
     s.bigT = rand(3, 6);
@@ -1295,20 +1299,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     save();
   }
 
+  /** Every full round of the four maps brings a bigger crowd: +35% per lap. */
+  function masPorVuelta(n: number) {
+    return 1 + 0.35 * Math.floor((n - 1) / 4);
+  }
+
   function waveList(n: number): VehiculoTipo[] {
     if (s.mapa === 'tormenta') return []; // only fighters up here
     if (s.mapa === 'valparaiso') {
       // On the hills: downhill bikers, trolleybuses and the usual convoy.
-      const count = Math.min(30, 5 + Math.round(n * 2));
+      const count = Math.min(44, Math.round((5 + n * 2) * masPorVuelta(n)));
       const pool: VehiculoTipo[] = ['bici', 'bici', 'trolebus', 'jeep', 'camion', 'tanque', 'sam'];
       return Array.from({ length: count }, () => pool[Math.floor(Math.random() * Math.min(pool.length, 4 + Math.floor(n / 2)))]);
     }
     if (s.mapa === 'oceano') {
       // At sea: speedboats and missile frigates.
-      const count = Math.min(26, 4 + Math.round(n * 1.8));
+      const count = Math.min(40, Math.round((4 + n * 1.8) * masPorVuelta(n)));
       return Array.from({ length: count }, () => (Math.random() < Math.min(0.55, 0.25 + n * 0.04) ? 'fragata' : 'lancha'));
     }
-    const count = n === 1 ? 4 : Math.min(34, 5 + Math.round(n * 2.2));
+    const count = n === 1 ? 4 : Math.min(50, Math.round((5 + n * 2.2) * masPorVuelta(n)));
     const w: Partial<Record<VehiculoTipo, number>> =
       n === 1 ? { jeep: 0.6, micro: 0.4 } :
       n === 2 ? { jeep: 0.3, micro: 0.2, portuario: 0.3, tanque: 0.2 } :
@@ -3054,7 +3063,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           cambiarMapa(destino);
           s.queue = waveList(s.wave);
           s.bigQueue = destino === 'oceano' ? [] : G.elegirGrandes(s.wave, Math.random);
-          s.fighterQueue = Math.max(1, CZ.cuantos(s.wave));
+          s.fighterQueue = Math.max(1, CZ.cuantos(s.wave)) + (s.wave >= 3 ? Math.floor((s.wave - 1) / 4) : 0);
           if (destino === 'tormenta') prepararTormenta();
           // Nothing follows the plane to the new map; the wave's goal suits the new map.
           s.jefe = null;
