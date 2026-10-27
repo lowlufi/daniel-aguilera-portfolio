@@ -1430,6 +1430,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const enAgua = sobreMar(x) && y - OC.NIVEL_MAR < ex.radio;
     VFX.explosion(s.fx, x, y, energy, { suelo: y - ground(x) < ex.radio * 0.6, quieto: still || s.calma, color: enAgua ? 'agua' : undefined });
     const ce = Math.cbrt(Math.max(0.1, energy));
+    // The screen only shakes for powerful blasts close to the plane.
+    if (energy >= 5 && s.mode === 'play') {
+      const cerca = 1 - Math.hypot(x - s.plane.x, y - s.plane.y) / 220;
+      if (cerca > 0) s.shake = Math.max(s.shake, cerca * Math.min(8, 1.6 * ce));
+    }
     L.luz(s.luces, x, y, Math.min(48, 14 + 10 * ce), '#ffd27a', 0.25 + 0.08 * ce);
     L.luz(s.luces, x, y, 8 * ce, '#ffffff', 0.05);
     if (!s.attract) AB.explosion(energy, Math.hypot(x - s.plane.x, y - s.plane.y), panOf(x));
@@ -1900,7 +1905,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const p = s.plane;
     s.inv = 0.9;
     s.hurtFlash = 0.3;
-    s.shake = Math.min(8, s.shake + 4);
     fx('impacto', sfx.hurt, { vol: 0.9 });
     for (let k = 0; k < n && !s.dead; k++) {
       const left = s.spec.parts.filter((q) => !s.lost.includes(q));
@@ -1977,7 +1981,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       for (let i = -2; i <= 2; i++) if (splashes.length < 30) splashes.push({ x: p.x + i * 9, t: Math.abs(i) * 0.08 });
       for (let i = 0; i < 8; i++) puff(p.x + rand(-16, 16), OC.NIVEL_MAR + rand(2, 10), rand(1.5, 3), false, 0.8, rand(-20, 20), rand(20, 50));
       AB.salpicadura(panOf(p.x), 4);
-      s.shake = 6;
+      s.shake = 3;
       s.overT = 1.8;
       s.reason = 'avion';
       return;
@@ -3015,7 +3019,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         s.hielo = clamp(s.hielo + (frio > 0 ? HIELO_SUBE * (0.4 + frio) : -HIELO_BAJA) * dt, 0, 1);
         if (!s.congelado && s.hielo >= 1) {
           s.congelado = true;
-          s.shake = Math.max(s.shake, 4);
           AB.congelado();
           pop(p.x, p.y + 20, '🧊 ¡Congelado!', '#bfe8ff');
         }
@@ -3141,7 +3144,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         p.vx += Math.cos(p.rumbo) * NITRO_ACC * dt;
         p.vy += Math.sin(p.rumbo) * NITRO_ACC * dt;
         if (Math.random() < dt * 40) puff(p.x - Math.cos(p.rumbo) * 12, p.y - Math.sin(p.rumbo) * 12, rand(1, 2.5), false, 0.6, -p.vx * 0.2, -p.vy * 0.2);
-        s.shake = Math.max(s.shake, 1.5);
       }
       // Stuck on the ground (too slow, too broken to take off): it's a crash.
       if (s.mode === 'play' && !s.despegue && p.y - ground(p.x) < 14 && Math.hypot(p.vx, p.vy) < 30) {
@@ -3518,7 +3520,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (isBoss(c.kind)) talk(SAY.win, META_X, ground(META_X));
         s.meta -= isBoss(c.kind) ? 3 : 1;
         sfx.lose();
-        s.shake = Math.min(6, s.shake + 3);
         stolen();
         if (s.meta <= 0 && s.overT === 0) {
           s.overT = 0.8;
@@ -4255,7 +4256,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       : THEMES[Math.max(0, s.wave - 1) % 3];
     const theme = s.themePick === 'auto' ? autoTheme : s.themePick;
     L.intensidadNoche(theme === 'noche' || s.plane.y > 2300 ? 1 : theme === 'tarde' ? 0.5 : 0);
-    const shake = still || s.calma ? 0 : Math.min(s.jefe || s.cars.some((c) => isBoss(c.kind)) ? 9 : 6, Math.max(s.shake, VFX.sacudida(s.fx)));
+    const shake = still || s.calma ? 0 : Math.min(9, s.shake);
     const shx = shake > 0.3 ? Math.round(rand(-shake, shake)) : 0;
     const shy = shake > 0.3 ? Math.round(rand(-shake, shake)) : 0;
     const cam = clamp(Math.round(s.camX) - shx, 0, LEVEL - vw);
@@ -5199,7 +5200,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (!s.attract) AB.nitro();
     // Ignition: a sonic ring and a flash behind the plane.
     VFX.explosion(s.fx, s.plane.x - Math.cos(s.plane.rumbo) * 14, s.plane.y - Math.sin(s.plane.rumbo) * 14, 1.2, { quieto: still || s.calma, color: 'humo' });
-    s.shake = Math.max(s.shake, 5);
     return true;
   }
   const onHide = () => {
