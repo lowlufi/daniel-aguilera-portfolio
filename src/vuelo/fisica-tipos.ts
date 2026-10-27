@@ -15,7 +15,7 @@ export type Suelo = (x: number) => number;
 /** The three home planes; each one is also its pilot's id (Lulu, Dui, Almendrita). */
 export type ModeloBase = 'avioneta' | 'caza' | 'bombardero';
 /** Every plane in the hangar: the home ones plus the iconic jets and the saucer. */
-export type ModeloAvion = ModeloBase | 'raptor' | 'sukhoi' | 'b2' | 'ovni' | 'tomcat' | 'a10' | 'spitfire';
+export type ModeloAvion = ModeloBase | 'raptor' | 'sukhoi' | 'b2' | 'ovni' | 'tomcat' | 'a10' | 'spitfire' | 'stuka' | 'mustang' | 'corsair' | 'f16' | 'mig29';
 /** Bomb loads: plain, cluster, white phosphorus, gas, and the saucer's plasma charge. */
 export type BombaTipo = 'comun' | 'racimo' | 'fosforo' | 'gas' | 'plasma' | 'guiada' | 'rebote' | 'crio' | 'emp' | 'termobarica';
 
