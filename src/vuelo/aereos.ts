@@ -75,6 +75,11 @@ export type Aereo = {
   aviso?: number;
   /** Saucer-only state. */
   ov?: EstadoOvni;
+  /** Helicopter: hp when first seen, and the hiding spot behind a hill (re-checked every `escRe`). */
+  hp0?: number;
+  escX?: number;
+  escY?: number;
+  escRe?: number;
 };
 
 /**
@@ -120,11 +125,11 @@ let siguienteGrupo = 1;
 const HP: Record<TipoAereo, number> = { helicoptero: 3, dron: 1, globo: 2, ovni: 4 };
 
 /** Highest altitude each type flies at, px. */
-const TECHOS: Record<TipoAereo, number> = { helicoptero: 900, dron: 1600, globo: 1300, ovni: 2980 };
+const TECHOS: Record<TipoAereo, number> = { helicoptero: 1300, dron: 2000, globo: 1700, ovni: 2980 };
 /** Saucers never come down into the clouds. */
 export const PISO_OVNI = 1450;
 /** Saucers only show up when the plane is above this. */
-export const ALTURA_OVNI = 1600;
+export const ALTURA_OVNI = 2000;
 /** Laser / tractor warning time, s (constant: it's what makes them dodgeable). */
 export const AVISO_RAYO = 0.8;
 const DUR_LASER = 0.35;
@@ -388,13 +393,49 @@ function pasoHeli(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
   const k = nivelIA(a.ola);
   const kd = k1(a.ola);
   const vMax = lerp(85, 125, kd);
-  // Hover point: on our side of the plane, at stand-off range, a bit above.
+  if (a.hp0 === undefined) a.hp0 = a.hp;
+  const herido = a.hp < a.hp0 * 0.5;
+  // Hover point: on our side of the plane, at stand-off range, a bit above
+  // (further off once hurt).
   const px = av.x + av.vx * 0.6, py = av.y + av.vy * 0.4;
   const lado = a.x >= px ? 1 : -1;
-  const distDeseada = lerp(135, 95, k) + Math.sin(a.t * 0.7 + a.semilla * 6) * 20;
-  const tx = px + lado * distDeseada;
-  const ty = clamp(py + 20 + Math.sin(a.t * 1.3 + a.semilla * 9) * 12, fin(vista.suelo(tx)) + 40, techoTipo('helicoptero') - 25);
+  const distDeseada = lerp(135, 95, k) + Math.sin(a.t * 0.7 + a.semilla * 6) * 20 + (herido ? 60 : 0);
+  let tx = px + lado * distDeseada;
+  let ty = clamp(py + 20 + Math.sin(a.t * 1.3 + a.semilla * 9) * 12, fin(vista.suelo(tx)) + 40, techoTipo('helicoptero') - 25);
+  // Nap-of-the-earth: while reloading (always, once hurt) it ducks behind a
+  // hill that masks it from the plane, and pops up again to fire.
+  const recargando = a.rafaga <= 0 && !(a.aviso! > 0) && a.cd > (herido ? 0.3 : 0.9);
+  if (av.vivo && recargando && kd > 0.15 && Math.abs(av.x - a.x) < 600) {
+    if (a.t >= (a.escRe ?? -1)) {
+      a.escRe = a.t + 0.5;
+      a.escX = NaN;
+      let mejor = Infinity;
+      for (let off = -180; off <= 180; off += 20) {
+        const x = a.x + off;
+        const y = fin(vista.suelo(x)) + 34;
+        if (Math.abs(x - av.x) < 90 || lineaLibre(x, y, av.x, av.y, vista.suelo)) continue;
+        const coste = Math.abs(off) + Math.abs(y - a.y) * 0.5;
+        if (coste < mejor) {
+          mejor = coste;
+          a.escX = x;
+          a.escY = y;
+        }
+      }
+    }
+    if (Number.isFinite(a.escX)) {
+      tx = a.escX!;
+      ty = a.escY!;
+    }
+  }
   let wx = (tx - a.x) * 1.5, wy = (ty - a.y) * 1.5;
+  // Strafing: it slides sideways across the plane's line while it fires (a
+  // moving gun is harder to hit back).
+  if (a.rafaga > 0 || a.aviso! > 0) {
+    const d0 = Math.hypot(av.x - a.x, av.y - a.y) || 1;
+    const sgn = a.semilla < 0.5 ? 1 : -1;
+    wx += (-(av.y - a.y) / d0) * 55 * sgn;
+    wy += ((av.x - a.x) / d0) * 55 * sgn;
+  }
   const s = Math.hypot(wx, wy);
   if (s > vMax) {
     wx *= vMax / s;
@@ -499,7 +540,15 @@ function pasoDron(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
   // Phases: circle the plane → dive at it → pull away → circle…
   a.faseT -= dt;
   // Before diving it flashes red for a moment (the warning).
-  if (a.fase === 0 && a.faseT <= 0 && av.vivo && !(a.aviso! > 0)) a.aviso = 0.4;
+  // Swarm mates, in id order: each gets its own slot round the plane, and only
+  // one (two from wave 6) dives at a time.
+  const enjambre = todos.filter((o) => o.tipo === 'dron' && o.hp > 0 && o.grupo === a.grupo).sort((p, q) => p.id - q.id);
+  const iSlot = Math.max(0, enjambre.indexOf(a));
+  const atacando = enjambre.filter((o) => o !== a && (o.fase === 1 || o.aviso! > 0)).length;
+  if (a.fase === 0 && a.faseT <= 0 && av.vivo && !(a.aviso! > 0)) {
+    if (atacando >= (a.ola >= 6 ? 2 : 1)) a.faseT = 0.35 + a.semilla * 0.3;
+    else a.aviso = 0.4;
+  }
   if (a.aviso! > 0) {
     a.aviso! -= dt;
     if (a.aviso! <= 0) {
@@ -530,7 +579,7 @@ function pasoDron(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
     vMax = a.fase === 2 ? 150 : lerp(120, 145, k);
     // Orbit point around the plane, each swarm going its own way round.
     const radioOrbita = 75 + a.semilla * 20;
-    const fase = a.t * 1.4 * a.lado + a.grupo * 2.1;
+    const fase = a.t * 1.4 * a.lado + a.grupo * 2.1 + (iSlot / Math.max(1, enjambre.length)) * Math.PI * 2;
     const ox = av.x + av.vx * 0.5 + Math.cos(fase) * radioOrbita;
     const oy = clamp(av.y + av.vy * 0.3 + Math.sin(fase) * radioOrbita * 0.6 + 25, fin(vista.suelo(av.x)) + 30, techoTipo('dron') - 15);
     wx = (ox - a.x) * 2;
@@ -556,8 +605,8 @@ function pasoDron(a: Aereo, todos: Aereo[], vista: Vista, dt: number): Resultado
     }
   }
   if (n && a.fase === 0) {
-    wx += (cx / n - a.x) * 0.8 + (ax / n - a.vx) * 0.35;
-    wy += (cy / n - a.y) * 0.8 + (ay / n - a.vy) * 0.35;
+    wx += (cx / n - a.x) * 0.25 + (ax / n - a.vx) * 0.35;
+    wy += (cy / n - a.y) * 0.25 + (ay / n - a.vy) * 0.35;
   }
   const sep = separacion(a, todos, 16);
   wx += sep.sx * 260;

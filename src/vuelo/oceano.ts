@@ -248,6 +248,13 @@ const OLAS: Record<'dia' | 'tarde' | 'noche', [string, string, string, string]> 
   noche: ['#4a5a98', '#a8b0d8', '#2a3270', '#7080b8'],
 };
 
+/** Veil over the water body per ambiente: [colour, alpha, surface sheen, its alpha]. */
+const VELO_AGUA: Record<'dia' | 'tarde' | 'noche', [string, number, string, number] | null> = {
+  dia: null,
+  tarde: ['#f08a6a', 0.3, '#ffd2a0', 0.35],
+  noche: ['#1a1650', 0.42, '#6a5aa8', 0.25],
+};
+
 /**
  * Wave crests and foam along the sea surface (screen row `ySuperficie`),
  * scrolling with the camera and rolling slowly left. Skips the island.
@@ -257,6 +264,23 @@ export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: numbe
   const [cuerpo, rizo, tinta, brillo] = OLAS[ambiente];
   const y = Math.round(ySuperficie);
   const roll = tt * 7;
+  // The water body is painted once in daylight colours: a veil warms it at
+  // dusk and darkens it at night, from the surface down to the seabed.
+  const velo = VELO_AGUA[ambiente];
+  if (velo) {
+    const x0 = Math.max(0, Math.round(orillaX - camX));
+    if (x0 < vw) {
+      g.globalAlpha = velo[1];
+      g.fillStyle = velo[0];
+      g.fillRect(x0, y, vw - x0, NIVEL_MAR + DIRT + 1);
+      if (velo[2]) {
+        g.globalAlpha = velo[3];
+        g.fillStyle = velo[2];
+        g.fillRect(x0, y, vw - x0, 4);
+      }
+      g.globalAlpha = 1;
+    }
+  }
   const i0 = Math.floor((camX + roll - 20) / CREST_P);
   const i1 = Math.ceil((camX + roll + vw + 20) / CREST_P);
   for (let i = i0; i <= i1; i++) {
@@ -334,5 +358,243 @@ export function dibujarSalpicadura(g: Ctx, x: number, y: number, k: number) {
   D.oval(g, X, Y, r + 1, 2, INK);
   D.oval(g, X, Y, r, 1, P.w3);
   R(g, X - r + 2, Y - 1, Math.max(1, r - 2), 1, P.white);
+  g.globalAlpha = 1;
+}
+
+/* ── The magic sea: bioluminescence and whales (storm map, once it clears) ── */
+
+const mod = (a: number, n: number) => ((a % n) + n) % n;
+const BIO = ['#2ad8f0', '#7af4ff', '#c8fff8', '#5ab8ff'];
+const BALLENA_W = 60;
+const BALLENA_H = 24;
+
+type Sprites = { glow: HTMLCanvasElement; ballena: HTMLCanvasElement[]; cria: HTMLCanvasElement };
+let SPR: Sprites | null = null;
+
+/** A whale facing right, painted at (0,0) of `g`: dark body, pale belly grooves, a glowing rim. */
+function pintarBallena(g: Ctx, s: number) {
+  const w = Math.round(BALLENA_W * s);
+  const h = Math.round(17 * s);
+  const cy = Math.round(BALLENA_H / 2 + 1);
+  const body = (col: string, grow: number) => {
+    // Tapered body: a long oval, the head a bit blunt, the tail stock thin.
+    for (let x = 0; x < w; x++) {
+      const u = x / w;
+      const th = u < 0.18 ? (u / 0.18) * 0.35 : u > 0.8 ? 1 - (u - 0.8) * 1.6 : 0.35 + ((u - 0.18) / 0.62) * 0.65;
+      const hh = Math.max(1, Math.round((h / 2) * th)) + grow;
+      g.fillStyle = col;
+      g.fillRect(x + 6, cy - hh, 1, hh * 2);
+    }
+    // Fluke at the tail (left), a fork.
+    g.fillStyle = col;
+    g.fillRect(6 - grow, cy - 4 - grow, 3 + grow * 2, 3 + grow * 2);
+    g.fillRect(6 - grow, cy + 2 - grow, 3 + grow * 2, 3 + grow * 2);
+    g.fillRect(3 - grow, cy - 6 - grow, 4 + grow * 2, 2 + grow * 2);
+    g.fillRect(3 - grow, cy + 5 - grow, 4 + grow * 2, 2 + grow * 2);
+  };
+  body('#5af0ff', 1);
+  body('#2a3a78', 0);
+  // Pale belly with grooves, a long pectoral fin, the eye, a sheen on the back.
+  g.fillStyle = '#9ab0d8';
+  for (let x = Math.round(w * 0.45); x < w - 2; x++) g.fillRect(x + 6, cy + Math.round(h * 0.18), 1, 1);
+  g.fillStyle = '#6a80b8';
+  for (let x = Math.round(w * 0.55); x < w - 4; x += 3) g.fillRect(x + 6, cy + Math.round(h * 0.28), 2, 1);
+  g.fillStyle = '#2e3e78';
+  g.fillRect(Math.round(w * 0.62) + 6, cy + 2, Math.round(10 * s), 2);
+  g.fillRect(Math.round(w * 0.55) + 6, cy + 4, Math.round(8 * s), 1);
+  g.fillStyle = '#7af4ff';
+  g.fillRect(Math.round(w * 0.3) + 6, cy - Math.round(h * 0.38), Math.round(w * 0.45), 1);
+  g.fillStyle = '#ffffff';
+  g.fillRect(w + 6 - Math.round(7 * s), cy - 1, 1, 1);
+}
+
+function sprites(): Sprites {
+  if (SPR) return SPR;
+  const mk = (w: number, h: number) => {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const g = c.getContext('2d')!;
+    g.imageSmoothingEnabled = false;
+    return [c, g] as const;
+  };
+  // A tiling band of dithered glow just under the surface.
+  const [glow, gg] = mk(128, 10);
+  for (let y = 0; y < 10; y++)
+    for (let x = 0; x < 128; x++) {
+      const h = hash(x, y + 40);
+      const k = (1 - y / 10) * 0.75;
+      if ((h % 1000) / 1000 < k * k + (y < 2 ? 0.25 : 0)) {
+        gg.fillStyle = BIO[h % 3];
+        gg.fillRect(x, y, 1, 1);
+      }
+    }
+  // The whale at a few tilts for the breach (nose up → level → nose down).
+  const [base, gb] = mk(BALLENA_W + 10, BALLENA_H + 4);
+  pintarBallena(gb, 1);
+  const ballena = [-0.9, -0.35, 0.15, 0.7].map((ang) => {
+    const S = 80;
+    const [c, g] = mk(S, S);
+    g.translate(S / 2, S / 2);
+    g.rotate(ang);
+    g.drawImage(base, -base.width / 2, -base.height / 2);
+    return c;
+  });
+  ballena.push(base);
+  const [cria, gc] = mk(46, BALLENA_H + 4);
+  pintarBallena(gc, 0.62);
+  SPR = { glow, ballena, cria };
+  return SPR;
+}
+
+/**
+ * The sea after the storm clears: glowing bioluminescent crests and a band of
+ * light just under the surface, sparkles (more where the water is stirred),
+ * a whale and her calf gliding under the surface with glowing edges, spouts,
+ * and now and then a whale breaching in a shower of glowing spray.
+ *
+ * Call it right after the sea surface and the waves (dibujarOlas) are drawn,
+ * every frame, with the same `camX` and `ySuperficie` (= sy(NIVEL_MAR)).
+ * `k` is how clear the night is (0 = full storm: draws nothing … 1 = clear).
+ * `agitados` are world x's where the water is being stirred (splashes, the
+ * plane skimming low); optional.
+ */
+export function dibujarMarMagico(g: Ctx, camX: number, ySuperficie: number, vw: number, vh: number, t: number, k: number, quieto = false, agitados?: ArrayLike<number>) {
+  if (k <= 0.01) return;
+  const S = sprites();
+  const tt = quieto ? 0 : t;
+  const y = Math.round(ySuperficie);
+  if (y > vh + 40) return;
+  const x0 = Math.max(0, Math.round(orillaX - camX));
+  const fondo = NIVEL_MAR + DIRT;
+
+  // The glow band under the surface, breathing slowly.
+  g.globalAlpha = k * (0.75 + 0.2 * Math.sin(tt * 0.8));
+  const gw = S.glow.width;
+  for (let x = x0 - mod(Math.round(camX * 1 - tt * 3), gw); x < vw; x += gw) if (x + gw > x0) g.drawImage(S.glow, x, y + 1);
+
+  // Whale and calf gliding under the surface (world-anchored, slowly swimming right).
+  {
+    const wx = mod(900 + tt * 9, 3400) - 200;
+    const sx = Math.round(wx - camX);
+    const wy = y + Math.round(fondo * 0.45) + Math.round(Math.sin(tt * 0.4) * 2);
+    if (sx > -80 && sx < vw + 20 && sx > x0 - 60) {
+      g.globalAlpha = k * 0.7;
+      g.drawImage(S.ballena[4], sx, wy - 10);
+      g.drawImage(S.cria, sx - 34, wy - 6 + Math.round(Math.sin(tt * 0.9) * 2));
+      // A spout now and then when she comes up to breathe.
+      const f = mod(tt / 9, 1);
+      if (f < 0.18) {
+        const u = f / 0.18;
+        const hx = sx + BALLENA_W + 4;
+        const H = Math.round(22 * Math.sin(u * Math.PI));
+        g.globalAlpha = k * (1 - u * 0.6);
+        for (let i = 0; i < H; i += 2) {
+          const spread = Math.round((i / 22) * 4);
+          g.fillStyle = BIO[(i >> 1) % 3];
+          g.fillRect(hx - spread, y - i, 1, 1);
+          g.fillRect(hx + spread, y - i, 1, 1);
+          if (i % 4 === 0) g.fillRect(hx, y - i - 1, 1, 1);
+        }
+        g.fillStyle = '#ffffff';
+        g.fillRect(hx - 1, y - H - 1, 3, 1);
+      }
+    }
+  }
+
+  // Glowing crests riding the surface.
+  {
+    const roll = tt * 7;
+    const i0 = Math.floor((camX + roll - 20) / CREST_P);
+    const i1 = Math.ceil((camX + roll + vw + 20) / CREST_P);
+    for (let i = i0; i <= i1; i++) {
+      const h = hash(i, 77);
+      const wx = i * CREST_P + (h % 9) - roll;
+      if (wx < orillaX + 8) continue;
+      const x = Math.round(wx - camX);
+      const p = 0.5 + 0.5 * Math.sin(tt * 1.7 + i * 1.3);
+      g.globalAlpha = k * (0.35 + 0.65 * p);
+      const w = h % 3 === 0 ? 7 : 5;
+      g.fillStyle = BIO[0];
+      g.fillRect(x - w, y - 1, w * 2 + 1, 1);
+      g.fillStyle = BIO[2];
+      g.fillRect(x - w + 3, y - 3 + Math.round(Math.sin(tt * 2.2 + i * 1.7) * 0.6 + 0.4), w, 1);
+    }
+  }
+
+  // Sparkles in the water, flickering on and off.
+  {
+    const n = Math.ceil(vw / 7);
+    const j0 = Math.floor(camX / 7);
+    for (let j = j0; j < j0 + n; j++) {
+      const h = hash(j, 501);
+      const ph = Math.sin(tt * (1.5 + (h % 5) * 0.4) + (h % 97));
+      if (ph < 0.55) continue;
+      const x = Math.round(j * 7 + (h % 7) - camX);
+      if (x < x0) continue;
+      const d = (h >> 8) % fondo;
+      g.globalAlpha = k * (ph - 0.4) * (1 - d / (fondo + 6));
+      g.fillStyle = BIO[(h >> 4) % 4];
+      g.fillRect(x, y + 1 + d, 1, 1);
+      if (ph > 0.92) {
+        g.fillRect(x - 1, y + 1 + d, 3, 1);
+        g.fillRect(x, y + d, 1, 3);
+      }
+    }
+  }
+
+  // Where the water is stirred, a burst of light.
+  if (agitados)
+    for (let i = 0; i < agitados.length; i++) {
+      const cx = Math.round(agitados[i] - camX);
+      if (cx < -20 || cx > vw + 20 || cx < x0) continue;
+      for (let j = 0; j < 14; j++) {
+        const h = hash(j, i * 31 + Math.floor(tt * 6));
+        g.globalAlpha = k * (0.5 + (h % 50) / 100);
+        g.fillStyle = BIO[h % 4];
+        g.fillRect(cx - 12 + (h % 25), y - 1 + ((h >> 5) % 10), 1 + ((h >> 9) % 2), 1);
+      }
+    }
+
+  // Now and then, a whale breaches near the middle of the screen.
+  if (!quieto) {
+    const PER = 24;
+    const ciclo = Math.floor(tt / PER);
+    const u = (tt - ciclo * PER) / 3.2;
+    const bx = Math.round(camX + vw * (0.35 + ((ciclo * 37) % 40) / 100));
+    if (u < 1 && bx > orillaX + 60) {
+      const sx = bx - camX;
+      const alto = 46;
+      const arc = Math.sin(Math.min(1, u * 1.25) * Math.PI);
+      const cy = y + 10 - Math.round(arc * alto);
+      const fr = u < 0.25 ? 0 : u < 0.45 ? 1 : u < 0.62 ? 2 : 3;
+      const spr = S.ballena[fr];
+      g.globalAlpha = k;
+      // Only the part above the seabed shows; under the surface it's dimmer.
+      g.save();
+      g.beginPath();
+      g.rect(0, 0, vw, y + fondo);
+      g.clip();
+      g.drawImage(spr, Math.round(sx + u * 40 - spr.width / 2), cy - spr.height / 2);
+      g.restore();
+      // Spray where it leaves and where it falls back.
+      for (const [u0, ox] of [[0.05, 0], [0.8, 46]] as const) {
+        const v = (u - u0) / 0.3;
+        if (v < 0 || v > 1) continue;
+        const H = Math.round(26 * Math.sin(v * Math.PI));
+        for (let i = 0; i < 10; i++) {
+          const side = i % 2 ? 1 : -1;
+          const dx = Math.round(side * (3 + i * 2) * v * 1.6);
+          const dy = Math.round(-H * (0.5 + ((i * 7) % 5) / 10) + 30 * v * v);
+          if (dy > 0) continue;
+          g.globalAlpha = k * (1 - v * 0.7);
+          g.fillStyle = BIO[i % 3];
+          g.fillRect(Math.round(sx + ox + dx), y + dy, 2, 1);
+        }
+        g.fillStyle = BIO[2];
+        g.fillRect(Math.round(sx + ox - 8 - v * 10), y - 1, Math.round(16 + v * 20), 1);
+      }
+    }
+  }
   g.globalAlpha = 1;
 }

@@ -42,7 +42,8 @@ export type Orden = {
   cadencia?: number;
 };
 
-export type VehiculoIA = { id: number; kind: string; x: number; y: number; vx: number; fireT: number };
+/** `hp` is optional: with it, a badly damaged mouse looks for cover / backs off. */
+export type VehiculoIA = { id: number; kind: string; x: number; y: number; vx: number; fireT: number; hp?: number };
 
 /* ── Tuning per vehicle ─────────────────────────────────────────────────── */
 
@@ -182,18 +183,24 @@ export function lineaLibre(x0: number, y0: number, x1: number, y1: number, suelo
 }
 
 /** Lead point: where the plane will be when a projectile at `vel` px/s gets there. */
-export function adelanto(ox: number, oy: number, vel: number, a: Vista['avion']): { x: number; y: number; t: number } {
+export function adelanto(
+  ox: number, oy: number, vel: number, a: Vista['avion'], acel?: { ax: number; ay: number },
+): { x: number; y: number; t: number } {
+  // Optional acceleration (a turning plane): half of a·t², capped, so a
+  // steady turn is led too but a sudden jink still beats it.
+  const ax = acel ? clamp(acel.ax, -250, 250) : 0, ay = acel ? clamp(acel.ay, -250, 250) : 0;
+  const px = (t: number) => a.x + a.vx * t + 0.25 * ax * t * t;
+  const py = (t: number) => a.y + a.vy * t + 0.25 * ay * t * t;
   let t = Math.hypot(a.x - ox, a.y - oy) / vel;
-  for (let i = 0; i < 3; i++) t = Math.hypot(a.x + a.vx * t - ox, a.y + a.vy * t - oy) / vel;
-  t = Math.min(t, 3);
-  return { x: a.x + a.vx * t, y: a.y + a.vy * t, t };
+  for (let i = 0; i < 4; i++) t = Math.min(3, Math.hypot(px(t) - ox, py(t) - oy) / vel);
+  return { x: px(t), y: py(t), t };
 }
 
-function tiro(v: VehiculoIA, vista: Vista, k: number) {
+function tiro(v: VehiculoIA, vista: Vista, k: number, acel?: { ax: number; ay: number }) {
   const F = ficha(v.kind);
   const a = vista.avion;
   const oy = v.y + F.canon;
-  const p = adelanto(v.x, oy, F.velBala * lerp(1, 1.1, k), a);
+  const p = adelanto(v.x, oy, F.velBala * lerp(1, 1.1, k), a, acel && { ax: acel.ax * k, ay: acel.ay * k });
   const alcance = F.alcance * lerp(1, 1.25, k);
   const dist = Math.hypot(a.x - v.x, a.y - oy);
   const libre = lineaLibre(v.x, oy, p.x, p.y, vista.suelo) || lineaLibre(v.x, oy, a.x, a.y, vista.suelo);
@@ -226,7 +233,9 @@ export function pensar(v: VehiculoIA, vista: Vista, memoria: Record<string, numb
   // 2. Keep distance from the one ahead (bigger gaps later: one bomb, one mouse).
   let delante: Vista['vecinos'][number] | null = null;
   for (const o of vista.vecinos) if (o.x < v.x && (!delante || o.x > delante.x)) delante = o;
-  const hueco = lerp(10, 22, k);
+  // Bombs in the air near us: open the gaps further (one bomb, one mouse).
+  const bombasCerca = vista.bombas.some((b) => Math.abs(b.x + b.vx * 1.2 - v.x) < 160);
+  const hueco = lerp(10, 22, k) * (bombasCerca && k > 0.25 ? 1.6 : 1);
   if (delante) {
     const gap = v.x - delante.x - F.medio - ficha(delante.kind).medio;
     if (gap < hueco) vd = Math.max(vd, Math.min(0, delante.vx) * 0.9 + (hueco - gap) * 0.6);
@@ -236,6 +245,45 @@ export function pensar(v: VehiculoIA, vista: Vista, memoria: Record<string, numb
   const sobre = a.vivo && Math.abs(dx - a.vx * 0.6) < 90 && a.y - v.y < 170 && a.vy < -25;
   if (sobre && k > 0.15 && !boss) memoria.dispersa = t + 1.2;
   if ((memoria.dispersa ?? -1) > t) vd = (v.id & 1) === 0 ? -base * lerp(1.4, 1.8, k) : base * 0.3;
+
+  // 3b. Cover: a hurt mouse (and, later on, the canny ones while reloading)
+  // pulls into a dip where a hill masks it from the plane, holds a few
+  // seconds, then carries on. Hurt and with no cover: it backs off.
+  if (memoria.hp0 === undefined && v.hp !== undefined) memoria.hp0 = v.hp;
+  const danado = v.hp !== undefined && (memoria.hp0 ?? 0) > 0 && v.hp < memoria.hp0 * 0.6;
+  const astuto = hash01(v.id, 11) < lerp(0, 0.5, k) && v.fireT > 1.5;
+  const acercandose = a.vivo && a.y - v.y < 900 && (Math.abs(dx) < 140 || (Math.abs(dx) < 380 && Math.sign(-dx) === Math.sign(a.vx || -dx)));
+  if (!boss && (danado || astuto) && acercandose && (memoria.cubBloq ?? -1) < t && (memoria.dispersa ?? -1) <= t) {
+    if (t >= (memoria.cubRe ?? -1)) {
+      memoria.cubRe = t + 0.4;
+      memoria.cubX = NaN;
+      let mejor = Infinity;
+      for (let off = -100; off <= 70; off += 14) {
+        const x = v.x + off;
+        const y = fin(vista.suelo(x)) + F.canon;
+        if (!lineaLibre(x, y, a.x, a.y, vista.suelo) && Math.abs(off) + (off > 0 ? 25 : 0) < mejor) {
+          mejor = Math.abs(off) + (off > 0 ? 25 : 0);
+          memoria.cubX = x;
+        }
+      }
+    }
+    memoria.cubT = (memoria.cubT ?? 0) + clamp(t - (memoria.cubUlt ?? t), 0, 0.1);
+    memoria.cubUlt = t;
+    if (memoria.cubT > 4) {
+      // Long enough: no more hiding for a while.
+      memoria.cubT = 0;
+      memoria.cubBloq = t + 3;
+    } else if (Number.isFinite(memoria.cubX)) {
+      const ex = memoria.cubX - v.x;
+      vd = Math.abs(ex) < 4 ? 0 : clamp(ex * 1.5, -base * 1.6, base * 1.1);
+    } else if (danado) {
+      // No cover: get away from the plane (backing up is slow).
+      vd = dx > 0 ? -base * 1.6 : base * 0.6;
+    }
+  } else {
+    memoria.cubT = 0;
+    memoria.cubUlt = t;
+  }
 
   // 4. Dodge what's falling on us (ballistic prediction + a little search over speeds).
   let esquivar = false;
@@ -279,11 +327,30 @@ export function pensar(v: VehiculoIA, vista: Vista, memoria: Record<string, numb
     esquivar = true;
   }
 
-  // 5. Shooting: only with a clear line, in range, with lead.
-  const tr = tiro(v, vista, k);
+  // 5. Shooting: only with a clear line, in range, with lead (the plane's
+  // turn is estimated from its velocity change), and only after a reaction
+  // time once the plane comes into view (it pops over a hill: a moment to
+  // react, not an instant shot).
+  let acel: { ax: number; ay: number } | undefined;
+  const dtA = t - (memoria.avT ?? -1);
+  if (dtA > 0.05 && dtA < 0.5) {
+    const ax = (a.vx - memoria.avx) / dtA, ay = (a.vy - memoria.avy) / dtA;
+    memoria.aax = lerp(memoria.aax ?? 0, ax, 0.5);
+    memoria.aay = lerp(memoria.aay ?? 0, ay, 0.5);
+    acel = { ax: memoria.aax, ay: memoria.aay };
+  }
+  if (dtA > 0.05 || dtA < 0) {
+    memoria.avx = a.vx;
+    memoria.avy = a.vy;
+    memoria.avT = t;
+  } else if (Number.isFinite(memoria.aax)) acel = { ax: memoria.aax, ay: memoria.aay };
+  const tr = tiro(v, vista, k, acel);
+  if (!tr.ok) memoria.visto = -1;
+  else if ((memoria.visto ?? -1) < 0) memoria.visto = t;
+  const reaccionTiro = lerp(0.7, 0.25, k) * (0.8 + 0.4 * hash01(v.id, 5));
   return {
     velocidad: fin(vd),
-    disparar: tr.ok && v.fireT <= 0,
+    disparar: tr.ok && v.fireT <= 0 && t - memoria.visto >= reaccionTiro,
     apuntarA: tr.punto,
     esquivar,
     cadencia: lerp(1, 0.7, k),

@@ -36,7 +36,7 @@ const VIEWS: Record<1 | 2 | 3, View> = {
 };
 
 /** Banked sprites are taller than the side ones: the wings spread vertically. */
-const GIRO_H: Record<ModeloAvion, number> = { avioneta: 38, caza: 30, bombardero: 50, raptor: 32, sukhoi: 34, b2: 48, ovni: 36 };
+const GIRO_H: Record<ModeloAvion, number> = { avioneta: 38, caza: 30, bombardero: 50, raptor: 32, sukhoi: 34, b2: 48, ovni: 36, tomcat: 34, a10: 46, spitfire: 38 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 const ri = Math.round;
@@ -635,9 +635,302 @@ function ovniGiro(g: Ctx, v: View, has: Has) {
   }
 }
 
+/* ── Tomcat, Warthog and Spitfire ───────────────────────────────────────── */
+
+function tomcatGiro(g: Ctx, v: View, has: Has) {
+  const G0 = '#56627a', G = '#8a97ab', G1 = '#b2bdcc', G2 = '#d6dde7', DK = '#262a36';
+  const WING: [string, string, string] = [G0, G, G1];
+  const { s, c, k } = v;
+  const wy = ri(2 * c);
+  const span = ri(14 * s);
+  const gspan = ri(4 * s);
+  const tspan = ri(6 * s);
+  const hy = bodyH(v, 3, 4);
+  const FIN_B: [number, number] = [-16, -11], FIN_T: [number, number] = [-17, -14];
+  if (has('cola')) {
+    wing(g, ri(c), -1, tspan, [-19, -13], [-18, -16], WING);
+    cantedFin(g, v, -3, 2, 6, FIN_B, FIN_T, G0, G);
+  }
+  // Swing wing fully swept back (tip far behind the root) and the fixed glove ahead of it.
+  wing(g, wy, -1, span, [-10, 0], [-16, -13], WING);
+  wing(g, wy, -1, gspan, [-4, 8], [-3, -1], WING);
+  D.oval(g, -1, 0, 16, hy, G0);
+  D.oval(g, -1, -ri(c), 15, Math.max(1, hy - 1), G);
+  R(g, -12, -ri((hy - 1) * c), 14, 1, G1);
+  const nose = Math.max(1, hy - 1);
+  for (let x = 15; x <= 18; x++) {
+    const h = ri(nose * (1 - (x - 15) / 4));
+    R(g, x, -h, 1, h * 2 + 1, x < 17 ? G : G0);
+  }
+  if (k === 1) R(g, -14, hy - 1, 22, 1, G2);
+  // Big boxy intakes on both flanks once we look down on it.
+  if (k > 1) {
+    for (const y of [-hy - 1, hy]) {
+      R(g, -4, y, 8, 2, G0);
+      R(g, 3, y, 1, 2, DK);
+    }
+  } else {
+    R(g, -4, 0, 8, 3, G0);
+    R(g, 4, 0, 1, 3, G2);
+    R(g, 3, 1, 1, 2, DK);
+  }
+  // Twin nozzles far apart, the far one showing above the near one from 30° on.
+  if (has('motor')) {
+    for (const sg of [-1, 1]) {
+      const y = sg * ri(3 * s);
+      R(g, -19, y - 1, 3, 3, P.metal0);
+      R(g, -18, y - 1, 2, 1, P.metal);
+      R(g, -19, y, 1, 1, DK);
+    }
+  } else stub(g, -17, -2, 2, 4);
+  if (has('cola')) {
+    wing(g, ri(c), 1, tspan, [-19, -13], [-18, -16], WING);
+    cantedFin(g, v, 3, 2, 6, FIN_B, FIN_T, G, G1);
+  } else stub(g, -14, -1, 2, 3);
+  if (has('ala')) wing(g, wy, 1, span, [-10, 0], [-16, -13], WING);
+  else stub(g, -7, wy + 1, 3, 2);
+  wing(g, wy, 1, gspan, [-4, 8], [-3, -1], WING);
+  // Long two-seat canopy.
+  const glass = has('cabina');
+  if (k === 1) {
+    if (glass) {
+      D.oval(g, 7, -4, 6, 2, P.gl0);
+      R(g, 2, -5, 2, 3, '#3a4258');
+    } else R(g, 1, -3, 12, 1, G0);
+    sideHead(g, 9, -2);
+    if (glass) {
+      R(g, 5, -6, 1, 4, G0);
+      g.globalAlpha = 0.45;
+      D.oval(g, 7, -4, 5, 1, P.gl1);
+      g.globalAlpha = 1;
+      R(g, 10, -6, 2, 1, P.white);
+    }
+  } else {
+    const cy = -ri(3 * c);
+    if (glass) {
+      D.oval(g, 6, cy, 7, 3, P.gl0);
+      R(g, 1, cy - 1, 3, 3, '#6a7690');
+      R(g, 1, cy - 1, 1, 3, '#4a5470');
+    }
+    topHead(g, 9, cy, k === 2 ? 1 : 0);
+    if (glass) {
+      R(g, 5, cy - 3, 1, 7, G0);
+      g.globalAlpha = 0.4;
+      D.oval(g, 8, cy - 1, 4, 1, P.gl1);
+      g.globalAlpha = 1;
+      R(g, 10, cy - 2, 2, 1, P.white);
+    }
+  }
+}
+
+/** Spanwise (d) and height (e) of the Warthog's pod engines, high on the rear fuselage. */
+const A10_ENG = { d: 4, e: 6 };
+
+function a10Giro(g: Ctx, v: View, has: Has) {
+  const A0 = '#4c5644', A = '#77826a', A1 = '#a2ac92', A2 = '#c9d0bb', CM = '#5d684f', DK = '#262a2a';
+  const WING: [string, string, string] = [A0, A, A1];
+  const { s, c, k } = v;
+  const wy = ri(2 * c);
+  const span = ri(18 * s);
+  const tspan = ri(7 * s);
+  const ty = -ri(2 * c);
+  const hy = bodyH(v, 3, 3);
+  // Square fin standing on a tip of the tailplane, at spanwise d.
+  const fin = (d: number, col: string, top: string) => {
+    const yb = ty + ri(d * s);
+    const yt = yb - ri(7 * c);
+    if (yt === yb) {
+      R(g, -20, yb, 5, 1, col);
+      R(g, -20, yb, 1, 1, top);
+      return;
+    }
+    R(g, -20, yt, 4, yb - yt + 2, col);
+    R(g, -20, yt, 4, 1, top);
+    R(g, -19, yt + 1, 1, yb - yt + 1, A0);
+  };
+  const pod = (y: number) => {
+    D.oval(g, -8, y, 5, 2, A0);
+    D.oval(g, -8, y - 1, 4, 1, A);
+    R(g, -11, y - 2, 6, 1, A2);
+    R(g, -2, y - 1, 1, 3, A2);
+    R(g, -3, y - 1, 1, 3, DK);
+    R(g, -14, y - 1, 2, 3, P.metal0);
+    R(g, -14, y, 1, 1, DK);
+  };
+  const podY = (sg: number) => -ri(A10_ENG.e * c) + sg * ri(A10_ENG.d * s);
+  if (has('cola')) {
+    wing(g, ty, -1, tspan, [-20, -14], [-20, -15], WING);
+    fin(-7, A0, A);
+  }
+  // Long, straight wing.
+  wing(g, wy, -1, span, [-6, 4], [-4, 2], WING);
+  D.oval(g, -1, 0, 17, hy, A0);
+  D.oval(g, -1, -ri(c), 16, Math.max(1, hy - 1), A);
+  R(g, -12, -ri((hy - 1) * c), 22, 1, A1);
+  R(g, -11, -ri(c), 5, 1, CM);
+  R(g, 1, -ri(c) + (hy > 2 ? 1 : 0), 4, 1, CM);
+  // Blunt nose, the grin under it and the long cannon barrel.
+  for (let x = 16; x <= 17; x++) {
+    const h = Math.max(0, hy - 1 - (x - 16));
+    R(g, x, -h, 1, h * 2 + 1, A);
+  }
+  if (k === 1) {
+    R(g, 10, hy - 2, 1, 1, '#3a2228');
+    R(g, 11, hy - 1, 5, 1, '#3a2228');
+    R(g, 12, hy - 1, 1, 1, P.white);
+    R(g, 14, hy - 1, 1, 1, P.white);
+  }
+  R(g, 16, ri(2 * c), 4, 1, P.metal0);
+  R(g, 19, ri(2 * c), 1, 1, '#2a2438');
+  if (has('cola')) {
+    wing(g, ty, 1, tspan, [-20, -14], [-20, -15], WING);
+    fin(7, A, A1);
+  } else stub(g, -16, -2, 2, 3);
+  if (has('ala')) {
+    wing(g, wy, 1, span, [-6, 4], [-4, 2], WING);
+    R(g, -4, wy + ri(span * 0.5), 3, 1, CM);
+  } else stub(g, -1, wy + 1, 3, 2);
+  // Both pod engines sit on the back, facing the camera from 30° on.
+  if (has('motor')) {
+    pod(podY(-1));
+    pod(podY(1));
+  } else stub(g, -9, podY(1) - 1, 3, 2);
+  const glass = has('cabina');
+  if (k === 1) {
+    if (glass) D.oval(g, 10, -4, 4, 2, P.gl0);
+    else R(g, 6, -3, 8, 1, A0);
+    sideHead(g, 10, -2);
+    if (glass) {
+      g.globalAlpha = 0.45;
+      D.oval(g, 10, -4, 3, 1, P.gl1);
+      g.globalAlpha = 1;
+      R(g, 11, -6, 2, 1, P.white);
+    }
+  } else {
+    const cy = -ri(4 * c);
+    if (glass) D.oval(g, 10, cy, 4, 3, P.gl0);
+    topHead(g, 10, cy, k === 2 ? 1 : 0);
+    if (glass) {
+      g.globalAlpha = 0.4;
+      D.oval(g, 11, cy - 1, 2, 1, P.gl1);
+      g.globalAlpha = 1;
+      R(g, 12, cy - 2, 2, 1, P.white);
+    }
+  }
+}
+
+/**
+ * An elliptical wing seen from above: `rows` rows from y0 towards dir, chord
+ * shrinking like an ellipse from [xc-back, xc+fwd] at the root to a round tip.
+ * `camo` paints hard-edged blotches over the upper surface.
+ */
+function ellWing(
+  g: Ctx, y0: number, dir: 1 | -1, rows: number, xc: number, back: number, fwd: number,
+  col: [string, string, string], camo?: string,
+) {
+  const [d, m, l] = col;
+  if (rows < 1) {
+    R(g, xc - back, y0, back + fwd + 1, 1, d);
+    return;
+  }
+  for (let i = 0; i <= rows; i++) {
+    const u = i / rows;
+    const f = Math.sqrt(Math.max(0, 1 - u * u * 0.94));
+    const x0 = ri(xc - back * f), x1 = ri(xc + fwd * f);
+    const y = y0 + i * dir;
+    R(g, x0, y, x1 - x0 + 1, 1, m);
+    if (camo) {
+      for (let x = x0 + 1; x < x1; x++) {
+        const cell = Math.floor((x + 40 + Math.floor(i / 3)) / 4) + Math.floor(i / 3) * 2;
+        if (cell % 3 === 0) R(g, x, y, 1, 1, camo);
+      }
+    }
+    R(g, x1, y, 1, 1, l);
+    R(g, x0, y, 1, 1, d);
+  }
+}
+
+function spitfireGiro(g: Ctx, v: View, has: Has) {
+  const GR0 = '#45583a', GR = '#647c4c', GR1 = '#88a066', BR = '#8a6a42', SK = '#c6d0bc', DK = '#2a2a26';
+  const WING: [string, string, string] = [GR0, GR, GR1];
+  const { s, c, k } = v;
+  const wy = ri(2 * c);
+  const span = ri(15 * s);
+  const tspan = ri(6 * s);
+  const hy = bodyH(v, 3, 3);
+  if (has('cola')) ellWing(g, 0, -1, tspan, -15, 2, 3, WING);
+  ellWing(g, wy, -1, span, 0, 7, 5, WING, BR);
+  D.oval(g, -2, 0, 15, hy, GR0);
+  D.oval(g, -2, -ri(c), 14, Math.max(1, hy - 1), GR);
+  R(g, -11, -ri((hy - 1) * c), 8, 1, GR1);
+  R(g, 4, -ri((hy - 1) * c), 8, 1, GR1);
+  R(g, -10, -ri(c), 4, 1, BR);
+  R(g, -1, -ri(c) + (hy > 2 ? 1 : 0), 4, 1, BR);
+  R(g, 6, -ri(c) - (hy > 2 ? 1 : 0), 3, 1, BR);
+  if (k === 1) R(g, -16, hy - 1, 28, 1, SK);
+  // Exhaust stubs: one row in the side view, both rows from above.
+  for (const x of [6, 8, 10]) {
+    if (k === 1) R(g, x, -1, 1, 1, DK);
+    else {
+      R(g, x, -hy + 1, 1, 1, DK);
+      R(g, x, hy - 1, 1, 1, DK);
+    }
+  }
+  if (has('motor')) {
+    D.disc(g, 13, 0, 2, P.cream);
+    R(g, 12, -2, 1, 5, '#b8ae98');
+    R(g, 15, 0, 1, 1, P.cream);
+    R(g, 13, -1, 1, 1, P.white);
+  } else stub(g, 10, -2, 2, 4);
+  if (has('cola')) {
+    ellWing(g, 0, 1, tspan, -15, 2, 3, WING);
+    // Rounded fin standing towards us.
+    const top = -ri(8 * c), base = -ri(2 * c);
+    if (top === base) R(g, -17, 0, 6, 1, GR0);
+    else {
+      const n = base - top;
+      for (let j = 0; j <= n; j++) {
+        const u = j / n;
+        const w = 1 + ri(5 * Math.sqrt(Math.max(0, 1 - (1 - u) ** 2)));
+        R(g, -17, top + j, w, 1, j === 0 ? GR1 : GR);
+      }
+      R(g, -15, top + 1, 1, Math.max(1, n - 1), GR0);
+    }
+  } else stub(g, -13, -1, 2, 3);
+  if (has('ala')) {
+    ellWing(g, wy, 1, span, 0, 7, 5, WING, BR);
+    R(g, 5, wy + ri(span * 0.3), 3, 1, P.metal0);
+    if (k > 1) R(g, 5, wy - ri(span * 0.3), 3, 1, P.metal0);
+  } else stub(g, -1, wy + 1, 3, 2);
+  const glass = has('cabina');
+  if (k === 1) {
+    if (glass) D.oval(g, 1, -4, 3, 2, P.gl0);
+    else R(g, -3, -3, 7, 1, GR0);
+    sideHead(g, 0, -2);
+    if (glass) {
+      g.globalAlpha = 0.45;
+      D.oval(g, 1, -4, 2, 1, P.gl1);
+      g.globalAlpha = 1;
+      R(g, 4, -5, 1, 3, GR0);
+      R(g, 1, -6, 2, 1, P.white);
+    }
+  } else {
+    const cy = -ri(3 * c);
+    if (glass) D.oval(g, 1, cy, 4, 3, P.gl0);
+    topHead(g, 0, cy, k === 2 ? 1 : 0);
+    if (glass) {
+      g.globalAlpha = 0.4;
+      D.oval(g, 2, cy - 1, 2, 1, P.gl1);
+      g.globalAlpha = 1;
+      R(g, 3, cy - 2, 2, 1, P.white);
+    }
+  }
+}
+
 const GIRO: Record<ModeloAvion, (g: Ctx, v: View, has: Has) => void> = {
   avioneta: avionetaGiro, caza: cazaGiro, bombardero: bombarderoGiro,
   raptor: raptorGiro, sukhoi: sukhoiGiro, b2: b2Giro, ovni: ovniGiro,
+  tomcat: tomcatGiro, a10: a10Giro, spitfire: spitfireGiro,
 };
 
 /** The banked sprite for frame k (1..3) with the given parts missing. */
@@ -657,6 +950,7 @@ export function giroSprite(m: ModeloAvion, k: 1 | 2 | 3, lost: readonly Parte[] 
 /** Propeller hubs [x, y, r] in banked frame k. */
 function propsFor(m: ModeloAvion, v: View): [number, number, number][] {
   if (m === 'avioneta') return [[12, 0, 4]];
+  if (m === 'spitfire') return [[15, 0, 5]];
   if (m === 'bombardero') {
     const { d, e } = BOMB_ENG;
     const near: [number, number, number] = [10, ri(e * v.c + d * v.s), 3];
@@ -667,7 +961,7 @@ function propsFor(m: ModeloAvion, v: View): [number, number, number][] {
 }
 
 /** Jet flames [x, y] in banked frame k; twin-engine jets far apart show two. */
-const JET_D: Partial<Record<ModeloAvion, number>> = { sukhoi: 4, b2: 6 };
+const JET_D: Partial<Record<ModeloAvion, number>> = { sukhoi: 4, b2: 6, tomcat: 3, a10: A10_ENG.d };
 function jetsFor(m: ModeloAvion, v: View): [number, number][] {
   const L = LOOKS[m];
   if (!L.jet) return [];
@@ -680,6 +974,7 @@ function jetsFor(m: ModeloAvion, v: View): [number, number][] {
 /** Top-view head centre x and its height above the spine, per airframe. */
 const TOP_HEAD: Record<ModeloAvion, [number, number]> = {
   avioneta: [-1, 3], caza: [2, 3], bombardero: [5, 4], raptor: [4, 3], sukhoi: [6, 3], b2: [10, 4], ovni: [0, 4],
+  tomcat: [9, 3], a10: [10, 4], spitfire: [0, 3],
 };
 
 /** Where the scarf starts in banked frame k. */
@@ -699,6 +994,7 @@ function anchorAt(m: ModeloAvion, part: Parte, v: View): [number, number] {
   if (part === 'ala') return m === 'b2' ? [ax, ri(v.c) + ri(6 * v.s)] : [ax, ri(2 * v.c) + 2];
   if (part === 'motor' && m === 'bombardero') return [ax, ri(BOMB_ENG.e * v.c + BOMB_ENG.d * v.s)];
   if (part === 'motor' && m === 'sukhoi') return [ax, ri(2 * v.c) + ri(4 * v.s)];
+  if (part === 'motor' && m === 'a10') return [ax, -ri(A10_ENG.e * v.c) + ri(A10_ENG.d * v.s)];
   if (part === 'motor' && m === 'b2') return [ax, -ri(4 * v.c) + ri(3 * v.s)];
   return [ax, ri(ay * v.c)];
 }

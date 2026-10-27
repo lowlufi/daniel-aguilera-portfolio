@@ -382,7 +382,8 @@ type Nombre =
   | 'nuclear' | 'trueno-cerca' | 'trueno-lejos' | 'chispa' | 'lluvia' | 'escarcha' | 'hielo-alerta' | 'congelado' | 'deshielo'
   | 'mision' | 'uf' | 'vida' | 'nuke-recoge' | 'bumeran' | 'pista' | 'oleada'
   | 'vulcan' | 'canon30' | 'laser' | 'orbe' | 'crucero' | 'fosforo' | 'gas' | 'plasma-bomba' | 'chaff' | 'holograma' | 'trampa'
-  | 'hangar-sel' | 'hangar-bloq' | 'desbloqueo';
+  | 'hangar-sel' | 'hangar-bloq' | 'desbloqueo'
+  | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae';
 
 const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
@@ -520,6 +521,12 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   'hangar-sel': hornoHangarSel,
   'hangar-bloq': hornoHangarBloq,
   desbloqueo: hornoDesbloqueo,
+  'zepelin-motor': hornoZepelinMotor,
+  'zepelin-sirena': hornoZepelinSirena,
+  'zepelin-cruje': (sr) => hornoZepelinCruje(sr, false),
+  'zepelin-cruje2': (sr) => hornoZepelinCruje(sr, true),
+  'zepelin-flak': hornoZepelinFlak,
+  'zepelin-cae': hornoZepelinCae,
 };
 
 function pieza(sr: number, vidrio: boolean) {
@@ -1643,9 +1650,10 @@ function hornoChaff(sr: number) {
     const bp = new Bq(sr, 'bp', 1500, 1.2);
     for (let i = 0; i < 0.08 * sr; i++) {
       const t = i / sr;
-      a[i] = bp.run(ruido()) * Math.min(1, t / 0.004) * Math.exp(-t / 0.02) * 0.9;
+      // Ataque de 12 ms y menos nivel: el eyector empuja en vez de chasquear (antes, cresta de 24 dB).
+      a[i] = bp.run(ruido()) * Math.pow(Math.min(1, t / 0.012), 2) * Math.exp(-t / 0.03) * 0.45;
     }
-    chasquidos(sr, a, 0.01, 0.85, (t) => 1200 * Math.exp(-t / 0.25), { hp: 3500, amp: 0.8, largo: [0.0003, 0.0015] });
+    chasquidos(sr, a, 0.01, 0.85, (t) => 1200 * Math.exp(-t / 0.25), { hp: 3500, amp: 0.8, largo: [0.0008, 0.002] });
     for (let k = 0; k < 25; k++) ping(sr, a, rand(0.02, 0.6), rand(4000, 9000), rand(0.005, 0.015), rand(0.03, 0.08));
     return a;
   });
@@ -1738,6 +1746,202 @@ function hornoDesbloqueo(sr: number) {
     R[i] += tim[i];
   }
   return normalizaEst([L, R], 0.88);
+}
+
+/* ── hornos del zepelín de Margarita ── */
+
+/**
+ * Motor del zepelín (bucle de 8 s): cuatro motores de pistón casi al unísono
+ * (36, 36.5, 37.25 y 37.75 explosiones/s). No hay vibrato: el «uom-uom» lento
+ * sale solo del batido entre ellos (0.25–1.75 Hz), como en los dirigibles de
+ * la Gran Guerra. Cada motor es un ciclo de dos explosiones algo desiguales
+ * (armónicos impares débiles); encima, el soplo de las hélices y un retumbo.
+ * Todas las frecuencias dan ciclos enteros en 8 s: bucle sin costura.
+ */
+function hornoZepelinMotor(sr: number) {
+  const Lp = 8;
+  const n = Math.round(sr * Lp);
+  const crudo = new Float32Array(n);
+  const TAB = 2048;
+  [36, 36.5, 37.25, 37.75].forEach((f, k) => {
+    const tab = new Float32Array(TAB);
+    for (let h = 1; h <= 28; h++) {
+      const amp = (h % 2 === 0 ? 1 : 0.28) / Math.pow(h, 0.85);
+      const ph = Math.random() * TAU;
+      for (let i = 0; i < TAB; i++) tab[i] += amp * Math.sin((TAU * h * i) / TAB + ph);
+    }
+    const fh = f / 2;
+    const g = 1 - k * 0.08;
+    for (let i = 0; i < n; i++) {
+      const x = (((fh * i) / sr) % 1) * TAB;
+      const i0 = Math.floor(x);
+      const fr = x - i0;
+      crudo[i] += (tab[i0] + (tab[(i0 + 1) % TAB] - tab[i0]) * fr) * g;
+    }
+  });
+  // Paso bajo en régimen permanente: una vuelta de calentamiento y la segunda se guarda (sigue periódico).
+  const lp = new Bq(sr, 'lp', 420, 0.8);
+  const tonal = new Float32Array(n);
+  for (let i = 0; i < 2 * n; i++) {
+    const y = lp.run(crudo[i % n]);
+    if (i >= n) tonal[i - n] = y;
+  }
+  escala([tonal], 1);
+  const rum = new Bq(sr, 'lp', 140, 0.7);
+  const soplo = new Bq(sr, 'bp', 480, 0.9);
+  const aire = bucle(sr, Lp, (_i, t) => rum.run(ruido()) * 1.1 + soplo.run(ruido()) * (0.45 + 0.55 * Math.abs(Math.sin(Math.PI * 36 * t))) * 0.6);
+  const a = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const sub = Math.sin(TAU * 37.25 * t) * 0.18;
+    a[i] = Math.tanh((tonal[i] * 0.8 + aire[i] * 0.35 + sub) * 1.3) * (0.86 + 0.14 * Math.sin(TAU * 0.25 * t));
+  }
+  return escala([a], 0.9)[0];
+}
+
+/**
+ * Sirena antiaérea a manivela (7.5 s, estéreo): sube lenta de 150 a 470 Hz,
+ * se sostiene y cae larga hasta ~120 Hz. Dos rotores a una tercera menor (el
+ * intervalo inquietante) y un soplo de aire; la altura solo se desliza, nunca
+ * ondula. Ecos tardíos distintos en cada lado: suena lejos, sobre la ciudad.
+ */
+function hornoZepelinSirena(sr: number) {
+  const n = Math.floor(sr * 7.5);
+  const altura = (t: number) =>
+    t < 2.6 ? 150 + 320 * (1 - Math.pow(1 - t / 2.6, 2.2)) : t < 4.2 ? 470 - 15 * ((t - 2.6) / 1.6) : 120 + 335 * Math.exp(-(t - 4.2) / 1.1);
+  const seco = new Float32Array(n);
+  const lp = new Bq(sr, 'lp', 1800, 0.7);
+  const sop = new Bq(sr, 'bp', 600, 2);
+  let p1 = 0, p2 = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const f = altura(t);
+    if ((i & 31) === 0) sop.f(f * 2);
+    p1 = (p1 + f / sr) % 1;
+    p2 = (p2 + (f * 1.19) / sr) % 1;
+    let s = 0;
+    for (let k = 1; k <= 10; k++) s += (Math.sin(TAU * k * p1) + 0.55 * Math.sin(TAU * k * p2)) / Math.pow(k, 1.2);
+    const env = Math.min(1, t / 0.6) ** 2 * (t > 6.3 ? Math.max(0, 1 - (t - 6.3) / 1.1) : 1);
+    seco[i] = (Math.tanh(lp.run(s) * 0.9) + sop.run(ruido()) * 0.35) * env;
+  }
+  const chs = [0, 1].map((c) => {
+    const a = new Float32Array(n);
+    const taps: [number, number][] = c ? [[0.29, 0.3], [0.56, 0.17], [0.83, 0.09]] : [[0.23, 0.3], [0.47, 0.18], [0.74, 0.1]];
+    for (let i = 0; i < n; i++) {
+      let y = seco[i];
+      for (const [d, g] of taps) {
+        const j = i - Math.floor(d * sr);
+        if (j >= 0) y += seco[j] * g;
+      }
+      a[i] = y;
+    }
+    return a;
+  });
+  return normalizaEst(chs, 0.9);
+}
+
+/**
+ * Crujido del casco (2.4 s): las vigas de un armazón enorme que se tuercen.
+ * Fricción a 50–85 golpes/s por resonancias graves (190, 430, 780 Hz; sin
+ * vibrato periódico), un gemido grave que baja y un asentamiento sordo.
+ */
+function hornoZepelinCruje(sr: number, variante: boolean) {
+  const n = Math.floor(sr * 2.4);
+  const a = new Float32Array(n);
+  friccion(sr, a, 0.05, 1.5, variante ? 70 : 85, variante ? 48 : 60, [190, 430, 780], 1);
+  friccion(sr, a, variante ? 1.1 : 0.85, 0.9, variante ? 120 : 145, 92, [520, 1150], 0.35);
+  let fase = 0, deriva = 0, meta = 0;
+  for (let i = 0; i < Math.floor(sr * 2); i++) {
+    const t = i / sr;
+    if ((i & 2047) === 0) meta = 0.6 + 0.4 * Math.random();
+    deriva += (meta - deriva) * 0.0008;
+    fase += (62 + 33 * Math.exp(-t / 0.7)) / sr;
+    const env = Math.min(1, t / 0.3) * Math.exp(-Math.max(0, t - 0.4) / 0.6);
+    a[i] += Math.tanh(Math.sin(TAU * fase) * 1.6) * env * deriva * 0.45;
+  }
+  golpe(sr, a, variante ? 1.75 : 1.55, 110, 40, 0.12, 0.4, 500);
+  for (let k = 0; k < 5; k++) ping(sr, a, rand(0.2, 1.8), rand(900, 2200), rand(0.01, 0.03), rand(0.02, 0.06));
+  return normaliza(a, 0.85);
+}
+
+/** Granada antiaérea (1.1 s): chasquido seco, «pom» hueco, soplo de esquirlas y un eco. */
+function hornoZepelinFlak(sr: number) {
+  const n = Math.floor(sr * 1.1);
+  const a = new Float32Array(n);
+  const hp = new Bq(sr, 'hp', 900, 0.7);
+  const bp = new Bq(sr, 'bp', 2500, 1.4);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    if ((i & 31) === 0) bp.f(600 + 1900 * Math.exp(-t / 0.15));
+    const crack = t < 0.03 ? Math.tanh(hp.run(ruido()) * 3 * Math.exp(-t / 0.006)) : 0;
+    const silbo = bp.run(ruido()) * Math.exp(-t / 0.18) * Math.min(1, t / 0.01) * 0.5;
+    a[i] = crack * 0.9 + silbo;
+  }
+  golpe(sr, a, 0, 150, 60, 0.09, 0.9, 1200);
+  chasquidos(sr, a, 0.04, 0.6, (t) => 60 * Math.exp(-t / 0.15), { hp: 2500, amp: 0.25, largo: [0.001, 0.004] });
+  const d = Math.floor(sr * 0.18);
+  const lp = new Bq(sr, 'lp', 900, 0.7);
+  const eco = new Float32Array(n);
+  for (let i = d; i < n; i++) eco[i] = lp.run(a[i - d]) * 0.28;
+  for (let i = 0; i < n; i++) a[i] += eco[i];
+  return normaliza(a, 0.9);
+}
+
+/**
+ * El zepelín se desploma en llamas (8.5 s, estéreo). Sigue la muerte del
+ * jefe: cuatro «buuf» de celdas que se encienden (0.3, 1.15, 2.0, 2.85 s), el
+ * armazón que gime al doblarse, el chasquido de la quilla al partirse (3.6 s)
+ * y la caída: rugido de fuego creciente, chisporroteo y un retumbo largo.
+ */
+function hornoZepelinCae(sr: number) {
+  const n = Math.floor(sr * 8.5);
+  const sub = new Float32Array(n);
+  let fs = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    if (t < 3.6) continue;
+    const u = t - 3.6;
+    fs += (24 + 12 * Math.exp(-u / 1.2)) / sr;
+    sub[i] = Math.sin(TAU * fs) * Math.min(1, u / 0.6) * Math.exp(-u / 2.6) * 0.55;
+  }
+  const chs = [0, 1].map((c) => {
+    const a = new Float32Array(n);
+    const fuego = new Bq(sr, 'lp', 300, 0.7);
+    const caida = new Bq(sr, 'lp', 120, 0.7);
+    const buuf = new Bq(sr, 'lp', 200, 0.8);
+    const hp = new Bq(sr, 'hp', 1500, 0.7);
+    let meta = 1, flam = 1;
+    const celdas = [0.3, 1.15, 2.0, 2.85];
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      if ((i & 31) === 0) fuego.f(300 + 600 * Math.min(1, t / 3));
+      if ((i & 4095) === 0) meta = 0.7 + 0.3 * Math.random();
+      flam += (meta - flam) * 0.0005;
+      const envF = Math.min(1, t / 2.5) * (t > 7 ? Math.max(0, 1 - (t - 7) / 1.5) : 1);
+      let y = fuego.run(ruido()) * envF * flam * 0.9;
+      // Celdas de gas: un soplido grave que se abre («buuf»).
+      let b = 0;
+      for (const c0 of celdas) {
+        const u = t - c0 - c * 0.015;
+        if (u > 0 && u < 1.5) b += Math.min(1, u / 0.08) * Math.exp(-u / 0.45);
+      }
+      if ((i & 31) === 0) buuf.f(200 + 900 * Math.min(1, b));
+      y += buuf.run(ruido()) * b * 1.4;
+      // Quilla partida: chasquido brillante.
+      const uq = t - 3.6;
+      if (uq > 0 && uq < 0.06) y += Math.tanh(hp.run(ruido()) * 3 * Math.exp(-uq / 0.012)) * 0.9;
+      // La caída: retumbo largo.
+      if (uq > 0) y += caida.run(ruido()) * Math.min(1, uq / 0.9) * Math.exp(-uq / 2.5) * 2.2;
+      a[i] = Math.tanh(y * 1.1) * 0.85 + sub[i];
+    }
+    for (const c0 of celdas) golpe(sr, a, c0 + c * 0.015, 80, 32, 0.4, 0.5, 500);
+    golpe(sr, a, 3.6, 120, 30, 0.6, 0.8, 900);
+    friccion(sr, a, 1.0, 2.7, 58, 36, [160, 360, 700], 0.45);
+    chasquidos(sr, a, 0.4, 8, (t) => 30 + 90 * Math.min(1, t / 4), { hp: 1500, amp: 0.45, largo: [0.0015, 0.008] });
+    for (let k = 0; k < 12; k++) ping(sr, a, rand(3.6, 5.5), rand(900, 2600), rand(0.02, 0.08), rand(0.02, 0.07));
+    return a;
+  });
+  return normalizaEst(chs, 0.95);
 }
 
 /** Racimos ya horneados por número de petardos (dos variantes de cada uno). */
@@ -2203,11 +2407,10 @@ export function jefeVencido(): void {
 
 /** Puente terminado: tres martillazos y un rechinido de tablas. */
 export function puenteListo(pan: number): void {
-  const m = salida();
-  if (!m) return;
-  const t = m.ctx.currentTime;
-  for (let i = 0; i < 3; i++) unaVez(m, 'pieza-metal', 0.3, 1.5 + i * 0.1, t + i * 0.14, pan);
-  unaVez(m, 'rechinido', 0.2, 1.1, t + 0.45, pan);
+  evento('puente', 1, (m, t) => {
+    for (let i = 0; i < 3; i++) unaVez(m, 'pieza-metal', 0.15, 1.5 + i * 0.1, t + i * 0.14, pan);
+    unaVez(m, 'rechinido', 0.1, 1.1, t + 0.45, pan);
+  });
 }
 
 /** Láser o rayo de la nave nodriza mientras dispara (llamar cada tick; se limita solo). */
@@ -2703,7 +2906,7 @@ export function vulcan(pan: number): void {
 }
 /** Cañón de 30 mm del Su-57 (llamar en cada tiro, ~cada 110 ms; se limita a uno cada 90 ms y 3 voces). */
 export function canon30(pan: number): void {
-  evento('canon30', 0.09, (m, t) => corta(m, tirosCanon, 3, 'canon30', 0.15 * rand(0.88, 1) * enAire(), rand(0.94, 1.05), t, pan, m.explo));
+  evento('canon30', 0.09, (m, t) => corta(m, tirosCanon, 3, 'canon30', 0.055 * rand(0.88, 1) * enAire(), rand(0.94, 1.05), t, pan, m.explo));
 }
 /** Láser del platillo (llamar en cada tiro, ~cada 70 ms; se limita a uno cada 60 ms y 3 voces). Suave. */
 export function laser(pan: number): void {
@@ -2736,7 +2939,7 @@ export function gas(pan: number): void {
 }
 /** Bomba de plasma del platillo: zumbido que sube y «uomp» sub-grave (1.2 s). */
 export function plasmaBomba(pan: number): void {
-  evento('plasma-bomba', 0.3, (m, t) => unaVez(m, 'plasma-bomba', 0.32 * enAire(), rand(0.97, 1.03), t, lado(pan), LIMITE + 4, m.explo));
+  evento('plasma-bomba', 0.3, (m, t) => unaVez(m, 'plasma-bomba', 0.11 * enAire(), rand(0.97, 1.03), t, lado(pan), LIMITE + 4, m.explo));
 }
 /** Chaff del B-2: eyector y susurro de cintas metálicas (0.8 s). */
 export function chaff(pan: number): void {
@@ -2841,6 +3044,7 @@ export function altitud(alt: number, velocidad: number): void {
     unaVez(m, 'estrella', rand(0.025, 0.055), RAZONES[k] * rand(0.997, 1.003), t, rand(-0.9, 0.9), LIMITE_AMB);
   }
   mantenerOvnis(m, t);
+  mantenerZepelin(t);
   mantenerMira(t);
 }
 
@@ -2964,6 +3168,105 @@ export function rayoOvni(): void {
   unaVez(m, 'zap', vol, rand(0.9, 1.1), t, pan || 0.001, LIMITE + 4);
 }
 
+/* ────────────────────────── zepelín de Margarita ────────────────────────── */
+
+type VozZep = { v: Voz; src: AudioBufferSourceNode; g: GainNode; lp: BiquadFilterNode; p: Pan; visto: number; libre: number; muere: number };
+let zep: VozZep | null = null;
+
+/**
+ * Zumbido de los motores del zepelín: grave, pesado, con un batido lento
+ * («uom… uom…»). Llamar cada tick con la posición del zepelín respecto al
+ * avión (px, y hacia arriba); vivo=false (está cayendo) apaga los motores con
+ * un quejido de ~3 s. Si se deja de llamar, se apaga solo en ~0.5 s.
+ */
+export function zepelinMotor(dx: number, dy: number, vivo: boolean): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  mantenerZepelin(t);
+  const x = num(dx), y = num(dy);
+  const r = Math.hypot(x, y);
+  if (!zep) {
+    if (!vivo || r > 1500 || vivos + 4 > LIMITE + 6) return;
+    const src = fuente(m, buf(m, 'zepelin-motor'), true);
+    const lp = m.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 400;
+    lp.Q.value = 0.5;
+    const g = ganancia(m, 0);
+    const p = panner(m.ctx);
+    const v = voz(src, [lp, g, p], m.bus, false);
+    src.start(t, rand(0, 8));
+    zep = { v, src, g, lp, p, visto: t, libre: -1, muere: -1 };
+  }
+  const z = zep;
+  z.visto = t;
+  z.libre = -1;
+  if (!vivo) {
+    if (z.muere < 0) {
+      // Los motores se ahogan: la marcha baja de una vez (un deslizamiento, no un vibrato) y se apaga.
+      z.muere = t;
+      sujeta(z.src.playbackRate, t);
+      z.src.playbackRate.setTargetAtTime(0.6, t, 1.1);
+      sujeta(z.g.gain, t);
+      z.g.gain.setTargetAtTime(0, t + 0.4, 0.9);
+    }
+    return;
+  }
+  if (z.muere >= 0) {
+    z.muere = -1;
+    sujeta(z.src.playbackRate, t);
+    hacia(z.src.playbackRate, 1, t, 0.3);
+  }
+  const prox = clamp(1 - r / 1500, 0, 1);
+  const vol = (0.04 + 0.22 * Math.pow(prox, 1.5)) * (1 - 0.35 * Math.max(duck, alarma)) * (0.6 + 0.4 * aire);
+  hacia(z.g.gain, vol, t, 0.25);
+  hacia(z.lp.frequency, 260 + 900 * prox * prox, t, 0.3);
+  panea(z.p, clamp(x / 450, -1, 1) * 0.85, t, 0.15);
+}
+
+/** El zepelín que el juego dejó de reportar (o que ya cayó) se apaga solo. */
+function mantenerZepelin(t: number) {
+  const z = zep;
+  if (!z) return;
+  if (z.libre < 0 && z.muere < 0 && t - z.visto > 0.5) {
+    z.libre = t;
+    hacia(z.g.gain, 0, t, 0.3);
+  } else if ((z.libre >= 0 && t - z.libre > 1.5) || (z.muere >= 0 && t - z.muere > 5)) {
+    apagar(z.v, z.g, t);
+    zep = null;
+  }
+}
+
+/** Llega el zepelín: sirena antiaérea larga y lejana sobre un golpe sordo (~7.5 s). Usar en vez de jefeLlega(). */
+export function zepelinLlega(): void {
+  evento('zepelin-llega', 5, (m, t) => {
+    unaVez(m, 'explo-grande', 0.3, 0.45, t, 0, LIMITE + 6);
+    unaVez(m, 'zepelin-sirena', 0.3 * cede(), 1, t + 0.15, 0, LIMITE + 8);
+  });
+}
+
+/** El casco gime y cruje (~2.4 s; se limita a uno cada 1.2 s). `pan` −1…1 opcional. */
+export function zepelinCruje(pan = 0): void {
+  evento('zepelin-cruje', 1.2, (m, t) =>
+    unaVez(m, Math.random() < 0.5 ? 'zepelin-cruje' : 'zepelin-cruje2', 0.24 * enAire(), rand(0.9, 1.06), t, lado(pan) || rand(-0.3, 0.3), LIMITE + 4),
+  );
+}
+
+const flaks: Corta[] = [];
+/** Estallido de una granada antiaérea del zepelín (se limita a uno cada 70 ms y 3 voces). */
+export function zepelinFlak(pan: number): void {
+  evento('zepelin-flak', 0.07, (m, t) => corta(m, flaks, 3, 'zepelin-flak', 0.42 * rand(0.85, 1) * enAire(), rand(0.9, 1.1), t, pan, m.explo));
+}
+
+/** El zepelín arde y se parte: celdas que estallan, quilla rota y caída (~8.5 s). Llamar al empezar su muerte. */
+export function zepelinCae(): void {
+  evento('zepelin-cae', 4, (m, t) => {
+    if (zep && zep.muere < 0) zepelinMotor(0, 0, false);
+    unaVez(m, 'zepelin-cae', 0.55, 1, t, 0, LIMITE + 8);
+  });
+}
+
 /* ────────────────────────── fijación fuerte ────────────────────────── */
 
 type Fuerte = { v: Voz; osc: OscillatorNode; g: GainNode; prox: number; paso: number; quieto: number; inicio: number; activo: boolean };
@@ -3069,6 +3372,8 @@ function apagarContinuos(t: number, tc: number) {
   }
   for (const o of ovnis) apagar(o.v, o.g, t, tc);
   ovnis.length = 0;
+  if (zep) apagar(zep.v, zep.g, t, tc);
+  zep = null;
   if (fuerte) apagar(fuerte.v, fuerte.g, t, tc);
   fuerte = null;
   nivelFuerte = alarma = alarmaFij = 0;
@@ -3118,6 +3423,9 @@ function reiniciar() {
   }
   for (const o of ovnis) liberar(o.v);
   ovnis.length = 0;
+  if (zep) liberar(zep.v);
+  zep = null;
+  flaks.length = 0;
   if (fuerte) liberar(fuerte.v);
   fuerte = null;
   nivelFuerte = alarma = alarmaFij = 0;

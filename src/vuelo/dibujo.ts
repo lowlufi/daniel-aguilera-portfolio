@@ -148,6 +148,18 @@ export const LOOKS: Record<ModeloAvion, PlaneLook> = {
     ink: '#3a3e58', w: 34, h: 18, glow: [0, 7], cupula: true, scarf: [-3, -6], scarfC: ['#5affc8', '#c8fff0'], rack: [0, 5],
     parts: { cabina: [0, -4], motor: [0, 5], ala: [-12, 2] },
   },
+  tomcat: {
+    ink: '#2c3240', w: 40, h: 20, jet: [-18, 0], scarf: [6, -6], scarfC: ['#3a8ad8', '#ffe048'], rack: [-2, 4],
+    parts: { cola: [-14, -5], ala: [-8, 3], motor: [-17, 0], cabina: [7, -4] },
+  },
+  a10: {
+    ink: '#2c3426', w: 42, h: 20, jet: [-13, -6], scarf: [7, -6], scarfC: ['#d86a3a', '#ffd08a'], rack: [0, 4],
+    parts: { cola: [-17, -4], ala: [0, 3], motor: [-8, -6], cabina: [10, -4], bodega: [-2, 6] },
+  },
+  spitfire: {
+    ink: '#2c3222', w: 36, h: 20, prop: [15, 0, 5], scarf: [-3, -6], scarfC: ['#e8e2d6', P.white], rack: [0, 3],
+    parts: { cola: [-14, -4], ala: [0, 3], motor: [11, -1], cabina: [1, -4] },
+  },
 };
 
 /* ── Who's flying: any pilot can take any plane ─────────────────────────── */
@@ -581,9 +593,204 @@ export function ovniGlow(g: Ctx, x: number, y: number, rx: number, ry: number, t
   g.globalAlpha = a0;
 }
 
+/** F-14: navy grey, twin fins, wings swept fully back, long two-seat canopy, big twin nozzles. */
+function paintTomcat(g: Ctx, has: Has) {
+  const G0 = '#56627a', G = '#8a97ab', G1 = '#b2bdcc', G2 = '#d6dde7', DK = '#262a36';
+  if (has('cola')) {
+    // Twin fins: the far one peeks out ahead of the near one.
+    for (let i = 0; i < 7; i++) R(g, -13 + Math.round(i * 0.5), -9 + i, 3, 1, i ? G0 : G);
+    for (let i = 0; i < 7; i++) R(g, -17 + Math.round(i * 0.6), -9 + i, 4, 1, i === 0 ? G2 : i < 3 ? G1 : G);
+    R(g, -17, -9, 3, 1, P.gold);
+    // Stabilators low at the back, a ventral fin underneath.
+    R(g, -19, 1, 8, 1, G);
+    R(g, -18, 2, 5, 1, G0);
+    R(g, -13, 3, 2, 2, G0);
+  } else stub(g, -14, -4, 2, 4);
+  // Long fuselage tapering into a pointed radome, light belly.
+  R(g, -12, -3, 14, 1, G1);
+  R(g, -15, -2, 28, 1, G);
+  R(g, -16, -1, 31, 1, G);
+  R(g, -16, 0, 33, 1, G);
+  R(g, -16, 1, 34, 1, G0);
+  R(g, -14, 2, 22, 1, G2);
+  R(g, 12, -1, 3, 1, G1);
+  R(g, 18, 1, 1, 1, P.metal0);
+  R(g, -7, -2, 1, 3, G0);
+  R(g, -11, -2, 3, 1, G0);
+  // The fixed glove running forward, and the big boxy intake under it.
+  R(g, 4, 1, 8, 1, G1);
+  R(g, -4, 0, 8, 3, G0);
+  R(g, -4, 0, 8, 1, G);
+  R(g, 4, 0, 1, 3, G2);
+  R(g, 3, 1, 1, 2, DK);
+  if (has('ala')) {
+    // The swing wing fully swept back, seen edge-on.
+    R(g, -12, 2, 10, 1, G1);
+    R(g, -14, 3, 9, 1, G);
+    R(g, -15, 4, 4, 1, G0);
+  } else stub(g, -7, 2, 3, 2);
+  if (has('motor')) {
+    // Big round nozzle with its petals.
+    R(g, -19, -2, 3, 5, P.metal0);
+    R(g, -18, -2, 2, 1, P.metal);
+    R(g, -19, -1, 1, 3, DK);
+  } else stub(g, -17, -2, 2, 4);
+  // Long two-seat canopy: an empty back seat and the pilot up front.
+  if (has('cabina')) {
+    D.oval(g, 7, -4, 6, 2, P.gl0);
+    R(g, 2, -5, 2, 3, '#3a4258');
+    miniHead(g, piloto, 9, -2);
+    R(g, 5, -6, 1, 4, G0);
+    g.globalAlpha = 0.45;
+    D.oval(g, 7, -4, 5, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 10, -6, 2, 1, P.white);
+  } else {
+    R(g, 1, -3, 12, 1, G0);
+    miniHead(g, piloto, 9, -2);
+    R(g, 13, -3, 1, 1, P.gl0);
+  }
+}
+
+/** A-10: olive grey, straight wing, two pod engines high on the back, twin square fins, nose gun. */
+function paintA10(g: Ctx, has: Has) {
+  const A0 = '#4c5644', A = '#77826a', A1 = '#a2ac92', A2 = '#c9d0bb', CM = '#5d684f', DK = '#262a2a';
+  if (has('cola')) {
+    // Square fins on the tailplane's tips: the far one peeks out above and ahead.
+    R(g, -16, -9, 3, 7, A0);
+    R(g, -16, -9, 3, 1, A);
+    R(g, -20, -8, 4, 9, A);
+    R(g, -20, -8, 4, 1, A1);
+    R(g, -19, -7, 1, 8, A0);
+    R(g, -20, -2, 8, 1, A1);
+  } else stub(g, -16, -3, 2, 4);
+  // Chunky fuselage, blunt nose.
+  R(g, -12, -3, 22, 1, A1);
+  R(g, -16, -2, 29, 1, A);
+  R(g, -17, -1, 32, 1, A);
+  R(g, -17, 0, 34, 1, A);
+  R(g, -16, 1, 33, 1, A0);
+  R(g, -13, 2, 27, 1, A0);
+  R(g, 13, -2, 2, 1, A1);
+  // Camo blotches.
+  R(g, -11, -2, 5, 2, CM);
+  R(g, 1, -1, 4, 2, CM);
+  R(g, -16, 0, 3, 1, CM);
+  // A friendly painted grin under the nose.
+  R(g, 10, 0, 1, 1, '#3a2228');
+  R(g, 11, 1, 5, 1, '#3a2228');
+  R(g, 16, 0, 1, 1, '#3a2228');
+  R(g, 12, 1, 1, 1, P.white);
+  R(g, 14, 1, 1, 1, P.white);
+  // The long cannon barrel poking out of the nose.
+  R(g, 15, 2, 5, 1, P.metal0);
+  R(g, 19, 2, 1, 1, '#2a2438');
+  if (has('ala')) {
+    // Straight, thick wing seen edge-on, with the gear pod.
+    R(g, -6, 2, 13, 1, A1);
+    R(g, -6, 3, 12, 1, A);
+    R(g, -5, 4, 9, 1, A0);
+    R(g, 3, 4, 3, 2, A0);
+  } else stub(g, -1, 2, 3, 2);
+  if (has('bodega')) {
+    // Stores hanging under the wing.
+    R(g, -2, 5, 1, 1, A0);
+    R(g, -5, 6, 7, 2, '#8a8a72');
+    R(g, -5, 6, 7, 1, '#b0b098');
+    R(g, -6, 6, 1, 2, A0);
+    R(g, 2, 7, 1, 1, '#5a5a4a');
+  } else {
+    R(g, -2, 5, 2, 1, DK);
+    R(g, -1, 6, 1, 1, P.gold);
+  }
+  if (has('motor')) {
+    // Pod engine on a short pylon high on the back.
+    R(g, -9, -4, 3, 1, A0);
+    D.oval(g, -8, -6, 5, 2, A0);
+    D.oval(g, -8, -7, 4, 1, A);
+    R(g, -11, -8, 6, 1, A2);
+    R(g, -2, -7, 1, 3, A2);
+    R(g, -3, -7, 1, 3, DK);
+    R(g, -14, -7, 2, 3, P.metal0);
+    R(g, -14, -6, 1, 1, DK);
+  } else stub(g, -9, -5, 3, 2);
+  if (has('cabina')) {
+    D.oval(g, 10, -4, 4, 2, P.gl0);
+    miniHead(g, piloto, 10, -2);
+    g.globalAlpha = 0.45;
+    D.oval(g, 10, -4, 3, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 11, -6, 2, 1, P.white);
+  } else {
+    R(g, 6, -3, 8, 1, A0);
+    miniHead(g, piloto, 10, -2);
+    R(g, 14, -3, 1, 1, P.gl0);
+  }
+}
+
+/** Spitfire: green/brown camo over a light belly, rounded fin, long nose, bubble canopy. */
+function paintSpitfire(g: Ctx, has: Has) {
+  const GR0 = '#45583a', GR = '#647c4c', GR1 = '#88a066', BR = '#8a6a42', SK = '#c6d0bc', SK0 = '#98a496', DK = '#2a2a26';
+  if (has('cola')) {
+    // Rounded fin and rudder.
+    const FIN: [number, number][] = [[-16, 2], [-17, 4], [-17, 5], [-17, 6], [-17, 6], [-17, 7]];
+    FIN.forEach(([x, w], i) => R(g, x, -8 + i, w, 1, i === 0 ? GR1 : GR));
+    R(g, -14, -6, 2, 2, BR);
+    R(g, -15, -7, 1, 5, GR0);
+    // Elliptical tailplane edge-on.
+    R(g, -17, 0, 6, 1, GR1);
+    R(g, -16, 1, 4, 1, SK0);
+  } else stub(g, -13, -3, 2, 4);
+  // Slim fuselage, the long engine cowling rising a little ahead of the cockpit.
+  R(g, -12, -2, 24, 1, GR);
+  R(g, -16, -1, 28, 1, GR);
+  R(g, -17, 0, 29, 1, GR);
+  R(g, -16, 1, 28, 1, SK);
+  R(g, -12, 2, 21, 1, SK0);
+  R(g, 4, -3, 8, 1, GR1);
+  R(g, -11, -2, 8, 1, GR1);
+  // Camo patches.
+  R(g, -10, -1, 4, 2, BR);
+  R(g, -1, -2, 4, 2, BR);
+  R(g, 6, -3, 3, 2, BR);
+  R(g, -16, -1, 2, 1, BR);
+  // Exhaust stubs along the cowling.
+  for (const x of [6, 8, 10]) R(g, x, -1, 1, 1, DK);
+  if (has('ala')) {
+    // Thin elliptical wing edge-on, the radiator under it, cannon ahead.
+    R(g, -7, 2, 14, 1, GR1);
+    R(g, -6, 3, 12, 1, SK);
+    R(g, -4, 4, 6, 1, SK0);
+    R(g, -3, 5, 4, 1, SK0);
+    R(g, -3, 5, 1, 1, DK);
+    R(g, 7, 2, 3, 1, P.metal0);
+  } else stub(g, -1, 2, 3, 2);
+  if (has('motor')) {
+    // Pointed spinner.
+    D.oval(g, 13, 0, 2, 2, P.cream);
+    R(g, 12, -2, 1, 5, '#b8ae98');
+    R(g, 15, 0, 1, 1, P.cream);
+    R(g, 13, -1, 1, 1, P.white);
+  } else stub(g, 10, -2, 2, 4);
+  if (has('cabina')) {
+    D.oval(g, 1, -4, 3, 2, P.gl0);
+    miniHead(g, piloto, 0, -2);
+    g.globalAlpha = 0.45;
+    D.oval(g, 1, -4, 2, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 4, -5, 1, 3, GR0);
+    R(g, 1, -6, 2, 1, P.white);
+  } else {
+    R(g, -3, -3, 7, 1, GR0);
+    miniHead(g, piloto, 0, -2);
+    R(g, 4, -3, 1, 1, P.gl0);
+  }
+}
+
 const PAINT: Record<ModeloAvion, (g: Ctx, has: Has) => void> = {
   avioneta: paintAvioneta, caza: paintCaza, bombardero: paintBombardero,
   raptor: paintRaptor, sukhoi: paintSukhoi, b2: paintB2, ovni: paintOvni,
+  tomcat: paintTomcat, a10: paintA10, spitfire: paintSpitfire,
 };
 
 /** The plane's sprite with the given parts missing (cached per combination). */
@@ -1633,6 +1840,12 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
       R(g, x, y0, 1, scal, sec === 1 ? '#7cb85a' : P.g1);
       R(g, x, y0 + 1, 1, 2, sec === 1 ? '#a8cc70' : P.g2);
       if (x % 6 === 2) R(g, x, y0 + 1, 1, 1, P.g3);
+      // Wildflowers dotted along the grass: more in San Juan's fields.
+      const hf = hash(x, 55);
+      if (hf % (sec === 0 ? 7 : 13) === 0 && x > pantry.x1 + 4) {
+        R(g, x, y0 - 2, 1, 2, P.g0);
+        R(g, x, y0 - 3, 1, 1, FLORES[(hf >> 4) % FLORES.length]);
+      }
     }
     // Outline along the top, joined where the slope steps.
     R(g, x, Math.min(y0, rowOf(hn)) - 1, 1, Math.abs(hn - h) + 1, ink);
@@ -1649,6 +1862,8 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
         R(g, gx, gy, sec === 3 ? 6 : 2, 1, sec === 3 ? '#a8a4b8' : '#b4aa94');
         continue;
       }
+      // A dot that would spill into the next sector (port concrete) is skipped.
+      if (sectorSA(gx + 3) !== sec) continue;
       R(g, gx + 1, gy, 2, 4, deep ? P.e2 : P.d3);
       R(g, gx, gy + 1, 4, 2, deep ? P.e2 : P.d3);
       if (!deep) R(g, gx + 1, gy + 1, 1, 1, P.white);
@@ -1658,8 +1873,10 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   const surfY = (x: number) => rowOf(Math.round(heightAt(x))) + 1;
   const libre = (x: number) => x > pantry.x1 + 30 && x < length - 12;
   // San Juan: two ponds (tranques), eucalyptus and a fence.
+  for (let x = 236; x < 306; x += 6) if (libre(x)) cerco(g, x, surfY(x), x + 6 < 306);
   for (const x of [210, 330]) if (libre(x)) tranque(g, x, surfY(x));
-  for (let x = pantry.x1 + 34; x < 400; x += 16 + (hash(x, 1) % 22)) if (libre(x) && Math.abs(x - 210) > 16 && Math.abs(x - 330) > 16) eucaliptoCerca(g, x, surfY(x), 28 + (hash(x, 2) % 16));
+  for (let x = pantry.x1 + 34; x < 400; x += 16 + (hash(x, 1) % 22)) if (libre(x) && Math.abs(x - 210) > 16 && Math.abs(x - 330) > 16 && Math.abs(x - 268) > 14) eucaliptoCerca(g, x, surfY(x), 28 + (hash(x, 2) % 16));
+  if (libre(268)) vaca(g, 268, surfY(268));
   // Llolleo: totora reeds, little lagoons and white herons.
   for (let x = 410; x < 1100; x += 8 + (hash(x, 3) % 18)) {
     if (!libre(x) || (x > 615 && x < 760)) continue;
@@ -1671,6 +1888,8 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   // Llolleo: the «Ojos de Mar» lagoon by the path, with its sign.
   if (libre(660)) {
     laguna(g, 660, surfY(660));
+    pato(g, 648, surfY(660) + 1, false);
+    pato(g, 672, surfY(660) + 2, true);
     cartel(g, 690, surfY(700), 'OJOS DE MAR', '#3d85c6');
   }
 
@@ -1685,6 +1904,7 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   // Beside Ñelo's house: three tall poplars and the neighbourhood's luchador, flexing.
   for (const [i, x] of [1546, 1558, 1570].entries()) if (libre(x)) alamo(g, x, surfY(x), i);
   if (libre(1590)) luchador(g, 1590, surfY(1590));
+  if (libre(1610)) perro(g, 1610, surfY(1610));
   for (let x = 1120; x < 1700; x += 70) if (libre(x) && Math.abs(x - 1440) > 40 && Math.abs(x - 1510) > 34 && Math.abs(x - 1220) > 26) faro(g, x, surfY(x));
   // The port: containers, bollards, a fried-fish stall, sea lions and pelicans on posts.
   for (let x = 1730; x < 2700; x += 50 + (hash(x, 5) % 50)) {
@@ -1715,7 +1935,8 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
     R(g, x, y - 7, 1, 1, '#c8c4d4');
   }
   // A crowded Playa Grande (parasols elbow to elbow), quieter Playa Chica.
-  for (let x = 2860; x < length - 20; x += x < 3160 ? 12 + (hash(x, 8) % 5) : 46 + (hash(x, 8) % 40)) if (Math.abs(x - 3050) > 14 && Math.abs(x - 3200) > 20) quitasol(g, x, surfY(x), hash(x, 9));
+  for (let x = 2860; x < length - 20; x += x < 3160 ? 12 + (hash(x, 8) % 5) : 46 + (hash(x, 8) % 40)) if (Math.abs(x - 3050) > 14 && Math.abs(x - 3200) > 20 && Math.abs(x - 3310) > 18) quitasol(g, x, surfY(x), hash(x, 9));
+  if (libre(3310)) salvavidas(g, 3310, surfY(3310));
   if (libre(2760)) estacion(g, 2740, surfY(2760));
   if (libre(2900)) cartel(g, 2836, surfY(2836), 'PLAYA GRANDE', '#3d85c6');
   if (libre(3420)) cartel(g, 3420, surfY(3420), 'PLAYA CHICA', '#3d85c6');
@@ -1757,6 +1978,80 @@ export function paintPantry(g: Ctx, px: number, base: number) {
     R(g, cx, cy + 2, 7, 1, P.k1);
     R(g, cx + 2, cy - 1, 3, 1, P.metal);
   }
+}
+
+const FLORES = ['#ff8ac0', '#ffd27f', '#ffffff', '#c9a7e0', '#ff6a5c', '#8fd3f8'];
+
+/** A post-and-rail fence segment (6 px), with the rail on to the next post. */
+function cerco(g: Ctx, x: number, y: number, riel: boolean) {
+  R(g, x, y - 8, 2, 8, '#8a5a3a');
+  R(g, x, y - 8, 1, 8, '#b07a4a');
+  if (riel) {
+    R(g, x + 2, y - 7, 4, 1, '#b07a4a');
+    R(g, x + 2, y - 4, 4, 1, '#8a5a3a');
+  }
+}
+
+/** A spotted cow grazing, head down to the left. */
+function vaca(g: Ctx, x: number, y: number) {
+  const N = '#3a3448';
+  R(g, x - 6, y - 4, 1, 4, N);
+  R(g, x - 3, y - 4, 1, 4, N);
+  R(g, x + 3, y - 4, 1, 4, N);
+  R(g, x + 6, y - 4, 1, 4, N);
+  R(g, x - 8, y - 11, 16, 8, N);
+  R(g, x - 7, y - 10, 14, 6, P.white);
+  R(g, x - 4, y - 10, 4, 3, N);
+  R(g, x + 3, y - 8, 3, 3, N);
+  R(g, x + 6, y - 10, 1, 2, N);
+  // Head down at the grass, pink muzzle, a little horn.
+  R(g, x - 12, y - 8, 5, 6, N);
+  R(g, x - 11, y - 7, 3, 4, P.white);
+  R(g, x - 12, y - 3, 4, 2, '#f4a7b9');
+  R(g, x - 10, y - 9, 1, 1, '#f2e6c8');
+  R(g, x - 9, y - 6, 1, 1, N);
+  // Udder and the tail.
+  R(g, x + 1, y - 4, 3, 1, '#f4a7b9');
+  R(g, x + 8, y - 10, 1, 5, N);
+  R(g, x + 8, y - 5, 2, 1, N);
+}
+
+/** A duck paddling in the lagoon. */
+function pato(g: Ctx, x: number, y: number, flip: boolean) {
+  const d = flip ? -1 : 1;
+  R(g, x - 3, y - 3, 7, 3, '#7a6a5a');
+  R(g, x - 3, y - 3, 7, 1, '#b8a890');
+  R(g, x + d * 3 - (flip ? 1 : 0), y - 6, 2, 3, '#3a8a5a');
+  R(g, x + d * 5 - (flip ? 1 : 0), y - 5, 2, 1, '#f2b040');
+  R(g, x - 4, y, 9, 1, P.w3);
+}
+
+/** A neighbourhood dog sitting, wagging its tail. */
+function perro(g: Ctx, x: number, y: number) {
+  R(g, x - 4, y - 5, 7, 5, '#c08a5a');
+  R(g, x + 1, y - 9, 4, 4, '#c08a5a');
+  R(g, x + 1, y - 10, 1, 2, '#8a5a3a');
+  R(g, x + 4, y - 7, 2, 1, '#3a3448');
+  R(g, x + 3, y - 8, 1, 1, '#3a3448');
+  R(g, x - 5, y - 4, 1, 3, '#8a5a3a');
+  R(g, x - 6, y - 5, 1, 1, '#8a5a3a');
+  R(g, x, y - 5, 2, 1, '#e86a5c');
+  R(g, x - 3, y - 1, 2, 1, '#8a5a3a');
+}
+
+/** The lifeguard's tower on the beach: stilts, a red hut and a flag. */
+function salvavidas(g: Ctx, x: number, y: number) {
+  for (const dx of [-6, 5]) R(g, x + dx, y - 14, 2, 14, '#8a5a3a');
+  for (let i = 0; i < 12; i++) R(g, x - 6 + i, y - 2 - i, 1, 1, '#b07a4a');
+  R(g, x - 9, y - 16, 19, 2, '#8a5a3a');
+  R(g, x - 8, y - 27, 17, 11, '#3e4a6b');
+  R(g, x - 7, y - 26, 15, 10, '#e05a5a');
+  R(g, x - 5, y - 24, 11, 4, P.gl1);
+  R(g, x - 7, y - 26, 15, 1, '#ff8a8a');
+  R(g, x - 10, y - 29, 21, 2, P.white);
+  R(g, x + 8, y - 38, 1, 10, '#3e4a6b');
+  R(g, x + 9, y - 38, 5, 3, '#ffd84a');
+  R(g, x + 9, y - 36, 5, 1, '#e05a5a');
 }
 
 /** Which San Antonio sector a world x is in (0 San Juan … 4 Cartagena), with a ragged border. */
@@ -1836,7 +2131,7 @@ function almacen(g: Ctx, x: number, y: number) {
   R(g, x + 25, y - 11, 7, 11, P.k1);
   R(g, x + 30, y - 6, 1, 1, P.gold);
   R(g, x + 2, y - 25, 36, 8, P.cream);
-  escribir(g, 'ALMACEN', x + 6, y - 24, '#3a5ab0');
+  escribir(g, 'ALMACÉN', x + 6, y - 24, '#3a5ab0');
   R(g, x - 2, y - 28, 44, 2, '#c0605a');
 }
 
