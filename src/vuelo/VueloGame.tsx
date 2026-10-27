@@ -779,6 +779,27 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     game.current?.setCalma(calma);
   }, [calma]);
 
+  // «Modo GORE» (blood, mice blown to pieces): opt-in, off by default, remembered on this device.
+  const [gore, setGore] = useState(() => {
+    try {
+      return localStorage.getItem('vuelo-gore') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleGore = (on: boolean) => {
+    setGore(on);
+    game.current?.setGore(on);
+    try {
+      localStorage.setItem('vuelo-gore', on ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  };
+  useEffect(() => {
+    game.current?.setGore(gore);
+  }, [gore]);
+
   const togglePause = useCallback(() => {
     if (phase !== 'play') return;
     setPaused((p) => {
@@ -1664,6 +1685,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 </span>
                 <input type="checkbox" role="switch" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="hud-switch" />
               </label>
+              <label className="hud-ajuste">
+                <span>
+                  Modo GORE (sangre)
+                  <small className="block text-[11px] font-bold text-[#c8c0e0]">Sangre y ratones en pedazos. No apto para peques.</small>
+                </span>
+                <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
+              </label>
               <div className="mt-2">
                 <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-[#c8c0e0]">Control táctil {touchUi ? '' : '(en teléfonos y tablets)'}</div>
                 <div role="radiogroup" aria-label="Control táctil" className="grid grid-cols-2 gap-1.5">
@@ -1889,6 +1917,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     <small className="block text-[11px] font-bold text-[#c8c0e0]">Sin sacudidas ni destellos fuertes</small>
                   </span>
                   <input type="checkbox" role="switch" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="hud-switch" />
+                </label>
+                <label className="hud-ajuste">
+                  <span>
+                    Modo GORE (sangre)
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">Sangre y ratones en pedazos. No apto para peques.</small>
+                  </span>
+                  <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
                 </label>
                 {touchUi && (
                   <div className="mt-2">

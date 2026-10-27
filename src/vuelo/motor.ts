@@ -6,6 +6,7 @@ import * as AB from './audio-batalla';
 import * as IA from './ia';
 import * as AE from './aereos';
 import * as VFX from './efectos';
+import * as GR from './gore';
 import * as G from './gigantes';
 import * as JF from './jefes';
 import * as CZ from './cazas';
@@ -774,6 +775,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     pista: '' as '' | PistaId,
     usos: { girar: 0, disparar: 0, fijar: 0, bengala: 0, nitro: 0 } as Record<PistaId, number>,
     calma: false,
+    /** «Modo GORE» (opt-in): blood, stains and mice blown to pieces (gore.ts). Survives new games. */
+    gore: false,
+    sangre: GR.crearGore(),
     /** Turns off the backdrop filter (debug / preference). */
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
@@ -1044,6 +1048,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.pops = [];
     s.junk = [];
     s.fx = VFX.crearEfectos();
+    GR.limpiar(s.sangre);
     s.luces = L.crearLuces();
     s.craters = [];
     s.bridges = [];
@@ -1493,7 +1498,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
     }
-    for (const u of s.gigantes) if (u.viva) giantHit(u, G.explotar(u, x, y, energy, hiereRatones ? damage : 0));
+    for (const u of s.gigantes) if (u.viva) giantHit(u, G.explotar(u, x, y, energy, hiereRatones ? damage : 0), x, y);
+    if (s.gore && hiereRatones) {
+      // Not while still popping out: the plane's own blast mustn't catch its pilot.
+      for (const e of s.eyectados) if (!e.jefa && e.t > 0.5 && Math.hypot(e.x - x, e.y + 4 - y) < ex.radio * 1.2) reventarEyectado(e);
+    }
     if (hiereRatones && s.jefe && JF.tocado(s.jefe, x, y, ex.radio)) {
       const h = JF.golpear(s.jefe, x, y, damage * BOSS_MUL[s.spec.id]);
       s.jefeFlash = 0.1;
@@ -1695,6 +1704,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (a.tipo === 'ovni' && !s.attract) celebrar(HG.registrar({ ovnis: 1 }));
     if (a.tipo === 'ovni') releasePrize(s.lives < MAX_VIDAS && Math.random() < 0.5 ? 'vida' : 'nuclear', a.x + 12, a.y + 14);
     for (let i = 0; i < 2; i++) VFX.pieza(s.fx, a.x, a.y, a.vx * 0.5 + rand(-50, 50), rand(20, 80), null, '#a88af0');
+    // Gore mode: the helicopter crew and the balloon's gunner don't make it.
+    if (s.gore && (a.tipo === 'helicoptero' || a.tipo === 'globo')) GR.despedazar(s.sangre, a.x, a.y, a.vx, a.vy, GR.PILOTO);
     const ax = a.x, ay = a.y;
     later(() => blast(ax, ay, FA.ENERGIA.vehiculo, 'jugador', 0.8), 50);
   }
@@ -1756,7 +1767,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       abatirAereo(a);
     }
     for (const f of s.fighters) if (seen(f.a.x)) hurtFighter(f, f.jefa ? f.hpMax * 0.35 : 99);
-    for (const u of s.gigantes) if (u.viva && seen(u.x)) giantHit(u, G.golpear(u, u.x, u.y + 6, 99));
+    for (const u of s.gigantes) if (u.viva && seen(u.x)) giantHit(u, G.golpear(u, u.x, u.y + 6, 99), u.x, u.y);
+    if (s.gore) for (const e of s.eyectados) if (!e.jefa && seen(e.x)) reventarEyectado(e);
     for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) sh.m.t = -1;
     s.proy = [];
     if (s.jefe && seen(s.jefe.x)) for (let i = 0; i < 6; i++) {
@@ -1786,6 +1798,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.eyectados.push({ x, y, vx: vx * 0.3, vy: 110, t: 0, jefa });
     if (!s.attract) AB.eyeccion(panOf(x));
     if (!jefa) pop(x, y + 16, RADIO.grito[Math.floor(Math.random() * RADIO.grito.length)], '#ffd0e8');
+  }
+  /** Gore mode: a pilot under his parachute caught by fire bursts red; the empty canopy flutters down. */
+  function reventarEyectado(e: (typeof s.eyectados)[number]) {
+    if (e.t >= 16) return;
+    GR.estallido(s.sangre, e.x, e.y + 4, e.vx, e.vy, GR.PILOTO);
+    if (e.t > 0.55) for (let i = 0; i < 2; i++) VFX.pieza(s.fx, e.x + rand(-4, 4), e.y + 12, rand(-30, 30), rand(10, 40), null, i ? '#ff9ad0' : P.white);
+    // Past its time: the list filter drops it.
+    e.t = 99;
   }
 
   /** Damages a mouse fighter; at 0 it blows apart (scored only if the player did it). */
@@ -1829,6 +1849,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     for (let i = 0; i < 3; i++) VFX.pieza(s.fx, x, y, vx * 0.4 + rand(-60, 60), vy * 0.4 + rand(20, 90), null, '#7a5ad0');
+    // Gore mode: no parachute when it crashes on its own, so the pilot goes with it.
+    if (s.gore && !byPlayer) GR.despedazar(s.sangre, x, y, vx, vy, GR.PILOTO);
     later(() => blast(x, y, FA.ENERGIA.vehiculo, 'jugador', 0.8), 30);
   }
 
@@ -1914,6 +1936,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     VFX.restos(s.fx, c.mid.x, ground(c.mid.x), A.VEH_LOOK[c.kind].w);
     // The crew bails out and fights on foot.
     if (s.mapa !== 'oceano' && !isBoss(c.kind) && Math.random() < (s.wave < 4 ? 0.3 : 0.6)) s.gigantes.push(...G.desembarcar(c.x, c.y, 1 + Math.floor(Math.random() * 2), Math.random, s.wave));
+    // Gore mode: not all of the crew makes it out.
+    if (s.gore && !isBoss(c.kind)) GR.despedazar(s.sangre, c.mid.x, c.mid.y + 4, rand(-40, 40), 60, GR.TRIPULANTE);
     // It comes apart: chunks of hull fly off smoking.
     for (let i = 0; i < 3 + (isBoss(c.kind) ? 4 : 0); i++) VFX.pieza(s.fx, c.mid.x + rand(-6, 6), c.mid.y + 4, rand(-70, 70), rand(50, 110), null, i % 2 ? '#8064d8' : '#b49af4');
     // The wreck goes up a moment later: chain reactions are allowed.
@@ -2247,13 +2271,35 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (e.fuego) VFX.fuego(s.fx, e.fuego.x, e.fuego.y, 0, 0, e.fuego.k);
     }
   }
-  function giantHit(u: G.Unidad, r: G.ResultadoGolpe) {
+  /**
+   * Turns what a hit did to a ground unit into score and debris. (hx, hy) is
+   * where it struck (gore mode only); `bala` for gunfire, otherwise a blast.
+   */
+  function giantHit(u: G.Unidad, r: G.ResultadoGolpe, hx?: number, hy?: number, bala = false) {
     giantEvents(r.eventos);
+    if (s.gore && hx !== undefined && hy !== undefined && u.tipo === 'infanteria') goreSoldado(u, r.muerta, hx, hy, bala);
     if (r.muerta) award(r.puntos, u.x, u.y + 10);
     else if (r.puntos) {
       s.score += r.puntos;
       pop(u.x, u.y + 20, `+${r.puntos}`);
     }
+  }
+
+  /**
+   * Gore mode on a foot soldier: gunfire draws a spurt of blood (he still
+   * falls whole); a blast that kills him tears him into pieces.
+   */
+  function goreSoldado(u: G.Unidad, muerto: boolean, hx: number, hy: number, bala: boolean) {
+    const cx = u.x, cy = u.y + 6;
+    const dx = cx - hx || (Math.random() < 0.5 ? -1 : 1), dy = cy - hy;
+    if (bala) {
+      GR.sangre(s.sangre, hx, hy, dx, Math.max(0, dy) + 2, muerto ? 10 : 5);
+      return;
+    }
+    if (!muerto) return;
+    const d = Math.hypot(dx, dy) || 1;
+    GR.despedazar(s.sangre, cx, cy, (dx / d) * 90, 40 + Math.max(0, dy / d) * 60, GR.SOLDADO);
+    u.quitar = true;
   }
 
   /** Some enemies carry a reward balloon: more often whatever the plane is short of. */
@@ -2733,7 +2779,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const bx = G.caja(u);
         if (b.x > bx.x0 && b.x < bx.x1 && b.y > bx.y0 && b.y < bx.y1) {
           hit = true;
-          giantHit(u, G.golpear(u, b.x, b.y, 0.25 * bd));
+          giantHit(u, G.golpear(u, b.x, b.y, 0.25 * bd), b.x, b.y, true);
+        }
+      }
+      if (s.gore && !hit) {
+        for (const e of s.eyectados) {
+          if (e.jefa || Math.abs(b.x - e.x) > 3 || Math.abs(b.y - (e.y + 4)) > 5) continue;
+          hit = true;
+          reventarEyectado(e);
+          break;
         }
       }
       for (const f of s.fighters) {
@@ -3938,7 +3992,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             const b = G.caja(u);
             if (m.x > b.x0 && m.x < b.x1 && m.y > b.y0 && m.y < b.y1) {
               m.t = -1;
-              giantHit(u, G.golpear(u, m.x, m.y, kit.dano));
+              giantHit(u, G.golpear(u, m.x, m.y, kit.dano), m.x, m.y);
               blast(m.x, m.y, kit.energia, 'jugador', kit.dano);
               break;
             }
@@ -4205,6 +4259,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     s.crates = s.crates.filter((c) => c.landed < 6);
     VFX.actualizar(s.fx, dt, wind, ground);
+    if (!GR.vacio(s.sangre)) GR.actualizar(s.sangre, dt, ground, sobreMar, OC.NIVEL_MAR);
     L.pasoLuces(s.luces, dt);
     for (const q of s.pops) q.t += dt;
     s.pops = s.pops.filter((q) => q.t < 1.3);
@@ -4421,6 +4476,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
 
+    // Gore mode: blood stains on the ground and pink patches on the water.
+    GR.dibujarSuelo(g, s.sangre, sx, sy, vw, OC.NIVEL_MAR);
+
     const p = s.plane;
 
     // Shadows on the ground or the sea under everything that flies.
@@ -4609,6 +4667,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       tupFx[1] = sy(y);
       return tupFx;
     }, s.t);
+    GR.dibujar(g, s.sangre, sx, sy);
     L.dibujarLuces(g, s.luces, toScreen, s.t);
     const blink = s.inv > 0 && Math.floor(s.t * 14) % 2 === 0;
     // Boarding: the pilot walks out of the house to the plane and hops in.
@@ -5446,6 +5505,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     /** «Menos movimiento»: no shake, no hit-stop or slow motion, softer flashes. */
     setCalma(on: boolean) {
       s.calma = on;
+    },
+    /** «Modo GORE»: blood and mice blown to pieces. Off clears whatever is on screen. */
+    setGore(on: boolean) {
+      s.gore = on;
+      if (!on) GR.limpiar(s.sangre);
     },
     setPaused(p: boolean) {
       s.paused = p;
