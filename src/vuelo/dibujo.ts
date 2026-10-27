@@ -1568,21 +1568,23 @@ export function drawJunk(g: Ctx, kind: 'chancla' | 'tomate' | 'macetero', x: num
  * A speech bubble with its tail pointing down at (x, y). Words are drawn with
  * the game's rounded font; the bubble wraps to two lines when it's long.
  */
-export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: number) {
-  g.font = 'bold 8px "Fredoka", "Nunito", sans-serif';
+export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: number, escala = 1) {
+  // Big and readable: 12px text (times the zoom factor so it keeps its size on screen).
+  const fs = 12 * escala, lh = fs + 2 * escala, pad = 7 * escala;
+  g.font = `bold ${fs}px "Fredoka", "Nunito", sans-serif`;
   const words = text.split(' ');
   const lines: string[] = [];
   let line = '';
   for (const w of words) {
     const next = line ? `${line} ${w}` : w;
-    if (g.measureText(next).width > 150 && line) {
+    if (g.measureText(next).width > 210 * escala && line) {
       lines.push(line);
       line = w;
     } else line = next;
   }
   if (line) lines.push(line);
-  const w = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width))) + 12;
-  const h = lines.length * 9 + 6;
+  const w = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width))) + pad * 2;
+  const h = lines.length * lh + pad;
   // Clear of the altimeter strip on the right edge.
   const bx = Math.round(Math.min(vw - w - 14, Math.max(2, x - w / 2)));
   const by = Math.round(y - h - 6);
@@ -1600,7 +1602,7 @@ export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: numbe
   g.textAlign = 'left';
   g.textBaseline = 'top';
   g.fillStyle = '#6a2a4a';
-  lines.forEach((l, i) => g.fillText(l, bx + 5, by + 3 + i * 9));
+  lines.forEach((l, i) => g.fillText(l, bx + pad, by + Math.round(pad / 2) + i * lh));
   g.textBaseline = 'alphabetic';
   g.textAlign = 'center';
 }

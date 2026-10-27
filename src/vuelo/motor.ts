@@ -4629,7 +4629,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g.globalAlpha = 1;
     }
     for (const e of s.eyectados) dibujarEyectado(sx(e.x), sy(e.y), e.t, e.jefa);
-    if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw);
+    if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw, clamp(Math.round(2 / view.s), 1, 3));
 
     if (s.mapa === 'tormenta') dibujarTormenta(vw, vh, sx, sy);
 
