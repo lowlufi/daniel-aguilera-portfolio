@@ -123,8 +123,26 @@ export function cuantos(oleada: number): number {
  *  - storm aces (`agresivo`): 1.5 → 2.4 hp, skill +0.12.
  *  - Margarita (`jefa`): 16 → 28 hp, skill 1. `modelo` picks her airframe.
  */
+/** The airframes the mice can field: each wave they get their hands on better ones. */
+const FLOTA: { desde: number; modelos: ModeloAvion[] }[] = [
+  { desde: 0, modelos: ['caza', 'spitfire', 'mustang', 'stuka'] },
+  { desde: 5, modelos: ['caza', 'mustang', 'corsair', 'f16'] },
+  { desde: 7, modelos: ['f16', 'mig29', 'corsair', 'tomcat'] },
+  { desde: 9, modelos: ['f16', 'mig29', 'tomcat', 'sukhoi'] },
+  { desde: 12, modelos: ['mig29', 'sukhoi', 'raptor', 'tomcat'] },
+];
+
+/** A fighter airframe for this wave: mostly the current tier, now and then the next one up. */
+export function modeloPorOleada(oleada: number, rnd: () => number = Math.random): ModeloAvion {
+  const ola = fin(oleada, 3);
+  let i = 0;
+  while (i + 1 < FLOTA.length && ola >= FLOTA[i + 1].desde) i++;
+  const tier = i + 1 < FLOTA.length && rnd() < 0.15 ? FLOTA[i + 1] : FLOTA[i];
+  return tier.modelos[Math.floor(rnd() * tier.modelos.length) % tier.modelos.length];
+}
+
 export function crear(x: number, y: number, haciaDerecha: boolean, oleada: number, agresivo = false, jefa = false, modelo?: ModeloAvion): Caza {
-  const m: ModeloAvion = modelo ?? (jefa ? 'sukhoi' : 'caza');
+  const m: ModeloAvion = modelo ?? (jefa ? 'sukhoi' : modeloPorOleada(oleada));
   const a = FV.nuevoAvion(m, x, y, haciaDerecha);
   const w = Math.max(0, fin(oleada, 3) - 3);
   const hab = jefa ? 1 : clamp(0.2 + w * 0.075 + (agresivo ? 0.12 : 0), 0.2, 0.92);
@@ -557,12 +575,12 @@ export function paso(
     c.avisoMisil -= dt;
     if (c.avisoMisil <= 0) {
       c.avisoMisil = 0;
-      if (c.misilCd < 1 && aa < 1.15 && d > 150 && d < 560) {
+      if (c.misilCd < 1 && aa < 1.15 && d > 150 && d < 820) {
         out.misil = true;
         c.misilCd = c.jefa ? 4.5 + Math.random() * 2 : clamp(11 - fin(oleada, 3) * 0.3, 6, 11) - h * 1.5 + Math.random() * 3;
       } else c.misilCd = 1.2;
     }
-  } else if (c.misilCd <= 0 && aa < (c.jefa ? 0.95 : 0.7) && ata < 0.4 && d > 200 && d < 500 && lineaLibre(a.x, a.y, jugador.x, jugador.y, suelo)) {
+  } else if (c.misilCd <= 0 && aa < (c.jefa ? 0.95 : 0.7) && ata < 0.4 && d > 200 && d < 780 && lineaLibre(a.x, a.y, jugador.x, jugador.y, suelo)) {
     // Margarita waits for a shot the plane can't easily dodge: slow, low, or
     // looking the other way (or right after it broke from her guns).
     const buena = !c.jefa || pV < 150 || pAlto < 240 || pAta > 2.2 || c.modo === 'reversa';

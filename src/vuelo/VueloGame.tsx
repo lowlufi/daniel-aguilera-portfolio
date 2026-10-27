@@ -434,6 +434,8 @@ const TIPO_AVION: Record<Avion, string> = {
   avioneta: 'De la casa', caza: 'De la casa', bombardero: 'De la casa',
   raptor: 'Caza furtivo', sukhoi: 'Caza supermaniobrable', b2: 'Bombardero furtivo', ovni: 'De otro mundo',
   tomcat: 'Caza de portaaviones', a10: 'Ataque a tierra', spitfire: 'Caza clásico de hélice',
+  stuka: 'Bombardero en picada', mustang: 'Caza clásico de escolta', corsair: 'Caza clásico naval',
+  f16: 'Caza polivalente', mig29: 'Caza de superioridad',
 };
 
 /** The mice's radio: a little transmission card, the line typing itself out. */
@@ -546,6 +548,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  useEffect(() => game.current?.setArriba(barraH), [barraH]);
   // The hangar: open or not, and the plane/bomb picked before take-off (null = the pilot's own plane).
   const [hangar, setHangar] = useState(false);
   const [avion, setAvion] = useState<Avion | null>(null);
@@ -616,6 +619,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     };
     const g = createVuelo(canvasRef.current!, boxRef.current!, hooks);
     game.current = g;
+    g.setArriba(barraRef.current?.getBoundingClientRect().height ?? 64);
     // The title screen's background: a game flown by the autopilot.
     g.attract();
     return () => {

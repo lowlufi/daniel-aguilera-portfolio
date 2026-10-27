@@ -236,6 +236,47 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
     accRigidez: 22, accAmort: 3, accPerdida: 8, wCabeceo: 18, tiempoTonel: 0.24,
     helice: true, panza: 5,
   }),
+  // Ju 87 Stuka: slow, fixed gear and gull wing; dive brakes make it steady
+  // in a steep dive, but it turns heavily.
+  stuka: derivar({
+    masa: 2.2, velCrucero: 95, velMax: 165, clCrucero: 0.3, cl0: 0.3, clAlfa: 7,
+    alfaPerdida: 0.27, cd0: 0.034, kInducido: 0.04, cargaMax: 8, cargaMin: -3,
+    tpwCrucero: 0.5, tpwMax: 0.85, inercia: 1.8, accMando: 28, mandoMinimo: 0.4,
+    accRigidez: 16, accAmort: 3, accPerdida: 7, wCabeceo: 13, tiempoTonel: 0.36,
+    helice: true, panza: 6,
+  }),
+  // P-51 Mustang: the fastest of the props, long legs, laminar wing.
+  mustang: derivar({
+    masa: 1.3, velCrucero: 125, velMax: 210, clCrucero: 0.2, cl0: 0.18, clAlfa: 6.8,
+    alfaPerdida: 0.26, cd0: 0.021, kInducido: 0.042, cargaMax: 9.5, cargaMin: -4,
+    tpwCrucero: 0.62, tpwMax: 1.1, inercia: 0.75, accMando: 42, mandoMinimo: 0.42,
+    accRigidez: 21, accAmort: 3, accPerdida: 8, wCabeceo: 17, tiempoTonel: 0.25,
+    helice: true, panza: 5,
+  }),
+  // F4U Corsair: bent wing, big engine, sturdy: climbs and rolls well.
+  corsair: derivar({
+    masa: 1.6, velCrucero: 120, velMax: 205, clCrucero: 0.22, cl0: 0.2, clAlfa: 6.8,
+    alfaPerdida: 0.27, cd0: 0.024, kInducido: 0.042, cargaMax: 9, cargaMin: -3.5,
+    tpwCrucero: 0.64, tpwMax: 1.12, inercia: 0.9, accMando: 40, mandoMinimo: 0.42,
+    accRigidez: 20, accAmort: 3, accPerdida: 8, wCabeceo: 16, tiempoTonel: 0.24,
+    helice: true, panza: 5,
+  }),
+  // F-16: light single-engine jet, fly-by-wire, 9 g, the quickest roll.
+  f16: derivar({
+    masa: 1.4, velCrucero: 160, velMax: 285, clCrucero: 0.15, cl0: 0.06, clAlfa: 5.2,
+    alfaPerdida: 0.33, cd0: 0.018, kInducido: 0.065, cargaMax: 12, cargaMin: -3.5,
+    tpwCrucero: 0.72, tpwMax: 1.4, inercia: 1, accMando: 40, mandoMinimo: 0.3,
+    accRigidez: 18, accAmort: 2.5, accPerdida: 6.5, wCabeceo: 17, tiempoTonel: 0.22,
+    helice: false, panza: 5,
+  }),
+  // MiG-29: twin-engine, high alpha with good low-speed authority.
+  mig29: derivar({
+    masa: 1.7, velCrucero: 155, velMax: 280, clCrucero: 0.15, cl0: 0.07, clAlfa: 5.3,
+    alfaPerdida: 0.42, cd0: 0.019, kInducido: 0.062, cargaMax: 11.5, cargaMin: -3.5,
+    tpwCrucero: 0.72, tpwMax: 1.42, inercia: 1.1, accMando: 40, mandoMinimo: 0.38,
+    accRigidez: 17, accAmort: 2.5, accPerdida: 6, wCabeceo: 17, tiempoTonel: 0.27,
+    helice: false, panza: 5,
+  }),
   // The saucer: whatever drives it, it out-climbs and out-turns everything
   // and barely stalls.
   ovni: derivar({

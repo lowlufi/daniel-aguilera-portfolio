@@ -160,6 +160,26 @@ export const LOOKS: Record<ModeloAvion, PlaneLook> = {
     ink: '#2c3222', w: 36, h: 20, prop: [15, 0, 5], scarf: [-3, -6], scarfC: ['#e8e2d6', P.white], rack: [0, 3],
     parts: { cola: [-14, -4], ala: [0, 3], motor: [11, -1], cabina: [1, -4] },
   },
+  stuka: {
+    ink: '#232c1c', w: 40, h: 22, prop: [18, 0, 5], scarf: [0, -6], scarfC: ['#ffd23a', '#fff2a8'], rack: [-3, 5],
+    parts: { cola: [-16, -4], ala: [0, 3], motor: [15, 0], cabina: [0, -5], bodega: [-3, 5] },
+  },
+  mustang: {
+    ink: '#3a3e4c', w: 36, h: 20, prop: [16, 0, 5], scarf: [-4, -6], scarfC: ['#ff4a5a', P.white], rack: [0, 3],
+    parts: { cola: [-14, -4], ala: [1, 3], motor: [13, 0], cabina: [-1, -4] },
+  },
+  corsair: {
+    ink: '#101830', w: 38, h: 20, prop: [17, 0, 6], scarf: [-6, -6], scarfC: [P.white, '#ffd23a'], rack: [0, 3],
+    parts: { cola: [-15, -4], ala: [1, 3], motor: [14, 0], cabina: [-2, -4] },
+  },
+  f16: {
+    ink: '#2e3440', w: 38, h: 20, jet: [-19, 0], scarf: [4, -6], scarfC: ['#ff6a9a', '#ffd0e0'], rack: [-2, 3],
+    parts: { cola: [-13, -5], ala: [-4, 3], motor: [-18, 0], cabina: [6, -4] },
+  },
+  mig29: {
+    ink: '#262e3e', w: 40, h: 20, jet: [-20, 2], scarf: [5, -6], scarfC: ['#ffb03a', '#fff0a0'], rack: [-2, 4],
+    parts: { cola: [-15, -5], ala: [-5, 3], motor: [-17, 2], cabina: [8, -4] },
+  },
 };
 
 /* ── Who's flying: any pilot can take any plane ─────────────────────────── */
@@ -787,10 +807,310 @@ function paintSpitfire(g: Ctx, has: Has) {
   }
 }
 
+/** Ju-87: splinter greens over a pale belly, inverted gull wing, trousered gear, long greenhouse, a bomb on the belly. */
+function paintStuka(g: Ctx, has: Has) {
+  const G0 = '#3c4a2e', G = '#5a6b42', G1 = '#7c8c56', S = '#46563a', SK = '#b4c2c8', SK0 = '#8a9aa4', DK = '#262a22';
+  if (has('cola')) {
+    // Square-topped fin with a rounded leading corner, braced tailplane.
+    const FIN: [number, number][] = [[-18, 3], [-19, 5], [-19, 6], [-19, 6], [-19, 6], [-19, 7], [-19, 8]];
+    FIN.forEach(([x, w], i) => R(g, x, -9 + i, w, 1, i === 0 ? G1 : G));
+    R(g, -19, -6, 3, 2, S);
+    R(g, -16, -8, 1, 6, G0);
+    R(g, -20, -2, 7, 1, G1);
+    R(g, -19, -1, 5, 1, SK0);
+    R(g, -17, 0, 1, 2, G0);
+  } else stub(g, -15, -3, 2, 4);
+  // Angular fuselage, deepest at the engine.
+  R(g, -14, -3, 26, 1, G1);
+  R(g, -18, -2, 32, 1, G);
+  R(g, -18, -1, 33, 1, G);
+  R(g, -18, 0, 34, 1, G);
+  R(g, -17, 1, 32, 1, SK);
+  R(g, -14, 2, 27, 1, SK0);
+  // Splinter camo: hard-edged slanted patches.
+  for (const [x0, y0] of [[-15, -2], [-7, -2], [6, -3]]) for (let i = 0; i < 3; i++) R(g, x0 + i, y0 + i, 3, 1, S);
+  // Cowling, exhaust stubs and the big chin radiator.
+  R(g, 10, -3, 4, 1, G1);
+  for (const x of [9, 11, 13]) R(g, x, -1, 1, 1, DK);
+  R(g, 9, 2, 6, 2, G0);
+  R(g, 10, 3, 4, 1, DK);
+  if (has('ala')) {
+    // Inverted gull wing edge-on: the root drops to the crank, the outer panel climbs back.
+    R(g, -7, 2, 15, 1, G1);
+    R(g, -6, 3, 14, 1, G);
+    R(g, -4, 4, 10, 1, SK0);
+    // Trousered gear hanging from the crank.
+    R(g, 3, 5, 3, 1, G);
+    R(g, 3, 6, 4, 1, G);
+    R(g, 3, 7, 5, 1, G0);
+    R(g, 4, 5, 1, 2, G1);
+    R(g, 4, 8, 3, 2, DK);
+    R(g, 5, 8, 1, 1, P.metal0);
+  } else stub(g, -1, 2, 3, 2);
+  if (has('bodega')) {
+    // The big bomb on its crutch under the belly.
+    R(g, -3, 3, 1, 1, G0);
+    D.oval(g, -3, 5, 4, 1, '#5c5c50');
+    R(g, -6, 4, 7, 1, '#a0a08a');
+    R(g, 1, 5, 1, 1, '#c8c8b0');
+    R(g, -9, 4, 2, 3, '#5c5c50');
+    R(g, -9, 5, 1, 1, P.gold);
+  } else {
+    R(g, -5, 3, 4, 1, DK);
+    R(g, -3, 4, 1, 1, P.gold);
+  }
+  if (has('motor')) {
+    D.oval(g, 16, 0, 2, 2, G);
+    R(g, 15, -2, 1, 5, G0);
+    R(g, 16, -1, 1, 1, G1);
+    R(g, 18, 0, 1, 1, P.cream);
+  } else stub(g, 13, -2, 2, 4);
+  // Long framed greenhouse: the pilot up front, the rear gun pointing back.
+  if (has('cabina')) {
+    R(g, -9, -5, 3, 1, P.metal0);
+    R(g, -7, -5, 13, 2, P.gl0);
+    R(g, -6, -6, 11, 1, P.gl0);
+    miniHead(g, piloto, 3, -2);
+    g.globalAlpha = 0.45;
+    R(g, -6, -5, 11, 1, P.gl1);
+    g.globalAlpha = 1;
+    for (const x of [-5, -2]) R(g, x, -6, 1, 3, G0);
+    R(g, 6, -5, 1, 2, G0);
+    R(g, -4, -6, 2, 1, P.white);
+  } else {
+    R(g, -7, -3, 14, 1, G0);
+    miniHead(g, piloto, 3, -2);
+    R(g, 6, -3, 1, 1, P.gl0);
+  }
+}
+
+/** P-51: bare metal, bubble canopy, belly scoop, a checkered nose band and a red spinner. */
+function paintMustang(g: Ctx, has: Has) {
+  const M0 = '#6c7482', M = '#a0a8b6', M1 = '#c8ced8', M2 = '#eef1f5', DK = '#2a2c34', CK = '#ff4a5a';
+  if (has('cola')) {
+    // Tall straight-edged fin running into a dorsal fillet, a red tip.
+    [3, 3, 4, 4, 5, 7, 9].forEach((w, i) => R(g, -17, -8 + i, w, 1, i === 0 ? CK : i === 1 ? M1 : M));
+    R(g, -15, -6, 1, 4, M0);
+    R(g, -18, 0, 6, 1, M1);
+    R(g, -17, 1, 4, 1, M0);
+  } else stub(g, -14, -3, 2, 4);
+  R(g, -12, -3, 8, 1, M1);
+  R(g, 3, -3, 8, 1, M1);
+  R(g, -16, -2, 29, 1, M);
+  R(g, -17, -1, 31, 1, M);
+  R(g, -17, 0, 31, 1, M);
+  R(g, -16, 1, 29, 1, M0);
+  R(g, -12, 2, 20, 1, M0);
+  // Polished shine and panel lines.
+  R(g, -14, -2, 9, 1, M2);
+  R(g, 4, -2, 6, 1, M2);
+  R(g, -6, -2, 1, 4, M0);
+  R(g, 5, -1, 1, 3, M0);
+  for (const x of [6, 8]) R(g, x, -1, 1, 1, DK);
+  // Checkered band round the nose.
+  for (let y = -3; y <= 1; y++) for (let x = 10; x <= 12; x++) R(g, x, y, 1, 1, (x + y) & 1 ? CK : P.white);
+  if (has('ala')) {
+    R(g, -5, 2, 13, 1, M1);
+    R(g, -4, 3, 11, 1, M);
+    R(g, -2, 4, 6, 1, M0);
+    R(g, 8, 2, 2, 1, P.metal0);
+  } else stub(g, 1, 2, 3, 2);
+  // The belly air scoop, its mouth just behind the wing.
+  R(g, -12, 2, 8, 2, M0);
+  R(g, -11, 2, 7, 1, M);
+  R(g, -4, 2, 1, 2, DK);
+  R(g, -13, 2, 1, 1, M0);
+  if (has('motor')) {
+    D.oval(g, 14, 0, 2, 2, CK);
+    R(g, 13, -2, 1, 5, '#c0303c');
+    R(g, 14, -1, 1, 1, '#ffb0b8');
+    R(g, 16, 0, 1, 1, CK);
+  } else stub(g, 11, -2, 2, 4);
+  if (has('cabina')) {
+    D.oval(g, -1, -4, 4, 2, P.gl0);
+    miniHead(g, piloto, -1, -2);
+    g.globalAlpha = 0.45;
+    D.oval(g, -1, -4, 3, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 3, -5, 1, 3, M0);
+    R(g, -1, -6, 2, 1, P.white);
+  } else {
+    R(g, -5, -3, 8, 1, M0);
+    miniHead(g, piloto, -1, -2);
+    R(g, 3, -3, 1, 1, P.gl0);
+  }
+}
+
+/** F4U: deep navy blue, inverted gull wing, cockpit far back behind a long nose, big round cowl and prop. */
+function paintCorsair(g: Ctx, has: Has) {
+  const N0 = '#1c2a4a', N = '#2c426e', N1 = '#45619a', N2 = '#7090c8', DK = '#121826';
+  if (has('cola')) {
+    const FIN: [number, number][] = [[-17, 3], [-18, 5], [-18, 5], [-18, 6], [-18, 6], [-18, 7]];
+    FIN.forEach(([x, w], i) => R(g, x, -8 + i, w, 1, i === 0 ? N1 : N));
+    R(g, -16, -7, 1, 5, N0);
+    R(g, -19, 0, 6, 1, N1);
+    R(g, -18, 1, 4, 1, N0);
+    R(g, -15, 2, 1, 1, N0);
+    R(g, -15, 3, 1, 1, DK);
+  } else stub(g, -15, -3, 2, 4);
+  R(g, -13, -3, 8, 1, N1);
+  R(g, 1, -3, 9, 1, N1);
+  R(g, -17, -2, 28, 1, N);
+  R(g, -18, -1, 30, 1, N);
+  R(g, -18, 0, 31, 1, N);
+  R(g, -17, 1, 29, 1, N0);
+  R(g, -13, 2, 22, 1, N0);
+  R(g, -12, -2, 7, 1, N2);
+  R(g, 2, -2, 6, 1, N2);
+  R(g, -7, -2, 1, 4, N0);
+  R(g, 4, -1, 1, 3, N0);
+  // Big round cowl with its ring and cowl flaps.
+  R(g, 10, -4, 4, 7, N0);
+  R(g, 10, -3, 3, 5, N);
+  R(g, 13, -3, 1, 5, N1);
+  R(g, 11, -4, 2, 1, N1);
+  R(g, 9, -2, 1, 4, DK);
+  if (has('ala')) {
+    // Inverted gull wing edge-on: lowest at the crank.
+    R(g, -6, 2, 15, 1, N1);
+    R(g, -5, 3, 13, 1, N);
+    R(g, -3, 4, 8, 1, N0);
+    R(g, -1, 5, 4, 1, N0);
+    R(g, 9, 3, 2, 1, P.metal0);
+  } else stub(g, 0, 2, 3, 2);
+  if (has('motor')) {
+    D.oval(g, 15, 0, 2, 2, N);
+    R(g, 15, -1, 1, 1, N2);
+    R(g, 17, 0, 1, 1, N1);
+  } else stub(g, 12, -2, 2, 4);
+  if (has('cabina')) {
+    D.oval(g, -2, -4, 3, 2, P.gl0);
+    miniHead(g, piloto, -3, -2);
+    g.globalAlpha = 0.45;
+    D.oval(g, -2, -4, 2, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 1, -5, 1, 3, N0);
+    R(g, -2, -6, 2, 1, P.white);
+  } else {
+    R(g, -6, -3, 7, 1, N0);
+    miniHead(g, piloto, -3, -2);
+    R(g, 1, -3, 1, 1, P.gl0);
+  }
+}
+
+/** F-16: light grey, one swept fin, chin intake under a long bubble canopy, cropped delta, single nozzle. */
+function paintF16(g: Ctx, has: Has) {
+  const F0 = '#68727f', F = '#9ba5b2', F1 = '#c2c9d3', F2 = '#e2e6ec', DK = '#262a34';
+  if (has('cola')) {
+    for (let i = 0; i < 8; i++) {
+      const x0 = -17 + Math.round(i * 0.2), x1 = -15 + Math.round(i * 0.75);
+      R(g, x0, -9 + i, x1 - x0 + 1, 1, i === 0 ? F2 : i < 3 ? F1 : F);
+    }
+    R(g, -17, -9, 1, 1, F0);
+    R(g, -15, -6, 1, 4, F0);
+    R(g, -19, 1, 7, 1, F1);
+    R(g, -18, 2, 4, 1, F0);
+    R(g, -11, 3, 2, 1, F0);
+  } else stub(g, -14, -4, 2, 4);
+  // Blended body running into a sharp radome.
+  R(g, -12, -3, 16, 1, F1);
+  R(g, -16, -2, 26, 1, F);
+  R(g, -17, -1, 32, 1, F);
+  R(g, -17, 0, 35, 1, F);
+  R(g, -16, 1, 30, 1, F0);
+  R(g, -14, 2, 14, 1, F0);
+  R(g, 15, -1, 1, 1, F0);
+  R(g, 17, 0, 1, 1, F0);
+  // The strake running forward to the cockpit, panel lines.
+  R(g, 0, 0, 12, 1, F2);
+  R(g, -8, -2, 1, 3, F0);
+  R(g, -12, -2, 2, 1, F0);
+  // Chin intake under the cockpit.
+  R(g, 1, 2, 7, 2, F0);
+  R(g, 1, 2, 6, 1, F);
+  R(g, 7, 2, 1, 2, DK);
+  R(g, 2, 4, 5, 1, F0);
+  if (has('ala')) {
+    R(g, -11, 2, 11, 1, F1);
+    R(g, -10, 3, 8, 1, F);
+    R(g, -8, 4, 4, 1, F0);
+  } else stub(g, -5, 2, 3, 2);
+  if (has('motor')) {
+    R(g, -19, -2, 2, 4, P.metal0);
+    R(g, -19, -2, 2, 1, P.metal);
+    R(g, -19, -1, 1, 2, DK);
+  } else stub(g, -17, -2, 2, 4);
+  if (has('cabina')) {
+    D.oval(g, 6, -4, 5, 2, P.gl0);
+    miniHead(g, piloto, 7, -2);
+    g.globalAlpha = 0.45;
+    D.oval(g, 6, -4, 4, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 8, -6, 2, 1, P.white);
+  } else {
+    R(g, 1, -3, 11, 1, F0);
+    miniHead(g, piloto, 7, -2);
+    R(g, 12, -3, 1, 1, P.gl0);
+  }
+}
+
+/** MiG-29: blue-grey over a pale belly, twin fins, a humped spine, two engines far apart under the wing roots. */
+function paintMig29(g: Ctx, has: Has) {
+  const B0 = '#4e5c70', B = '#7c8ca4', B1 = '#a4b2c6', BC = '#66788f', W = '#cfd7e0', W0 = '#a8b2be', DK = '#242a36';
+  if (has('cola')) {
+    // Twin fins: the far one peeks out ahead of the near one.
+    for (let i = 0; i < 7; i++) R(g, -14 + Math.round(i * 0.6), -9 + i, 3, 1, i ? B0 : B);
+    for (let i = 0; i < 7; i++) R(g, -18 + Math.round(i * 0.6), -9 + i, 4, 1, i === 0 ? B1 : i < 3 ? BC : B);
+    R(g, -20, 0, 7, 1, B);
+    R(g, -19, 1, 4, 1, B0);
+  } else stub(g, -14, -3, 2, 4);
+  R(g, -12, -3, 18, 1, B1);
+  R(g, -16, -2, 26, 1, B);
+  R(g, -17, -1, 31, 1, B);
+  R(g, -17, 0, 34, 1, B);
+  R(g, -16, 1, 35, 1, W);
+  R(g, -14, 2, 18, 1, W0);
+  R(g, 19, 1, 1, 1, B0);
+  R(g, -10, -2, 4, 2, BC);
+  R(g, 0, -1, 4, 1, BC);
+  R(g, -5, -2, 1, 3, B0);
+  if (has('motor')) {
+    // Engine nacelles slung low, the intake ramp under the wing root, nozzles far back.
+    R(g, -17, 2, 19, 2, B0);
+    R(g, -16, 2, 17, 1, B);
+    R(g, 1, 2, 2, 3, DK);
+    R(g, 3, 2, 1, 3, W);
+    R(g, -20, 1, 3, 3, P.metal0);
+    R(g, -19, 1, 2, 1, P.metal);
+    R(g, -20, 2, 1, 1, DK);
+  } else stub(g, -15, 2, 3, 2);
+  if (has('ala')) {
+    // Swept wing edge-on and the long root extension reaching for the cockpit.
+    R(g, -11, 2, 12, 1, B1);
+    R(g, -10, 4, 9, 1, B);
+    R(g, -8, 5, 5, 1, B0);
+    R(g, 1, 1, 9, 1, B1);
+  } else stub(g, -5, 3, 3, 2);
+  if (has('cabina')) {
+    D.oval(g, 8, -4, 4, 2, P.gl0);
+    miniHead(g, piloto, 8, -2);
+    g.globalAlpha = 0.45;
+    D.oval(g, 8, -4, 3, 1, P.gl1);
+    g.globalAlpha = 1;
+    R(g, 9, -6, 2, 1, P.white);
+    R(g, 13, -3, 1, 1, P.gl1);
+  } else {
+    R(g, 4, -3, 9, 1, B0);
+    miniHead(g, piloto, 8, -2);
+    R(g, 12, -3, 1, 1, P.gl0);
+  }
+}
+
 const PAINT: Record<ModeloAvion, (g: Ctx, has: Has) => void> = {
   avioneta: paintAvioneta, caza: paintCaza, bombardero: paintBombardero,
   raptor: paintRaptor, sukhoi: paintSukhoi, b2: paintB2, ovni: paintOvni,
   tomcat: paintTomcat, a10: paintA10, spitfire: paintSpitfire,
+  stuka: paintStuka, mustang: paintMustang, corsair: paintCorsair, f16: paintF16, mig29: paintMig29,
 };
 
 /** The plane's sprite with the given parts missing (cached per combination). */
@@ -1588,16 +1908,16 @@ export function drawJunk(g: Ctx, kind: 'chancla' | 'tomate' | 'macetero', x: num
  * A speech bubble with its tail pointing down at (x, y). Words are drawn with
  * the game's rounded font; the bubble wraps to two lines when it's long.
  */
-export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: number, escala = 1, arriba = false) {
+export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: number, escala = 1, arriba = false, ancho = 1) {
   // Big and readable: 12px text (times the zoom factor so it keeps its size on screen).
-  const fs = 12 * escala, lh = fs + 2 * escala, pad = 7 * escala;
+  const fs = 12 * escala, lh = fs + 2 * escala, pad = (ancho > 1 ? 5 : 7) * escala;
   g.font = `bold ${fs}px "Fredoka", "Nunito", sans-serif`;
   const words = text.split(' ');
   const lines: string[] = [];
   let line = '';
   for (const w of words) {
     const next = line ? `${line} ${w}` : w;
-    if (g.measureText(next).width > 210 * escala && line) {
+    if (g.measureText(next).width > Math.min(210 * escala * ancho, vw * 0.6) && line) {
       lines.push(line);
       line = w;
     } else line = next;
@@ -1703,7 +2023,16 @@ const PRIZE_COL: Record<Premio, [string, string, string]> = {
  * A reward balloon. (x, y) is where its string ends (tied to an enemy, or
  * hanging free). `big` draws the bigger free-floating one with a glow.
  */
-export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number, big: boolean) {
+export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number, big: boolean, escala = 1) {
+  // Scaled from the string's foot, so it stays tied to whatever carries it.
+  if (escala !== 1) {
+    g.save();
+    g.translate(Math.round(x), Math.round(y));
+    g.scale(escala, escala);
+    drawPrize(g, 0, 0, kind, t + x * 0.001, big);
+    g.restore();
+    return;
+  }
   const [c0, c1, c2] = PRIZE_COL[kind];
   const X = Math.round(x);
   const Y = Math.round(y);
