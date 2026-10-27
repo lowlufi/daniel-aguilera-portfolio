@@ -768,6 +768,7 @@ html.lite .liquid-glass-strong::before {
     opacity: 0.88;
   }
   .hud-touch:active,
+  .hud-touch-down,
   .hud-touch-on {
     opacity: 1;
     background: #ffd84a;
@@ -776,7 +777,8 @@ html.lite .liquid-glass-strong::before {
       0 -2px 0 0 #22183f, 0 2px 0 0 #22183f, -2px 0 0 0 #22183f, 2px 0 0 0 #22183f,
       0 5px 0 0 #22183f;
   }
-  .hud-touch:active {
+  .hud-touch:active,
+  .hud-touch-down {
     transform: translateY(3px);
     box-shadow:
       inset 2px 2px 0 #e8a92a,
@@ -791,6 +793,38 @@ html.lite .liquid-glass-strong::before {
   .hud-touch svg {
     filter: drop-shadow(1px 0 0 #22183f) drop-shadow(-1px 0 0 #22183f) drop-shadow(0 1px 0 #22183f) drop-shadow(0 -1px 0 #22183f);
   }
+}
+
+/* First-flight tutorial: a golden ring pulses round the key the step talks about. */
+@keyframes hud-guia {
+  0%, 100% { outline-color: rgba(255, 216, 74, 0.95); outline-offset: 3px; }
+  50% { outline-color: rgba(255, 216, 74, 0.25); outline-offset: 7px; }
+}
+.hud-touch.hud-touch-guia {
+  outline: 3px solid #ffd84a;
+  animation: hud-guia 1s ease-in-out infinite;
+  opacity: 1;
+}
+/* …and the halves' edge hints breathe while step 1 asks to turn. */
+@keyframes hud-guia-pulso {
+  0%, 100% { scale: 1; }
+  50% { scale: 1.12; }
+}
+.hud-guia-pulso {
+  animation: hud-guia-pulso 1.1s ease-in-out infinite;
+}
+/* A tiny pixel arrow pointing up (rotated for «Baja»), in the text colour. */
+.hud-flechita {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 5px solid currentColor;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-touch.hud-touch-guia,
+  .hud-guia-pulso { animation: none; }
 }
 
 /* Flares touch key: flashes red/yellow while a missile is about to hit. */

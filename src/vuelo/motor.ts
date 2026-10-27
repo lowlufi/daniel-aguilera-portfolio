@@ -61,6 +61,11 @@ export type HangarInfo = {
 export type Hud = {
   /** The mice's radio chatter on screen, if any. */
   radio: { quien: string; texto: string } | null;
+  /**
+   * Where the nose is pointing sideways: 1 right, -1 left, 0 near vertical. On touch,
+   * holding the left half climbs when it's 1 and dives when it's -1 (the right half the opposite).
+   */
+  nariz: number;
   /** The plane, its weapons and the hangar picks. */
   hangar: HangarInfo;
   /** Fish was just stolen: the pantry chip flashes. */
@@ -576,7 +581,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   // `levels` are the zoom steps (whole-number pixel scales), `zi` the current one.
   /** `sinLejos`: the quality governor (see the loop) dropped the 1/3 zoom on a struggling phone. */
   /** `arriba`: CSS px taken by the HUD bar along the top edge (the radar sits right under it). */
-  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1, sinLejos: false, arriba: 64 };
+  /**
+   * `derecha`: CSS px along the right edge covered by the thumb buttons (phones), so the
+   * camera frames the plane in the free part. `radar`: CSS px of the slot the HUD bar keeps
+   * for the radar on phones (its top-right corner), or null to use the default corner.
+   */
+  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1, sinLejos: false, arriba: 64, derecha: 0, radar: null as { x: number; y: number } | null };
   mapaActual = 'valle';
   resetHeights();
   const valleStrip = A.groundStrip(LEVEL, ground, PANTRY);
@@ -1777,6 +1787,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function radio(quien: string, frases: string[], urgente = false) {
     if (s.attract || s.mode !== 'play') return;
     if (s.radio && s.radio.t < (urgente ? 1.2 : 3.2)) return;
+    // Phones: chatter waits while Margarita's bubble is up, so the two cards don't stack at the top.
+    if (view.touch && !urgente && s.say) return;
     s.radio = { quien, texto: frases[Math.floor(Math.random() * frases.length)], t: 0 };
     AB.radioRaton();
     s.hudKey = '';
@@ -2942,11 +2954,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function textoPista(k: PistaId): string {
     const t = view.touch;
     return {
-      girar: t ? 'Mantén izquierda o derecha para girar' : 'Flechas o WASD para pilotear',
-      disparar: t ? 'Toca 🚀 Misil o 💥 Metralla para disparar' : 'Espacio: misil · H: metralla',
+      girar: t ? 'Mantén el lado «Sube» o «Baja» de la pantalla para girar' : 'Flechas o WASD para pilotear',
+      disparar: t ? 'La metralla dispara sola · toca 🚀 Misil para lanzar uno' : 'Espacio: misil · H: metralla',
       fijar: 'Mantén la nariz 1 s sobre un enemigo: se fija y el misil lo persigue',
       bengala: t ? '¡Misil! Toca ✨ Bengalas o gira fuerte' : '¡Misil! L suelta bengalas, o gira fuerte',
-      nitro: t ? 'Doble toque en la pantalla: super nitro 🔥' : 'Aprieta E dos veces: super nitro 🔥',
+      nitro: t ? 'Doble toque en Gas: super nitro 🔥' : 'Aprieta E dos veces: super nitro 🔥',
     }[k];
   }
   /** Picks the hint that fits the moment, if the player hasn't learned it yet. */
@@ -4211,8 +4223,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
     // Camera: leads in the direction of flight, and climbs with the plane
     // once it's above the middle of the screen.
-    const lead = Math.cos(p.rumbo) * view.vw * 0.16;
-    const want = clamp(p.x - view.vw / 2 + lead, 0, LEVEL - view.vw);
+    // Phones: frame the plane in the part of the screen the thumb buttons leave free,
+    // with more room ahead (smoothed, so a loop doesn't swing the view back and forth).
+    let want: number;
+    if (view.touch && s.mode === 'play') {
+      leadK += (Math.cos(p.rumbo) - leadK) * Math.min(1, dt * 1.6);
+      const libre = Math.max(view.vw * 0.6, view.vw - view.derecha / view.s);
+      want = clamp(p.x - libre / 2 + leadK * libre * 0.25, 0, LEVEL - view.vw);
+    } else {
+      leadK = Math.cos(p.rumbo);
+      want = clamp(p.x - view.vw / 2 + Math.cos(p.rumbo) * view.vw * 0.16, 0, LEVEL - view.vw);
+    }
     s.camX += (want - s.camX) * Math.min(1, dt * 3);
     // The ground sits a little above the bottom edge (more on touch screens,
     // where the buttons are), and on tall screens the spare sky is shared out.
@@ -4220,7 +4241,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const lift = Math.max(view.touch ? 70 : 14, (playH - (CEIL + 40)) * 0.5);
     // Low down the ground stays in view; higher up the plane is centred.
     const frame = 0.72 - 0.22 * clamp((p.y - 200) / 500, 0, 1);
-    const wantY = clamp(p.y - playH * frame, -lift, Math.max(-lift, CEIL + 40 - playH));
+    // On phones the HUD bar covers the top of the frame: at the ceiling, look a bit higher so the plane stays below it.
+    const techo = view.touch ? view.arriba / view.s : 0;
+    const wantY = clamp(p.y - playH * frame, -lift, Math.max(-lift, CEIL + 40 + techo - playH));
     s.camY += (wantY - s.camY) * Math.min(1, dt * 4);
     s.shake = Math.max(0, s.shake - dt * 14);
     s.hurtFlash = Math.max(0, s.hurtFlash - dt);
@@ -4630,6 +4653,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Banked and top-view frames as it rolls or pulls hard (g smoothed so they don't flicker).
     // During a barrel roll the drawn bank spins a full turn (the physics keep flying straight).
     const giroVisual = s.tonelT > 0 ? Math.cos(Math.PI * 2 * (1 - s.tonelT / 0.55)) * (p.alabeo >= 0 ? 1 : -1) : p.alabeo;
+    // Phones, while a half is held: which way the nose is swinging (drawn just under the plane).
+    if (!s.dead && turn && view.touch && s.mode === 'play' && !s.despegue) dibujarGuiaGiro(sx(p.x), sy(p.y), p.rumbo);
     if (!s.dead) drawPlaneGiro(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, giroVisual, s.cargaSuave, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
     else if (s.hundido) {
       // Sinking: under the surface, nose dropping, tinted by the water, trailing bubbles.
@@ -4713,7 +4738,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const esc = clamp(Math.round(2 / view.s), 1, 6);
       // Phones: pinned at the top centre under the HUD, so the thumb buttons never cover it,
       // and compact (about 14 CSS px text, a short wide box) so it doesn't hide the sky.
-      if (view.touch) A.drawBubble(g, vw / 2, Math.round((view.arriba + 4) / view.s), s.say.text, vw, 1.15 / view.s, true, 1.6);
+      // Below the boss bar when there is one, and below an urgent radio line that cut in.
+      if (view.touch) {
+        const bajo = (jefeEnHud() ? 50 : 0) + (s.radio && s.radio.t < 3.8 ? 64 : 0);
+        A.drawBubble(g, vw / 2, Math.round((view.arriba + 4 + bajo) / view.s), s.say.text, vw, 1.15 / view.s, true, 1.6);
+      }
       else A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw, esc);
     }
 
@@ -4871,9 +4900,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         let best = foes[0];
         for (const f of foes) if (Math.hypot(f.x - p.x, f.y - p.y) < Math.hypot(best.x - p.x, best.y - p.y)) best = f;
         const right = best.x > p.x;
-        const ax = right ? vw - 22 : 14;
-        // On phones the weapon buttons cover the lower right: keep the arrow above them.
-        const ay = clamp(sy(best.y), 40, view.touch ? Math.round(vh * 0.55) : vh - A.DIRT - 22);
+        // On phones the weapon buttons cover the right edge: the arrow sits just left of them, under the HUD bar.
+        const ax = right ? vw - 22 - (view.touch ? Math.round(view.derecha / view.s) : 0) : 14;
+        const ay = view.touch
+          ? clamp(sy(best.y), Math.round(view.arriba / view.s) + 8, vh - A.DIRT - 22)
+          : clamp(sy(best.y), 40, vh - A.DIRT - 22);
         const bob = Math.round(Math.sin(s.t * 6) * 2) * (right ? 1 : -1);
         g.globalAlpha = 0.9;
         A.R(g, ax - 9 + bob, ay - 5, 18, 10, '#3a2a6a');
@@ -4920,8 +4951,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const ALC = 760; // world px from the plane to the radar's edge
       const k = S / (2 * ALC);
       // Top-right corner, under the pause key and the HUD bar (the bottom is for the thumbs and the road).
-      const rx = view.touch ? vw - S - 5 * u : vw - S - 8 * u;
-      const ry = view.touch ? 30 * u : Math.round((view.arriba + 8) / view.s);
+      // Phones: in the slot the HUD bar keeps for it, left of the pause key, so the
+      // thumb buttons below have the whole right edge (and the notch is respected).
+      const slot = view.touch ? view.radar : null;
+      const rx = slot ? Math.round(slot.x / view.s) - S - 3 * u : view.touch ? vw - S - 5 * u : vw - S - 8 * u;
+      const ry = slot ? Math.round(slot.y / view.s) + 3 * u : view.touch ? 30 * u : Math.round((view.arriba + 8) / view.s);
       const cx = rx + S / 2, cy = ry + S / 2;
       const aX = (x: number) => Math.round(cx + (x - p.x) * k);
       const aY = (y: number) => Math.round(cy - (y - p.y) * k);
@@ -5001,6 +5035,38 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (s.jefe) A.R(g, rx + Math.round((s.jefe.x / LEVEL) * (S - u)), by, u, 2 * u, P.red);
       A.R(g, rx + Math.round((p.x / LEVEL) * (S - 2 * u)), by - u, 2 * u, 4 * u, P.gold);
     }
+  }
+
+  /** True while the HUD shows a boss bar (same rule as `hud().boss`). */
+  function jefeEnHud() {
+    return s.fighters.some((f) => f.jefa) || s.cars.some((c) => isBoss(c.kind));
+  }
+
+  /**
+   * Phones, while a side of the screen is held: a short dotted arc from the nose, bending
+   * the way the nose is turning, so it's plain which way the plane is going to swing.
+   */
+  function dibujarGuiaGiro(px: number, py: number, rumbo: number) {
+    const r = s.spec.hit + 14;
+    const lado = Math.sign(turn);
+    const k = 0.45 + 0.55 * turnK;
+    const punto = (x: number, y: number, c: string, a: number) => {
+      g.globalAlpha = a;
+      A.R(g, Math.round(x) - 2, Math.round(y) - 2, 4, 4, '#22183f');
+      A.R(g, Math.round(x) - 1, Math.round(y) - 1, 2, 2, c);
+    };
+    let a = rumbo;
+    for (let i = 0; i < 4; i++) {
+      a = rumbo + lado * (0.15 + i * 0.22) * k;
+      punto(px + Math.cos(a) * r, py - Math.sin(a) * r, '#fff8e7', 0.55 + i * 0.12);
+    }
+    // Arrow head at the end of the arc: two barbs behind the tip, one each side of the arc.
+    const hx = px + Math.cos(a) * r, hy = py - Math.sin(a) * r;
+    // Direction of travel along the arc (screen y points down).
+    const tx = -Math.sin(a) * lado, ty = -Math.cos(a) * lado;
+    for (const lat of [-1, 1]) punto(hx - tx * 4 + Math.cos(a) * lat * 4, hy - ty * 4 - Math.sin(a) * lat * 4, P.gold, 0.95);
+    punto(hx + tx * 2, hy + ty * 2, P.gold, 0.95);
+    g.globalAlpha = 1;
   }
 
   /** Rain, the lightning bolt (and its warning glow) and the sky flashing white. */
@@ -5197,6 +5263,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       congelado: s.congelado,
       zoom: [view.levels.length, view.zi],
       throttle: Math.sign(input.gas),
+      nariz: Math.abs(Math.cos(s.plane.rumbo)) < 0.3 ? 0 : Math.sign(Math.cos(s.plane.rumbo)),
       boss: (() => {
         const jefa = s.fighters.find((f) => f.jefa);
         if (jefa) return { name: 'Margarita en su caza', hp: clamp(Math.round((jefa.hp / jefa.hpMax) * 100) / 100, 0, 1) };
@@ -5207,7 +5274,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       resumen: s.mode === 'play' && s.phase === 'break' && s.breakT > 1 ? s.resumen : null,
       viaje: s.transT > 0,
       pista: s.mode !== 'play' || s.dead ? '' : s.despegue === 'subiendo' ? `${s.spec.pilot} sube al avión…` : s.despegue === 'pista'
-        ? (view.touch ? 'Mantén ⏩ Acelerar y, con velocidad, mantén la mitad izquierda para despegar' : 'Mantén E para acelerar y, con velocidad, ↑ para despegar')
+        ? (view.touch ? 'Mantén Gas y, con velocidad, mantén el lado «Sube» para despegar' : 'Mantén E para acelerar y, con velocidad, ↑ para despegar')
         : s.pista ? textoPista(s.pista) : '',
       radio: s.mode === 'play' && s.radio && s.radio.t < 3.8 ? { quien: s.radio.quien, texto: s.radio.texto } : null,
       mision: s.mode === 'play' && s.mision ? { texto: s.mision.texto, prog: s.mision.prog, meta: s.mision.meta, hecha: s.mision.hecha, fallida: s.mision.fallida } : null,
@@ -5230,6 +5297,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none; and how far into the hold (0…1). */
   let turn = 0;
   let turnK = 0;
+  /** Phones: the camera's look-ahead, smoothed towards the nose's sideways direction. */
+  let leadK = 0;
   /** True if an enemy is right in front of the nose, within gun range (the auto gun on phones). */
   function enemigoEnMira(p: Avion) {
     const cx = Math.cos(p.rumbo), cy = Math.sin(p.rumbo);
@@ -5530,6 +5599,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     /** Height in CSS px of the HUD bar along the top, so the radar sits below it. */
     setArriba(px: number) {
       view.arriba = Math.max(0, px);
+    },
+    /** Phones: CSS px covered by the thumb buttons along the right edge (the camera frames the rest). */
+    setDerecha(px: number) {
+      view.derecha = Math.max(0, px);
+    },
+    /** Phones: top-right corner (CSS px) of the radar's slot in the HUD bar, or null. */
+    setRadar(r: { x: number; y: number } | null) {
+      view.radar = r;
     },
   };
 }
