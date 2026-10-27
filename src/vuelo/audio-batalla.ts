@@ -1973,6 +1973,29 @@ function buf(m: Mezcla, n: Nombre) {
   return b;
 }
 
+/**
+ * Bakes every one-shot ahead of time, a few per idle moment, so the first
+ * explosion or missile of a game doesn't stall a frame while it's synthesized.
+ */
+export function precalentar() {
+  const m = salida(true);
+  if (!m) return;
+  const pend = (Object.keys(HORNO) as Nombre[]).filter((n) => !hornos.has(n));
+  const ocioso = (f: (d?: IdleDeadline) => void) =>
+    window.requestIdleCallback ? window.requestIdleCallback(f, { timeout: 2000 }) : window.setTimeout(() => f(), 60);
+  const paso = (d?: IdleDeadline) => {
+    // The context may have been replaced since: stop quietly.
+    if (salida(true) !== m) return;
+    do {
+      const n = pend.shift();
+      if (!n) return;
+      buf(m, n);
+    } while (pend.length && d && d.timeRemaining() > 6);
+    if (pend.length) ocioso(paso);
+  };
+  ocioso(paso);
+}
+
 /* ────────────────────────── persecución ────────────────────────── */
 
 const C_JUEGO = 480; // «velocidad del sonido» del juego, px/s: con misiles a 100–250 px/s el doppler se oye claro

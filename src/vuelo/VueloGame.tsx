@@ -469,6 +469,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     setMusicVolume(0);
     initAudio(muted);
     cargarSonidos();
+    // Once the audio has woken up, bake the battle sounds in idle time.
+    window.setTimeout(() => AB.precalentar(), 800);
     menu.despegar();
     setResult(null);
     setPaused(false);
@@ -600,6 +602,12 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     };
     const onHide = () => {
       if (document.hidden && phase === 'play' && !paused) togglePause();
+      // Menus and cards: the title music stops with the tab hidden (a throttled
+      // background timer would only stutter it) and comes back on return.
+      else if (phase !== 'play' && phase !== 'intro') {
+        if (document.hidden) pauseAudio();
+        else initAudio(muted);
+      }
     };
     window.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onHide);
@@ -607,7 +615,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('visibilitychange', onHide);
     };
-  }, [togglePause, play, phase, paused, confirmado]);
+  }, [togglePause, play, phase, paused, confirmado, muted]);
 
   /*
    * Touch: no sliding. Hold the left half of the screen to turn the nose
