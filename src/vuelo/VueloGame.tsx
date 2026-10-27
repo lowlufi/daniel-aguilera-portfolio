@@ -450,13 +450,13 @@ function Radio({ quien, texto, top }: { quien: string; texto: string; top: numbe
     return () => window.clearInterval(id);
   }, [texto]);
   return (
-    <div role="status" aria-live="polite" className="pointer-events-none absolute left-3 z-20 max-w-[min(22rem,70vw)] animate-[aparece_0.2s_ease-out]" style={{ top: top + 6 }}>
+    <div role="status" aria-live="polite" className="pointer-events-none absolute left-3 z-20 max-w-[min(22rem,46vw)] animate-[aparece_0.2s_ease-out]" style={{ top: top + 6, marginLeft: 'env(safe-area-inset-left)' }}>
       <div className="hud-panel hud-radio items-start gap-2 whitespace-normal px-2 py-1.5">
         <span className="hud-socket mt-0.5 grid h-7 w-7 shrink-0 place-items-center" aria-hidden>
           <Px i="raton" s={2} />
         </span>
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-[#7af0a0]">
+          <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-[#7af0a0]">
             <Px i="antena" s={1.5} className="hud-parpadeo" />
             {limpio(quien)}
           </div>
@@ -764,6 +764,23 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     return () => window.removeEventListener('keydown', onKey);
   }, [phase, quien, confirmado, elegir]);
 
+  // Vibration on the thumb keys, remembered on this device (on by default).
+  const [vibra, setVibra] = useState(() => {
+    try {
+      return localStorage.getItem('vuelo-vibrar') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const toggleVibra = (on: boolean) => {
+    setVibra(on);
+    try {
+      localStorage.setItem('vuelo-vibrar', on ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+    if (on) vibrar(20);
+  };
   // «Menos movimiento», remembered on this device.
   const [calma, setCalma] = useState(() => {
     // The system's «reduce motion» turns it on unless the player chose otherwise.
@@ -940,8 +957,35 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   };
   const fingers = useRef(new Map<number, 1 | -1>());
   const [turning, setTurning] = useState(0);
-  // The hint goes away once the player has turned a couple of times.
-  const [turns, setTurns] = useState(0);
+  /*
+   * First flight on a touch screen: three short steps (turn with both halves, fire a
+   * missile, drop flares), each one gone once it's done; then never again on this device.
+   * 0…2 = the step showing, 3 = done.
+   */
+  const [tuto, setTuto] = useState(() => {
+    try {
+      return localStorage.getItem('vuelo-tutorial') === '1' ? 3 : 0;
+    } catch {
+      return 3;
+    }
+  });
+  const tutoRef = useRef(tuto);
+  tutoRef.current = tuto;
+  const pasoTuto = useCallback((hecho: number) => {
+    if (tutoRef.current !== hecho) return;
+    const sig = hecho + 1;
+    tutoRef.current = sig;
+    setTuto(sig);
+    if (sig >= 3) {
+      try {
+        localStorage.setItem('vuelo-tutorial', '1');
+      } catch {
+        /* private mode */
+      }
+    }
+  }, []);
+  // Step 1 is done when both halves have been held a moment (one climbs, the other dives).
+  const giroTuto = useRef({ lado: 0, desde: 0, usados: new Set<number>() });
   const applyTurn = () => {
     let l = false, r = false;
     for (const side of fingers.current.values()) {
@@ -951,8 +995,74 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     const dir = l === r ? 0 : l ? 1 : -1;
     game.current?.steer(dir);
     setTurning(dir);
-    if (dir) setTurns((n) => n + 1);
+    const gt = giroTuto.current;
+    const now = performance.now();
+    if (gt.lado && now - gt.desde > 350) gt.usados.add(gt.lado);
+    gt.lado = dir;
+    gt.desde = now;
+    if (gt.usados.size === 2) pasoTuto(0);
   };
+  // Other touch schemes have their own steering hint: the tutorial starts at the weapons.
+  useEffect(() => {
+    if (control !== 'mitades') pasoTuto(0);
+  }, [control, pasoTuto]);
+  // The flares step can't wait for a missile forever.
+  useEffect(() => {
+    if (tuto !== 2 || phase !== 'play' || paused) return;
+    const id = window.setTimeout(() => pasoTuto(2), 15000);
+    return () => window.clearTimeout(id);
+  }, [tuto, phase, paused, pasoTuto]);
+  /** Ajustes: show the first-flight steps again. */
+  const repetirTuto = () => {
+    try {
+      localStorage.removeItem('vuelo-tutorial');
+    } catch {
+      /* private mode */
+    }
+    giroTuto.current = { lado: 0, desde: 0, usados: new Set<number>() };
+    // The turning step is only for «Pantalla dividida».
+    const desde = control === 'mitades' ? 0 : 1;
+    tutoRef.current = desde;
+    setTuto(desde);
+  };
+  // Once airborne; it steps aside for the missile alarm, which uses the same spot.
+  const tutoVisible = phase === 'play' && touchUi && !paused && !cine && tuto < 3 && !!hud && !hud.enTierra && !hud.resumen && !hud.warn;
+
+  // Phones: the thumb buttons' width along the right edge (the camera frames the plane in
+  // the rest), and the radar's slot in the HUD bar, measured and handed to the engine.
+  const botonesRef = useRef<HTMLDivElement>(null);
+  const radarRef = useRef<HTMLSpanElement>(null);
+  const [derechaBotones, setDerechaBotones] = useState(0);
+  const conBotones = phase === 'play' && touchUi && !paused;
+  useEffect(() => {
+    if (!conBotones) return;
+    const medir = () => {
+      const b = botonesRef.current?.getBoundingClientRect();
+      const px = b ? Math.max(0, window.innerWidth - b.left) : 0;
+      setDerechaBotones(px);
+      game.current?.setDerecha(px);
+      const r = radarRef.current?.getBoundingClientRect();
+      game.current?.setRadar(r ? { x: r.right, y: r.top } : null);
+    };
+    medir();
+    const ro = new ResizeObserver(medir);
+    if (botonesRef.current) ro.observe(botonesRef.current);
+    if (barraRef.current) ro.observe(barraRef.current);
+    window.addEventListener('resize', medir);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', medir);
+    };
+  }, [conBotones, movil, barraH]);
+  useEffect(() => {
+    if (movil) return;
+    game.current?.setRadar(null);
+  }, [movil]);
+  // A missile locking on: a double buzz, the same moment the flares key starts blinking.
+  const avisoMisil = phase === 'play' && !!hud?.warn && touchUi;
+  useEffect(() => {
+    if (avisoMisil) vibrar([30, 40, 30]);
+  }, [avisoMisil]);
   const onSkyDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (control === 'volante') return;
     if (control === 'tocar') {
@@ -1080,6 +1190,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         /* a pointer that already ended */
       }
       game.current?.touch({ [key]: true });
+      if (key === 'fire') pasoTuto(1);
+      else if (key === 'flare') pasoTuto(2);
     },
     onPointerUp: () => game.current?.touch({ [key]: false }),
     onPointerCancel: () => game.current?.touch({ [key]: false }),
@@ -1180,7 +1292,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                       color={hud.hp / hud.hpMax > 0.5 ? '#7af0a0' : hud.hp / hud.hpMax > 0.25 ? '#ffd84a' : '#ff5a6a'}
                       alerta={hud.hp / hud.hpMax <= 0.25}
                     />
-                    <span className="hud-lectura text-[0.8em] text-[#c8c0e0]">{hud.hp}/{hud.hpMax}</span>
+                    {!movil && <span className="hud-lectura text-[0.8em] text-[#c8c0e0]">{hud.hp}/{hud.hpMax}</span>}
                   </span>
                   {hud.mejoras.coraza > 0 && (
                     <>
@@ -1238,7 +1350,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     <Px i="montana" s={ic} />
                     <span className="hud-lectura">
                       {hud.altitude.toLocaleString('es-CL')}
-                      <small className="ml-0.5 text-[0.75em] text-[#c8c0e0]">m</small>
+                      <small className={`ml-0.5 text-[#c8c0e0] ${movil ? 'text-[1em]' : 'text-[0.75em]'}`}>m</small>
                     </span>
                   </span>
                   <span
@@ -1281,29 +1393,37 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     />
                     {hud.nitro === 'carga' && !movil && <span className="hud-lectura text-[0.75em] text-[#c8c0e0]">{Math.round(hud.nitroK * 100)}%</span>}
                   </span>
-                  <span className="hud-sep" />
-                  <span
-                    className="inline-flex items-center gap-1"
-                    title="Metralla: si la mantienes mucho se calienta y debe enfriarse"
-                    aria-label={hud.hot ? 'Metralla recalentada' : `Metralla: calor ${Math.round(hud.heat * 100)} %`}
-                  >
-                    <Px i="bala" s={ic} />
-                    <Segs
-                      n={hud.hot ? 6 : Math.ceil(hud.heat * 6)}
-                      max={6}
-                      ancho={movil ? 3 : 4}
-                      color={hud.hot ? '#ff5a6a' : (k: number) => (k < 3 ? '#7af0a0' : k < 5 ? '#ffd84a' : '#ff5a6a')}
-                      alerta={hud.hot}
-                    />
-                  </span>
+                  {/* Phones: the gun fires by itself and its key says «¡Calor!» when hot, so the heat bar gives its room to the radar. */}
+                  {!movil && (
+                    <>
+                      <span className="hud-sep" />
+                      <span
+                        className="inline-flex items-center gap-1"
+                        title="Metralla: si la mantienes mucho se calienta y debe enfriarse"
+                        aria-label={hud.hot ? 'Metralla recalentada' : `Metralla: calor ${Math.round(hud.heat * 100)} %`}
+                      >
+                        <Px i="bala" s={ic} />
+                        <Segs
+                          n={hud.hot ? 6 : Math.ceil(hud.heat * 6)}
+                          max={6}
+                          ancho={4}
+                          color={hud.hot ? '#ff5a6a' : (k: number) => (k < 3 ? '#7af0a0' : k < 5 ? '#ffd84a' : '#ff5a6a')}
+                          alerta={hud.hot}
+                        />
+                      </span>
+                    </>
+                  )}
                 </span>
               </>
             )
           )}
         </div>
-        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
+        <div className={`pointer-events-auto flex items-center justify-end gap-2 ${movil ? 'shrink-0 flex-nowrap' : 'flex-wrap'}`}>
+          {/* Phones: the radar is drawn in this slot (left of the pause key), so the HUD chips
+              never run under it and the thumb buttons get the whole right edge below. */}
+          {phase === 'play' && movil && <span ref={radarRef} aria-hidden className="pointer-events-none block h-7 w-[104px] shrink-0" />}
           {phase === 'play' && (
-            <button type="button" aria-label={paused ? 'Seguir' : 'Pausa'} title={paused ? 'Seguir (Esc)' : 'Pausa (Esc o P)'} onClick={togglePause} className={tecla}>
+            <button type="button" aria-label={paused ? 'Seguir' : 'Pausa'} title={paused ? 'Seguir (Esc)' : 'Pausa (Esc o P)'} onClick={togglePause} className={`${tecla} ${movil ? "relative after:absolute after:-inset-2 after:content-['']" : ''}`}>
               <Px i={paused ? 'play' : 'pausa'} s={ic} />
             </button>
           )}
@@ -1330,9 +1450,28 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       </div>
 
+      {/* First flight on a phone: one short step at a time, low and left of the thumb
+          buttons (the plane mostly flies in the upper half, where a card would hide it). */}
+      {tutoVisible && (
+        <div
+          className="pointer-events-none absolute left-0 z-10 flex justify-center px-4 bottom-[max(0.75rem,env(safe-area-inset-bottom))]"
+          style={{ right: derechaBotones }}
+        >
+          <div role="status" className="hud-panel max-w-[24rem] items-center gap-2 whitespace-normal px-2.5 py-1.5 text-xs font-black leading-snug">
+            <span className="hud-socket grid h-7 w-8 shrink-0 place-items-center text-[11px] text-[#ffd84a]">{tuto + 1}/3</span>
+            <span>
+              {tuto === 0
+                ? 'Mantén un lado de la pantalla para girar: «Sube» levanta la nariz, «Baja» la baja.'
+                : tuto === 1
+                  ? 'La metralla dispara sola. Toca Misil para lanzar uno.'
+                  : 'Si un misil te sigue, Bengalas parpadea: tócalo.'}
+            </span>
+          </div>
+        </div>
+      )}
       {/* Wave banner and missile alarm. */}
       {phase === 'play' && hud?.banner && (
-        <div className={`pointer-events-none absolute inset-x-0 z-10 text-center ${hud.boss ? '' : movil ? 'top-[16%]' : 'top-[22%]'}`} style={hud.boss ? { top: barraH + 52 } : undefined}>
+        <div className={`pointer-events-none absolute inset-x-0 z-10 text-center ${hud.boss ? '' : movil ? '' : 'top-[22%]'}`} style={hud.boss ? { top: barraH + 52 } : movil ? { top: barraH + 6 } : undefined}>
           <span className={`hud-panel hud-panel-crema max-w-[90vw] justify-center whitespace-normal font-black ${movil ? 'gap-1.5 px-3 py-1 text-sm' : 'gap-3 px-6 py-3 text-2xl md:text-3xl'}`}>
             {iconoDe(hud.banner) && <Px i={iconoDe(hud.banner)!} s={movil ? 2 : 4} />}
             <span>{limpio(hud.banner)}</span>
@@ -1340,23 +1479,30 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
       {phase === 'play' && zoneSign && !paused && (
-        <div className="pointer-events-none absolute inset-x-0 top-[14%] z-10 text-center">
-          <span className="hud-panel gap-2 px-5 py-2 text-lg font-black tracking-wide text-[#fff6d0]">
+        <div className={`pointer-events-none absolute inset-x-0 z-10 text-center ${movil ? '' : 'top-[14%]'}`} style={movil ? { top: barraH + 44 } : undefined}>
+          <span className={`hud-panel gap-2 font-black tracking-wide text-[#fff6d0] ${movil ? 'px-3 py-1 text-sm' : 'px-5 py-2 text-lg'}`}>
             <Px i="montana" s={2} />
             {limpio(zoneSign)}
           </span>
         </div>
       )}
+      {/* Phones: low, beside the blinking flares key it's about (the plane is usually mid-screen). */}
       {phase === 'play' && hud?.warn && !paused && (
-        <div className="pointer-events-none absolute inset-x-0 top-[38%] z-10 text-center">
+        <div
+          className={`pointer-events-none absolute z-10 text-center ${movil ? 'left-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))]' : 'inset-x-0 top-[38%]'}`}
+          style={movil ? { right: derechaBotones } : undefined}
+        >
           <span className="hud-panel hud-panel-roja hud-alerta-suave gap-2 px-4 py-1.5 text-sm font-black">
             <Px i="alerta" s={2} />
             ¡Misil! Gira fuerte o suelta bengalas
           </span>
         </div>
       )}
-      {phase === 'play' && hud?.pista && !hud.resumen && !paused && (
-        <div className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 ${hud.enTierra && touchUi ? 'top-[38%]' : 'bottom-28 [@media(max-height:500px)]:bottom-24'}`}>
+      {phase === 'play' && hud?.pista && !hud.resumen && !paused && !tutoVisible && (
+        <div
+          className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 ${hud.enTierra && touchUi ? '' : 'bottom-28 [@media(max-height:500px)]:bottom-24'}`}
+          style={hud.enTierra && touchUi ? { top: barraH + (hud.banner ? 48 : 6) } : undefined}
+        >
           <span className={`hud-panel gap-2 whitespace-normal px-3 py-1.5 text-center text-sm font-black ${touchUi ? 'max-w-[55%] text-xs' : ''}`}>
             <Px i="bombilla" s={2} />
             <span>{limpio(hud.pista)}</span>
@@ -1491,7 +1637,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         />
       )}
       {phase === 'play' && hud && hud.hielo > 0.25 && !paused && (
-        <div className="pointer-events-none absolute inset-x-0 top-[30%] z-20 flex justify-center px-4">
+        <div className={`pointer-events-none absolute inset-x-0 z-20 flex justify-center px-4 ${movil ? '' : 'top-[30%]'}`} style={movil ? { top: barraH + (hud.banner ? 48 : 6) } : undefined}>
           <span
             role={hud.congelado ? 'alert' : 'status'}
             className={`hud-panel hud-panel-hielo gap-2 whitespace-normal px-4 py-1.5 text-center text-sm font-black ${hud.congelado ? 'hud-alerta-suave' : ''}`}
@@ -1509,7 +1655,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
       {phase === 'play' && hud?.stall && !paused && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 text-center">
+        <div className={`pointer-events-none absolute bottom-20 z-10 text-center ${movil ? 'left-0' : 'inset-x-0'}`} style={movil ? { right: derechaBotones } : undefined}>
           <span className="hud-panel hud-panel-amarilla hud-alerta-suave gap-2 px-4 py-1.5 text-sm font-black">
             <Px i="alerta" s={2} />
             ¡Vas muy lento! Apunta hacia abajo y acelera
@@ -1702,6 +1848,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 </span>
                 <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
               </label>
+              {touchUi && (
+                <label className="hud-ajuste">
+                  <span>
+                    Vibración
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">Un toque corto al apretar y al acercarse un misil</small>
+                  </span>
+                  <input type="checkbox" role="switch" checked={vibra} onChange={(e) => toggleVibra(e.target.checked)} className="hud-switch" />
+                </label>
+              )}
               <div className="mt-2">
                 <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-[#c8c0e0]">Control táctil {touchUi ? '' : '(en teléfonos y tablets)'}</div>
                 <div role="radiogroup" aria-label="Control táctil" className="grid grid-cols-2 gap-1.5">
@@ -1715,10 +1870,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                       className={`${TECLA} !h-auto flex-col items-start px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
                     >
                       <span className="text-xs font-black">{c.nombre}</span>
-                      <span className="text-[10px] font-bold opacity-75">{c.texto}</span>
+                      <span className="text-[11px] font-bold opacity-75">{c.texto}</span>
                     </button>
                   ))}
                 </div>
+                {touchUi && (
+                  <button type="button" onClick={repetirTuto} disabled={tuto === 0} className={`${TECLA} mt-1.5 px-3 text-xs disabled:opacity-50`}>
+                    {tuto === 0 ? 'El tutorial saldrá en el próximo vuelo' : 'Repetir el tutorial del primer vuelo'}
+                  </button>
+                )}
               </div>
             </div>
             <button type="button" onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${TECLA} self-start px-3`}>
@@ -1936,6 +2096,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
                 </label>
                 {touchUi && (
+                  <label className="hud-ajuste">
+                    <span>
+                      Vibración
+                      <small className="block text-[11px] font-bold text-[#c8c0e0]">Un toque corto al apretar y al acercarse un misil</small>
+                    </span>
+                    <input type="checkbox" role="switch" checked={vibra} onChange={(e) => toggleVibra(e.target.checked)} className="hud-switch" />
+                  </label>
+                )}
+                {touchUi && (
                   <div className="mt-2">
                     <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-[#c8c0e0]">Control táctil</div>
                     <div role="radiogroup" aria-label="Control táctil" className="grid grid-cols-2 gap-1.5">
@@ -1949,10 +2118,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                           className={`${TECLA} !h-auto flex-col items-start px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
                         >
                           <span className="text-xs font-black">{c.nombre}</span>
-                          <span className="text-[10px] font-bold opacity-75">{c.texto}</span>
+                          <span className="text-[11px] font-bold opacity-75">{c.texto}</span>
                         </button>
                       ))}
                     </div>
+                    <button type="button" onClick={repetirTuto} disabled={tuto === 0} className={`${TECLA} mt-1.5 px-3 text-xs disabled:opacity-50`}>
+                      {tuto === 0 ? 'El tutorial saldrá en el próximo vuelo' : 'Repetir el tutorial del primer vuelo'}
+                    </button>
                   </div>
                 )}
                 {touchUi && hud && (
@@ -2009,45 +2181,36 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             )}
             {control === 'mitades' && (
               <>
-            {/* Two invisible halves: hold one to turn. Only a soft glow on that edge, and a small arrow, show it. */}
-            <div className="pointer-events-none relative h-full w-1/2">
-              <div className={`absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white/25 to-transparent transition-opacity duration-150 ${turning === 1 ? 'opacity-100' : 'opacity-0'}`} />
-              <span aria-hidden className={`hud-giro absolute left-2 top-1/2 -translate-y-1/2 transition-opacity ${turning === 1 ? 'opacity-90' : 'opacity-30'}`}>
-                <Px i="giro" s={3} style={{ transform: 'scaleX(-1)' }} />
-              </span>
-            </div>
-            <div className="pointer-events-none relative h-full w-1/2">
-              <div className={`absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-white/25 to-transparent transition-opacity duration-150 ${turning === -1 ? 'opacity-100' : 'opacity-0'}`} />
-              <span aria-hidden className={`hud-giro absolute right-2 top-[38%] -translate-y-1/2 transition-opacity ${turning === -1 ? 'opacity-90' : 'opacity-30'}`}>
-                <Px i="giro" s={3} />
-              </span>
-            </div>
-            {turns < 3 && !hud?.enTierra && (
-              <span className="hud-panel pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 gap-1.5 px-3 py-1 text-center text-[11px] font-black opacity-85">
-                Mantén un lado para girar · la metralla dispara sola · doble toque en acelerar:
-                <Px i="llama" s={1.5} />
-                nitro
-              </span>
-            )}
+                {/* Two invisible halves: hold one to turn. A soft glow on that edge, and at each
+                    edge the rotation arrow with what it does right now: «Sube» or «Baja» depends
+                    on which way the plane flies, so the label swaps when it turns around. */}
+                <div className="pointer-events-none relative h-full w-1/2">
+                  <div className={`absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white/25 to-transparent transition-opacity duration-150 ${turning === 1 ? 'opacity-100' : 'opacity-0'}`} />
+                  <GuiaLado lado={1} nariz={hud?.nariz ?? 1} on={turning === 1} resalta={tuto === 0} />
+                </div>
+                <div className="pointer-events-none relative h-full w-1/2">
+                  <div className={`absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-white/25 to-transparent transition-opacity duration-150 ${turning === -1 ? 'opacity-100' : 'opacity-0'}`} />
+                  <GuiaLado lado={-1} nariz={hud?.nariz ?? 1} on={turning === -1} resalta={tuto === 0} margen={derechaBotones} />
+                </div>
               </>
             )}
           </div>
           {/* Right thumb: two vertical columns along the right edge — the big flares and
               missile on the outside, machine gun, bomb and throttle on the inside (nuke on top when there is one). */}
-          <div className="absolute bottom-4 right-3 z-10 flex items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] [@media(max-height:420px)]:bottom-2 [@media(max-height:420px)]:gap-2">
-            <div className="flex flex-col items-center gap-2.5 [@media(max-height:420px)]:gap-1.5">
+          <div ref={botonesRef} className="absolute bottom-4 right-3 z-10 flex items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] [@media(max-height:420px)]:bottom-2 [@media(max-height:420px)]:gap-2">
+            <div className="flex flex-col items-center gap-2.5 [@media(min-height:421px)_and_(max-height:500px)]:gap-1.5 [@media(max-height:420px)]:gap-1">
               {!!hud?.nukes && (
-                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>
+                <TouchButton label={`Nuclear ×${hud.nukes}`} corto="Nuclear" {...hold('nuke')}>
                   <Px i="nuclear" s={3} />
                 </TouchButton>
               )}
-              <TouchButton label={hud?.hot ? 'Metralla: recalentada' : 'Metralla'} active={!!hud?.hot} {...hold('gun')}>
+              <TouchButton label={hud?.hot ? 'Metralla: recalentada' : 'Metralla'} corto={hud?.hot ? '¡Calor!' : 'Balas'} active={!!hud?.hot} {...hold('gun')}>
                 <Px i="bala" s={3} />
               </TouchButton>
               <TouchButton label="Bomba" {...hold('bomb')}>
                 <Px i="bomba" s={3} />
               </TouchButton>
-              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar (doble toque: nitro)' : 'Acelerar'} corto={hud?.nitro === 'listo' ? 'Gas ×2' : 'Gas'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
                 {hud?.nitro === 'activo' ? <Px i="llama" s={3} /> : (
                   <span className="relative inline-flex">
                     <Px i="acelerar" s={3} />
@@ -2055,15 +2218,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   </span>
                 )}
               </TouchButton>
-              <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>
+              <TouchButton label="Frenar" corto="Freno" active={hud?.throttle === -1} {...throttle(-1)}>
                 <Px i="frenar" s={3} />
               </TouchButton>
             </div>
             <div className="flex flex-col items-center gap-2.5 [@media(max-height:420px)]:gap-1.5">
-              <TouchButton label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} big alerta={!!hud?.warn} {...hold('flare')}>
+              <TouchButton label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} corto="Bengalas" big alerta={!!hud?.warn} guia={tutoVisible && tuto === 2} {...hold('flare')}>
                 <Px i="bengala" s={4} />
               </TouchButton>
-              <TouchButton label="Misil" big {...hold('fire')}>
+              <TouchButton label="Misil" big guia={tutoVisible && tuto === 1} {...hold('fire')}>
                 <Px i="misil" s={4} />
               </TouchButton>
             </div>
@@ -2074,27 +2237,82 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   );
 }
 
-function TouchButton({ label, big, active, alerta, children, ...rest }: { label: string; big?: boolean; active?: boolean; alerta?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+/**
+ * «Pantalla dividida»: the hint at the edge of each half. The left half (lado 1) turns the
+ * nose counterclockwise, so it climbs while the plane flies right (nariz 1) and dives while
+ * it flies left; the right half the opposite. Near vertical only the rotation arrow shows.
+ */
+function GuiaLado({ lado, nariz, on, resalta, margen = 0 }: { lado: 1 | -1; nariz: number; on: boolean; resalta: boolean; margen?: number }) {
+  const sube = nariz === 0 ? null : lado * nariz > 0;
+  return (
+    <span
+      aria-hidden
+      className={`absolute top-1/2 flex -translate-y-1/2 flex-col items-center gap-1 transition-opacity ${on ? 'opacity-95' : resalta ? 'hud-guia-pulso opacity-85' : 'opacity-45'}`}
+      style={lado === 1 ? { left: 'max(0.5rem, env(safe-area-inset-left))' } : { right: margen + 10 }}
+    >
+      <span className="hud-giro">
+        <Px i="giro" s={3} style={lado === 1 ? { transform: 'scaleX(-1)' } : undefined} />
+      </span>
+      {sube !== null && (
+        <span className={`hud-panel gap-1 px-1.5 py-0.5 text-[11px] font-black leading-none ${sube ? 'text-[#7af0a0]' : 'text-[#ffd84a]'}`}>
+          <span className={`hud-flechita ${sube ? '' : 'rotate-180'}`} />
+          {sube ? 'Sube' : 'Baja'}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A short buzz under the thumb, unless the player turned vibration off in Ajustes. */
+function vibrar(ms: number | number[]) {
+  try {
+    if (localStorage.getItem('vuelo-vibrar') === '0') return;
+  } catch {
+    /* private mode: vibrate anyway */
+  }
+  try {
+    navigator.vibrate?.(ms);
+  } catch {
+    /* no vibration */
+  }
+}
+
+/**
+ * A thumb key: the icon, and under it a short word (`corto`, 11 px so it reads on a phone;
+ * the full `label` is what screen readers hear). It sinks while held (tracked by hand: with
+ * pointer capture `:active` isn't reliable on every phone), and `guia` rings it while the
+ * first-flight tutorial points at it.
+ */
+function TouchButton({ label, corto, big, active, alerta, guia, children, ...rest }: { label: string; corto?: string; big?: boolean; active?: boolean; alerta?: boolean; guia?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const [down, setDown] = useState(false);
   return (
     <button
       type="button"
       aria-label={label}
-      className={`hud-touch flex flex-col items-center justify-center ${active ? 'hud-touch-on' : ''} ${alerta ? 'hud-touch-alerta' : ''} ${
-        big ? 'h-20 w-20 [@media(max-height:420px)]:h-[4.5rem] [@media(max-height:420px)]:w-[4.5rem]' : 'h-14 w-14 [@media(max-height:420px)]:h-12 [@media(max-height:420px)]:w-12'
+      className={`hud-touch flex flex-col items-center justify-center ${active ? 'hud-touch-on' : ''} ${down ? 'hud-touch-down' : ''} ${alerta ? 'hud-touch-alerta' : ''} ${guia ? 'hud-touch-guia' : ''} ${
+        big
+          ? 'h-20 w-20 [@media(max-height:420px)]:h-[4.5rem] [@media(max-height:420px)]:w-[4.5rem]'
+          : // Short (landscape phone) screens: 48 px, then the 44 px minimum, so the column clears the radar even with the nuke key.
+            'h-14 w-14 [@media(min-height:421px)_and_(max-height:500px)]:h-12 [@media(min-height:421px)_and_(max-height:500px)]:w-12 [@media(max-height:420px)]:h-11 [@media(max-height:420px)]:w-11'
       }`}
       {...rest}
       onPointerDown={(e) => {
-        // A short buzz under the thumb.
-        try {
-          navigator.vibrate?.(big ? 18 : 10);
-        } catch {
-          /* no vibration */
-        }
+        setDown(true);
+        vibrar(big ? 18 : 10);
         rest.onPointerDown?.(e);
       }}
+      onPointerUp={(e) => {
+        setDown(false);
+        rest.onPointerUp?.(e);
+      }}
+      onPointerCancel={(e) => {
+        setDown(false);
+        rest.onPointerCancel?.(e);
+      }}
+      onLostPointerCapture={() => setDown(false)}
     >
       <span aria-hidden className="grid min-h-6 place-items-center leading-none">{children}</span>
-      <span aria-hidden className="mt-1 text-[8px] font-black leading-none text-[#3a2a6a]">{label}</span>
+      <span aria-hidden className="mt-0.5 whitespace-nowrap text-[11px] font-black leading-none tracking-tight text-[#3a2a6a]">{corto ?? label}</span>
     </button>
   );
 }
