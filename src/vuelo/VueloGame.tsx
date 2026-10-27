@@ -44,9 +44,13 @@ const ELENCO = [
 /** CC0 sound recordings (no attribution required; thanked anyway). */
 const SONIDOS_CC0 = ['modusmogulus', 'craigsmith', 'qubodup', 'unfa', 'josecruz98', 'Alxy', 'Anthousai', 'Rocotilos'];
 
-const CHIP = 'inline-flex h-8 [@media(min-height:500px)]:h-10 items-center gap-1 rounded-full bg-[#fff8e7]/95 px-2.5 [@media(min-height:500px)]:px-3 text-xs [@media(min-height:500px)]:text-sm whitespace-nowrap font-black text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] tabular-nums';
-/** The phone HUD: the same chips, small, in one tight row so the sky stays clear. */
-const CHIP_M = 'inline-flex h-6 items-center gap-0.5 rounded-full bg-[#fff8e7]/90 px-1.5 text-[10px] whitespace-nowrap font-black text-[#6b4f3a] shadow-[0_2px_0_rgba(91,70,54,0.2)] tabular-nums';
+/** A HUD instrument plate (night-purple, bevelled, pixel-notched corners): see .hud-panel in index.css. */
+const CHIP = 'hud-panel h-8 [@media(min-height:500px)]:h-9 gap-1.5 px-2 text-sm';
+/** The phone HUD: the same plates, small, in one tight row so the sky stays clear. */
+const CHIP_M = 'hud-panel h-6 gap-1 px-1.5 text-[11px]';
+/** The HUD's cockpit switches: cream key caps on the same pixel frame. */
+const TECLA = 'hud-key h-8 [@media(min-height:500px)]:h-9 text-sm';
+const TECLA_M = 'hud-key h-7 text-xs';
 const BTN = 'whitespace-nowrap rounded-full bg-[#fff8e7]/95 px-3 md:px-4 h-8 [@media(min-height:500px)]:h-10 text-xs md:text-sm font-extrabold text-[#6b4f3a] shadow-[0_3px_0_rgba(91,70,54,0.2)] hover:-translate-y-0.5 transition-transform';
 const GO = 'rounded-full bg-[#7ccf8a] px-6 py-3 text-base font-black text-[#1d4a26] shadow-[0_4px_0_#4f9c5d] hover:-translate-y-0.5 active:translate-y-0.5 active:shadow-[0_1px_0_#4f9c5d] transition-transform';
 
@@ -58,57 +62,120 @@ function readMuted() {
   }
 }
 
-function Pips({ n, max, on, off }: { n: number; max: number; on: string; off: string }) {
+/*
+ * The HUD's pixel icons: drawn as tiny SVGs (one rect per run of pixels, crisp
+ * edges), so they stay sharp at any size and match the game instead of the
+ * system's emoji. Each letter is a colour; '.' is transparent.
+ */
+const PX_COL: Record<string, string> = {
+  k: '#22183f', w: '#fff8e7', y: '#ffd84a', o: '#f0a45d', O: '#e8742a', r: '#ff5a6a', p: '#ff8ab8',
+  g: '#7af0a0', b: '#7ad8ff', B: '#4a7ae0', s: '#c8c0e0', m: '#ddd2ec',
+};
+const PX = {
+  avion: ['yy.........', 'yyy..bb....', 'yyyyyyyyyy.', '.oooooooyyw', '....ooo....'],
+  pez: ['..ooo...o', '.ooooo.oo', 'okoooooo.', '.ooooo.oo', '..ooo...o'],
+  estrella: ['...y...', '..yyy..', 'yyyyyyy', '.yyyyy.', '..yyy..', '.yy.yy.', 'yy...yy'],
+  raton: ['mm...mm', 'mmm.mmm', '.mmmmm.', '.mkmkm.', '..mpm..', '...m...'],
+  ola: ['.bb..bb.', 'b..bb..b', '........', '.bb..bb.', 'b..bb..b'],
+  montana: ['...w.....', '..wws....', '.sssss.s.', '.ssssssss', 'sssssssss'],
+  manga: ['srrww....', 'srrwwrrw.', 'srrwwrrww', 'srrwwrr..', 's........', 's........'],
+  misil: ['.s........', '.sswwwwwr.', 'oswwwwwwrr', '.sswwwwwr.', '.s........'],
+  bomba: ['s...mmm..', 'ss.mmrmm.', 'sssmmrmmm', 'ss.mmrmm.', 's...mmm..'],
+  bengala: ['...y...', '.y.o.y.', '..ooo..', 'yowwwoy', '..ooo..', '.y.o.y.', '...y...'],
+  llama: ['...o...', '..oo...', '..oyo.o', '.oyyoo.', '.oyyyo.', 'oyywyyo', 'oyywwyo', '.oyyyo.'],
+  bala: ['.y...y.', 'yyy.yyy', 'ooo.ooo', 'ooo.ooo', 'ooo.ooo'],
+  nuclear: ['kk...kk', 'kkk.kkk', '.kk.kk.', '...k...', '.......', '..kkk..', '.kkkkk.'],
+  corazon: ['.pp.pp.', 'ppppppp', 'ppppppp', '.ppppp.', '..ppp..', '...p...'],
+  diana: ['..rrr..', '.r...r.', 'r..r..r', 'r.rrr.r', 'r..r..r', '.r...r.', '..rrr..'],
+  medalla: ['.b...b.', '..b.b..', '...b...', '..yyy..', '.yyoyy.', '.yoooy.', '.yyoyy.', '..yyy..'],
+  pausa: ['kk..kk', 'kk..kk', 'kk..kk', 'kk..kk', 'kk..kk', 'kk..kk', 'kk..kk'],
+  play: ['k.....', 'kkk...', 'kkkkk.', 'kkkkkk', 'kkkkk.', 'kkk...', 'k.....'],
+  parlante: ['...k.....', '..kk..k..', 'kkkk...k.', 'kkkk.k.k.', 'kkkk...k.', '..kk..k..', '...k.....'],
+  mudo: ['...k.....', '..kk.....', 'kkkk.r.r.', 'kkkk..r..', 'kkkk.r.r.', '..kk.....', '...k.....'],
+  sol: ['...O...', '.O...O.', '..yyy..', 'O.yyy.O', '..yyy..', '.O...O.', '...O...'],
+  luna: ['..BBB..', '.BB....', 'BB.....', 'BB.....', 'BB.....', '.BB...B', '..BBBB.'],
+  tarde: ['.......', '..ooo..', '.oyyyo.', 'oyyyyyo', 'BBBBBBB', '.......', 'B.BBB.B'],
+  auto: ['y....BB', '.yy.B..', 'yyy.B..', '.yy.BB.', 'y....BB', '.......', 'kkkkkkk'],
+  lupaMas: ['..kkk...', '.k...k..', 'k..k..k.', 'k.kkk.k.', 'k..k..k.', '.k...kk.', '..kkk.kk', '......kk'],
+  lupaMenos: ['..kkk...', '.k...k..', 'k.....k.', 'k.kkk.k.', 'k.....k.', '.k...kk.', '..kkk.kk', '......kk'],
+  casa: ['...k...', '..kkk..', '.kkkkk.', 'kkkkkkk', '.kkkkk.', '.kk.kk.', '.kk.kk.'],
+  hangar: ['..kkk..', '.k...k.', 'k.kkk.k', 'k.k.k.k', 'k.k.k.k', 'kkkkkkk'],
+} as const;
+type PxIcon = keyof typeof PX;
+/** Each icon's runs of same-coloured pixels, worked out once. */
+const pxRuns = new Map<PxIcon, [number, number, number, string][]>();
+function runsOf(i: PxIcon) {
+  let out = pxRuns.get(i);
+  if (!out) {
+    out = [];
+    PX[i].forEach((row, y) => {
+      let x = 0;
+      while (x < row.length) {
+        const ch = row[x];
+        let n = 1;
+        while (row[x + n] === ch) n++;
+        if (ch !== '.') out!.push([x, y, n, ch]);
+        x += n;
+      }
+    });
+    pxRuns.set(i, out);
+  }
+  return out;
+}
+/** A pixel icon, `s` screen px per art pixel. `tinta` paints every pixel one colour (empty sockets). */
+function Px({ i, s = 2, tinta, className, style }: { i: PxIcon; s?: number; tinta?: string; className?: string; style?: React.CSSProperties }) {
+  const rows = PX[i];
+  const w = rows[0].length;
+  const h = rows.length;
   return (
-    <span aria-hidden className="tracking-tight">
-      {Array.from({ length: max }, (_, i) => (i < n ? on : off)).join('')}
-    </span>
+    <svg aria-hidden width={w * s} height={h * s} viewBox={`0 0 ${w} ${h}`} shapeRendering="crispEdges" className={`shrink-0 ${className ?? ''}`} style={style}>
+      {runsOf(i).map(([x, y, n, ch]) => (
+        <rect key={`${x}.${y}`} x={x} y={y} width={n} height={1} fill={tinta ?? PX_COL[ch]} />
+      ))}
+    </svg>
   );
 }
 
-/*
- * Tiny pixel-art icons for the weapons chip, so it matches the game instead of
- * the system's emoji. Each letter is a colour; '.' is transparent.
- */
-const ICON_COL: Record<string, string> = { k: '#3a2a6a', w: '#fff8e7', r: '#ff4a5a', o: '#ff9a3c', y: '#ffd84a', g: '#8a8aa8', b: '#2a2438' };
-const ICONS = {
-  misil: ['.k.......', 'krkkkkkk.', 'orgggggwk', 'krkkkkkk.', '.k.......'],
-  bomba: ['..bbbb.k.', '.bbwbbbk.', 'bbbbbbbkk', '.bbbbbbk.', '..bbbb.k.'],
-  bengala: ['....o....', '..oyyyo..', 'ooywwwyoo', '..oyyyo..', '....o....'],
-} as const;
-type Icono = keyof typeof ICONS;
-const iconUrls = new Map<Icono, string>();
-function iconUrl(n: Icono) {
-  let u = iconUrls.get(n);
-  if (!u) {
-    const rows = ICONS[n];
-    const c = document.createElement('canvas');
-    c.width = rows[0].length;
-    c.height = rows.length;
-    const g = c.getContext('2d')!;
-    rows.forEach((row, y) =>
-      [...row].forEach((ch, x) => {
-        if (ch === '.') return;
-        g.fillStyle = ICON_COL[ch];
-        g.fillRect(x, y, 1, 1);
-      }),
-    );
-    u = c.toDataURL();
-    iconUrls.set(n, u);
-  }
-  return u;
-}
-
-/** One pixel icon per slot: full ones bright, empty ones faded. */
-function Slots({ icon, n, max }: { icon: Icono; n: number; max: number }) {
+/** One socket per slot: loaded ones lit, spent ones a dark silhouette. */
+function Sockets({ i, n, max, s }: { i: PxIcon; n: number; max: number; s?: number }) {
   return (
-    <span aria-hidden className="inline-flex items-center">
-      {Array.from({ length: max }, (_, i) => (
-        <img key={i} src={iconUrl(icon)} alt="" width={18} height={10} className={i < n ? '' : 'opacity-25 grayscale'} style={{ imageRendering: 'pixelated' }} />
+    <span aria-hidden className="inline-flex items-center gap-px">
+      {Array.from({ length: max }, (_, k) => (
+        <Px key={k} i={i} s={s} tinta={k < n ? undefined : '#55467f'} />
       ))}
     </span>
   );
 }
+
+/** A segmented instrument bar: `n` lit of `max`, in `color`; `alerta` blinks the lit ones. */
+function Segs({ n, max, color, alerta, ancho = 6 }: { n: number; max: number; color: string | ((k: number) => string); alerta?: boolean; ancho?: number }) {
+  return (
+    <span aria-hidden className="hud-segs">
+      {Array.from({ length: max }, (_, k) => (
+        <i key={k} className={k < n && alerta ? 'hud-parpadeo' : ''} style={{ width: ancho, background: k < n ? (typeof color === 'string' ? color : color(k)) : undefined }} />
+      ))}
+    </span>
+  );
+}
+
+/** The score as a mechanical counter: each digit in its own drum window, idle leading zeros dimmed. */
+function Contador({ v, cifras = 5 }: { v: number; cifras?: number }) {
+  const t = String(Math.max(0, Math.floor(v)));
+  const pad = Math.max(0, cifras - t.length);
+  return (
+    <span aria-hidden className="hud-odo">
+      {Array.from({ length: pad }, (_, k) => (
+        <b key={`z${k}`} className="hud-odo-cero">0</b>
+      ))}
+      {[...t].map((d, k) => (
+        <b key={k}>{d}</b>
+      ))}
+    </span>
+  );
+}
+
+const CIELO_NOMBRE: Record<string, string> = { auto: 'automático', dia: 'día', tarde: 'tarde', noche: 'noche' };
+const CIELO_ICONO: Record<string, PxIcon> = { auto: 'auto', dia: 'sol', tarde: 'tarde', noche: 'luna' };
 
 /** A big pilot portrait, animated at the pose's own pace (pixel art scaled with CSS). */
 function Retrato({ m, pose, className }: { m: ModeloAvion; pose: Pose; className?: string }) {
@@ -404,6 +471,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   // Phones get their own layout: compact HUD, small translucent buttons, extras in the pause menu.
   const movil = touchUi && (phase === 'play' || phase === 'over');
   const chip = movil ? CHIP_M : CHIP;
+  // The HUD's switches (square cream key caps) and its icon scale.
+  const tecla = movil ? `${TECLA_M} w-7` : `${TECLA} w-8 [@media(min-height:500px)]:w-9`;
+  const ic = movil ? 1.5 : 2;
   const [verticalOk, setVerticalOk] = useState(false);
 
   useEffect(() => {
@@ -768,86 +838,150 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         <canvas ref={canvasRef} className="block" aria-label="Escuadrón Dui: juego de aviones" />
       </div>
 
-      {/* Top bar: score on the left, the way out on the right. */}
+      {/* Top bar: the instrument panel on the left, the cockpit switches on the right. */}
       <div ref={barraRef} className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-        <div className="pointer-events-auto flex flex-wrap items-center gap-1.5">
+        <div className={`pointer-events-auto flex flex-wrap items-center ${movil ? 'gap-1.5' : 'gap-2'}`}>
           {phase === 'intro' || phase === 'titulo' || phase === 'creditos' ? null : phase === 'menu' ? (
-            <span className={`${chip} px-4`}>✈️ Escuadrón Dui</span>
+            <span className={`${chip} px-3`}>
+              <Px i="avion" s={ic} />
+              <span className="hud-lectura text-[#fff8e7]">Escuadrón Dui</span>
+            </span>
           ) : (
             hud && (
               <>
-                <span className={chip} title="Aviones que te quedan" aria-label={`Aviones: ${hud.lives}`}>
-                  ✈️ ×{hud.lives}
-                </span>
-                <span
-                  className={`${chip} ${hud.lost.length ? 'ring-2 ring-[#ff4a5a]' : ''}`}
-                  title={hud.lost.length ? `Dañado: ${hud.lost.join(', ')}` : 'Avión intacto'}
-                  aria-label={`Blindaje: ${hud.hp} de ${hud.hpMax}${hud.lost.length ? `. Perdiste ${hud.lost.join(', ')}` : ''}`}
-                >
-                  <Pips n={hud.hp} max={hud.hpMax} on="🛡️" off="💥" />
-                  <span className="ml-1 tabular-nums text-[10px] opacity-70">{hud.hp}/{hud.hpMax}</span>
-                </span>
-                <span className={`${chip} ${hud.stolen ? 'animate-pulse ring-4 ring-[#ff4a5a]' : ''}`} title="Pescado en la despensa" aria-label={`Despensa: ${hud.meta} de ${hud.metaMax}`}>
-                  <Pips n={hud.meta} max={hud.metaMax} on="🐟" off="🦴" />
-                </span>
-                <span className={chip}>⭐ {hud.score}</span>
-                {hud.mejoras.coraza > 0 && (
-                  <span className={`${chip} text-[#c8507a]`} title="Coraza de la mejora «Salud»: cada una absorbe un golpe" aria-label={`Coraza: ${hud.mejoras.coraza}`}>
-                    ❤️ ×{hud.mejoras.coraza}
+                {/* Airframe: planes left, the hull's segments, and the «Salud» armour. */}
+                <span className={`${chip} ${hud.lost.length ? 'hud-danado' : ''}`}>
+                  <span className="inline-flex items-center gap-1" title="Aviones que te quedan" aria-label={`Aviones: ${hud.lives}`}>
+                    <Px i="avion" s={ic} />
+                    <span className="hud-lectura">×{hud.lives}</span>
                   </span>
-                )}
+                  <span className="hud-sep" />
+                  <span
+                    className="inline-flex items-center gap-1"
+                    title={hud.lost.length ? `Dañado: ${hud.lost.join(', ')}` : 'Avión intacto'}
+                    aria-label={`Blindaje: ${hud.hp} de ${hud.hpMax}${hud.lost.length ? `. Perdiste ${hud.lost.join(', ')}` : ''}`}
+                  >
+                    <Segs
+                      n={hud.hp}
+                      max={hud.hpMax}
+                      ancho={movil ? 5 : 7}
+                      color={hud.hp / hud.hpMax > 0.5 ? '#7af0a0' : hud.hp / hud.hpMax > 0.25 ? '#ffd84a' : '#ff5a6a'}
+                      alerta={hud.hp / hud.hpMax <= 0.25}
+                    />
+                    <span className="hud-lectura text-[0.8em] text-[#c8c0e0]">{hud.hp}/{hud.hpMax}</span>
+                  </span>
+                  {hud.mejoras.coraza > 0 && (
+                    <>
+                      <span className="hud-sep" />
+                      <span className="inline-flex items-center gap-1" title="Coraza de la mejora «Salud»: cada una absorbe un golpe" aria-label={`Coraza: ${hud.mejoras.coraza}`}>
+                        <Px i="corazon" s={ic} />
+                        <span className="hud-lectura text-[#ff8ab8]">×{hud.mejoras.coraza}</span>
+                      </span>
+                    </>
+                  )}
+                </span>
+                <span className={`${chip} ${hud.stolen ? 'hud-alerta' : ''}`} title="Pescado en la despensa" aria-label={`Despensa: ${hud.meta} de ${hud.metaMax}`}>
+                  <Sockets i="pez" n={hud.meta} max={hud.metaMax} s={ic} />
+                </span>
+                <span className={`${chip} hud-panel-crema`} title="Puntos" aria-label={`Puntos: ${hud.score}`}>
+                  <Px i="estrella" s={ic} />
+                  <Contador v={hud.score} />
+                </span>
                 {hud.mision && !hud.resumen && !movil && (
                   <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-black shadow ${
-                      hud.mision.hecha ? 'bg-[#c8f0c8] text-[#2f6a3a]' : hud.mision.fallida ? 'bg-[#ead6b3]/80 text-[#a08060] line-through' : 'bg-[#fff8e7]/90 text-[#6b4f3a]'
-                    }`}
+                    className={`hud-panel min-h-8 max-w-[22rem] gap-1.5 whitespace-normal px-2 py-1 text-xs ${hud.mision.hecha ? 'hud-panel-ok' : hud.mision.fallida ? 'opacity-70' : ''}`}
+                    aria-label={`Misión${hud.mision.hecha ? ' cumplida' : hud.mision.fallida ? ' fallida' : ''}: ${hud.mision.texto}${hud.mision.meta > 1 && !hud.mision.hecha ? `, ${hud.mision.prog} de ${hud.mision.meta}` : ''}`}
                   >
-                    {hud.mision.hecha ? '🏅' : '🎯'} {hud.mision.texto}
-                    {hud.mision.meta > 1 && !hud.mision.hecha ? ` (${hud.mision.prog}/${hud.mision.meta})` : ''}
+                    <Px i={hud.mision.hecha ? 'medalla' : 'diana'} s={ic} />
+                    <span className={`font-black leading-tight ${hud.mision.fallida ? 'line-through' : ''}`}>{hud.mision.texto}</span>
+                    {hud.mision.meta > 1 && !hud.mision.hecha && <span className="hud-lectura text-[#ffd84a]">{hud.mision.prog}/{hud.mision.meta}</span>}
                   </span>
                 )}
                 {hud.nukes > 0 && (
-                  <span className={`${chip} bg-[#f4ffc0] text-[#4a5a1a]`} title="Bomba nuclear: tecla N o botón ☢️">
-                    ☢️ ×{hud.nukes}
+                  <span className={`${chip} hud-panel-lima`} title="Bomba nuclear: tecla N o el botón nuclear" aria-label={`Bombas nucleares: ${hud.nukes}`}>
+                    <Px i="nuclear" s={ic} />
+                    <span className="hud-lectura">×{hud.nukes}</span>
                   </span>
                 )}
                 {hud.boost && (
-                  <span className={`${chip} animate-pulse bg-[#ffe0f0] text-[#c8507a]`} title="Mejora especial de un avión derribado">
-                    ⭐ {hud.boost} · {hud.boostT} s
+                  <span className={`${chip} hud-panel-rosa`} title="Mejora especial de un avión derribado" aria-label={`Mejora ${hud.boost}: ${hud.boostT} segundos`}>
+                    <Px i="estrella" s={ic} className="hud-parpadeo" />
+                    <span className="font-black">{hud.boost}</span>
+                    <span className="hud-lectura">{hud.boostT}s</span>
                   </span>
                 )}
-                <span className={chip}>🌊 {hud.wave} · 🐭 {hud.left}</span>
-                <span className={chip} title="Altura">⛰️ {hud.altitude.toLocaleString('es-CL')} m</span>
-                <span className={`${chip} max-[899px]:hidden`} title="Viento: empuja las bombas y el humo" aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}>
-                  🌬️ {hud.wind < 0 ? '◀'.repeat(Math.min(3, Math.ceil(-hud.wind / 4))) : hud.wind > 0 ? '▶'.repeat(Math.min(3, Math.ceil(hud.wind / 4))) : '·'}
+                <span className={chip} aria-label={`Oleada ${hud.wave}, quedan ${hud.left} ratones`}>
+                  <span className="inline-flex items-center gap-1" title="Oleada">
+                    <Px i="ola" s={ic} />
+                    <span className="hud-lectura">{hud.wave}</span>
+                  </span>
+                  <span className="hud-sep" />
+                  <span className="inline-flex items-center gap-1" title="Ratones que quedan">
+                    <Px i="raton" s={ic} />
+                    <span className="hud-lectura">{hud.left}</span>
+                  </span>
                 </span>
+                <span className={chip}>
+                  <span className="inline-flex items-center gap-1" title="Altura" aria-label={`Altura: ${hud.altitude.toLocaleString('es-CL')} metros`}>
+                    <Px i="montana" s={ic} />
+                    <span className="hud-lectura">
+                      {hud.altitude.toLocaleString('es-CL')}
+                      <small className="ml-0.5 text-[0.75em] text-[#c8c0e0]">m</small>
+                    </span>
+                  </span>
+                  <span
+                    className="inline-flex items-center gap-1 max-[899px]:hidden"
+                    title="Viento: empuja las bombas y el humo"
+                    aria-label={`Viento ${Math.abs(hud.wind)} hacia la ${hud.wind < 0 ? 'izquierda' : 'derecha'}`}
+                  >
+                    <span className="hud-sep" />
+                    <Px i="manga" s={ic} style={hud.wind < 0 ? { transform: 'scaleX(-1)' } : undefined} />
+                    <span className="hud-viento" aria-hidden>
+                      {[0, 1, 2].map((k) => (
+                        <i key={k} className={k < Math.min(3, Math.ceil(Math.abs(hud.wind) / 4)) ? 'on' : ''} style={hud.wind < 0 ? { transform: 'scaleX(-1)' } : undefined} />
+                      ))}
+                    </span>
+                  </span>
+                </span>
+                {/* The weapons rack: one socket per hardpoint, then nitro and the gun's heat. */}
                 <span
                   className={chip}
                   title="Armamento: atrapa los globos de los enemigos para ganar más puestos"
                   aria-label={`Misiles ${hud.ammo} de ${hud.rack}, bombas ${hud.bombs} de ${hud.bombMax}, bengalas ${hud.flares} de ${hud.flareMax}`}
                 >
-                  <Slots icon="misil" n={hud.ammo} max={hud.rack} />
-                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
-                  <Slots icon="bomba" n={hud.bombs} max={hud.bombMax} />
-                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
-                  <Slots icon="bengala" n={hud.flares} max={hud.flareMax} />
-                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
+                  <Sockets i="misil" n={hud.ammo} max={hud.rack} s={ic} />
+                  <span className="hud-sep" />
+                  <Sockets i="bomba" n={hud.bombs} max={hud.bombMax} s={ic} />
+                  <span className="hud-sep" />
+                  <Sockets i="bengala" n={hud.flares} max={hud.flareMax} s={ic} />
+                  <span className="hud-sep" />
                   <span
+                    className="inline-flex items-center gap-1"
                     title="Super nitro: aprieta acelerar dos veces seguidas"
-                    className={`rounded-full px-1.5 text-[10px] font-black ${
-                      hud.nitro === 'activo' ? 'animate-pulse bg-[#7ad8ff] text-[#1a3a6a]' : hud.nitro === 'listo' ? 'bg-[#ffe3a3] text-[#e8742a]' : 'bg-[#ead6b3] text-[#a08060]'
-                    }`}
+                    aria-label={`Super nitro: ${hud.nitro === 'activo' ? 'encendido' : hud.nitro === 'listo' ? 'listo' : `cargando, ${Math.round(hud.nitroK * 100)} %`}`}
                   >
-                    🔥{hud.nitro === 'carga' ? ` ${Math.round(hud.nitroK * 100)}%` : ''}
+                    <Px i="llama" s={ic} className={hud.nitro === 'activo' ? 'hud-parpadeo' : hud.nitro === 'carga' ? 'opacity-50' : ''} />
+                    <Segs
+                      n={hud.nitro === 'carga' ? Math.floor(hud.nitroK * 5) : 5}
+                      max={5}
+                      ancho={movil ? 3 : 4}
+                      color={hud.nitro === 'activo' ? '#7ad8ff' : hud.nitro === 'listo' ? '#ffd84a' : '#f0a45d'}
+                    />
+                    {hud.nitro === 'carga' && !movil && <span className="hud-lectura text-[0.75em] text-[#c8c0e0]">{Math.round(hud.nitroK * 100)}%</span>}
                   </span>
-                  <span className="mx-0.5 h-4 w-px bg-[#ead6b3]" />
+                  <span className="hud-sep" />
                   <span
-                    className="relative h-2.5 w-8 overflow-hidden rounded-full bg-[#ead6b3]"
+                    className="inline-flex items-center gap-1"
                     title="Metralla: si la mantienes mucho se calienta y debe enfriarse"
+                    aria-label={hud.hot ? 'Metralla recalentada' : `Metralla: calor ${Math.round(hud.heat * 100)} %`}
                   >
-                    <span
-                      className={`absolute inset-y-0 left-0 ${hud.hot ? 'animate-pulse bg-[#ff4a5a]' : hud.heat > 0.7 ? 'bg-[#ff9a3c]' : 'bg-[#7ccf8a]'}`}
-                      style={{ width: `${Math.round((hud.hot ? 1 : hud.heat) * 100)}%` }}
+                    <Px i="bala" s={ic} />
+                    <Segs
+                      n={hud.hot ? 6 : Math.ceil(hud.heat * 6)}
+                      max={6}
+                      ancho={movil ? 3 : 4}
+                      color={hud.hot ? '#ff5a6a' : (k: number) => (k < 3 ? '#7af0a0' : k < 5 ? '#ffd84a' : '#ff5a6a')}
+                      alerta={hud.hot}
                     />
                   </span>
                 </span>
@@ -855,37 +989,31 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             )
           )}
         </div>
-        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-1.5">
+        <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
           {phase === 'play' && (
-            <button type="button" aria-label={paused ? 'Seguir' : 'Pausa'} onClick={togglePause} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
-              {paused ? '▶️' : '⏸️'}
+            <button type="button" aria-label={paused ? 'Seguir' : 'Pausa'} title={paused ? 'Seguir (Esc)' : 'Pausa (Esc o P)'} onClick={togglePause} className={tecla}>
+              <Px i={paused ? 'play' : 'pausa'} s={ic} />
             </button>
           )}
           {phase === 'play' && hud && !movil && (
-            <button
-              type="button"
-              aria-label={`Cielo: ${({ auto: 'automático', dia: 'día', tarde: 'tarde', noche: 'noche' } as Record<string, string>)[hud.sky]}. Cambiar`}
-              title="Cambiar el cielo"
-              onClick={() => game.current?.cycleSky()}
-              className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}
-            >
-              {({ auto: '🌄', dia: '☀️', tarde: '🌅', noche: '🌙' } as Record<string, string>)[hud.sky]}
+            <button type="button" aria-label={`Cielo: ${CIELO_NOMBRE[hud.sky]}. Cambiar`} title="Cambiar el cielo" onClick={() => game.current?.cycleSky()} className={tecla}>
+              <Px i={CIELO_ICONO[hud.sky] ?? 'auto'} s={ic} />
             </button>
           )}
           {phase === 'play' && hud && hud.zoom[0] > 1 && !movil && (
-            <button type="button" aria-label={hud.zoom[1] === hud.zoom[0] - 1 ? 'Volver a acercar' : 'Alejar la cámara'} title="Zoom (Z)" onClick={() => game.current?.zoom()} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
-              {hud.zoom[1] ? '🔎' : '🔍'}
+            <button type="button" aria-label={hud.zoom[1] === hud.zoom[0] - 1 ? 'Volver a acercar' : 'Alejar la cámara'} title="Zoom (Z)" onClick={() => game.current?.zoom()} className={tecla}>
+              <Px i={hud.zoom[1] ? 'lupaMas' : 'lupaMenos'} s={ic} />
             </button>
           )}
           {!movil && (
             <>
-              <button type="button" aria-label={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className={`${BTN} w-8 [@media(min-height:500px)]:w-10 px-0 md:px-0`}>
-                {muted ? '🔇' : '🔊'}
+              <button type="button" aria-label={muted ? 'Activar sonido' : 'Silenciar'} title={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className={tecla}>
+                <Px i={muted ? 'mudo' : 'parlante'} s={ic} />
               </button>
-              <button type="button" onClick={() => navigate('/')} className={`${BTN} hidden lg:block`}>
-                🏝️ Isla
+              <button type="button" onClick={() => navigate('/')} className={`${TECLA} px-3 hidden lg:inline-flex`}>
+                Isla
               </button>
-              <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} bg-[#ffe3a3] ring-2 ring-[#f0a45d]/60`}>
+              <button type="button" onClick={() => navigate('/clasico')} className={`${TECLA} hud-key-amarilla px-3`}>
                 <span className="lg:hidden">Clásica</span>
                 <span className="hidden lg:inline">Versión clásica</span>
               </button>
@@ -1318,30 +1446,69 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
 
       {phase === 'play' && paused && (
-        <div role="dialog" aria-modal="true" aria-label="Pausa" className="absolute inset-0 z-30 grid place-items-center bg-[#3a2a6a]/30 p-4">
-          <div className="rounded-[2rem] bg-[#fff8e7]/95 p-6 text-center shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
-            <h2 className="text-3xl font-black">Pausa</h2>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <button type="button" autoFocus onClick={togglePause} className={GO}>Seguir</button>
-              <button type="button" onClick={toHangar} className={`${BTN} h-12`}>Salir al hangar</button>
-              <button type="button" onClick={toMenu} className={`${BTN} h-12`}>Menú principal</button>
-            </div>
-            {touchUi && hud && (
-              <div className="mt-3 flex flex-wrap justify-center gap-2">
-                <button type="button" onClick={() => game.current?.cycleSky()} className={`${BTN} h-10`}>
-                  {({ auto: '🌄', dia: '☀️', tarde: '🌅', noche: '🌙' } as Record<string, string>)[hud.sky]} Cielo
-                </button>
-                {hud.zoom[0] > 1 && (
-                  <button type="button" onClick={() => game.current?.zoom()} className={`${BTN} h-10`}>🔍 Zoom</button>
-                )}
-                <button type="button" onClick={toggleMute} className={`${BTN} h-10`}>{muted ? '🔇 Sonido' : '🔊 Sonido'}</button>
-                <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} h-10`}>Versión clásica</button>
+        <div role="dialog" aria-modal="true" aria-labelledby="pausa-titulo" className="hud-pausa-fondo absolute inset-0 z-30 grid place-items-center overflow-auto p-4 [@media(max-height:500px)]:p-2">
+          <div className="hud-pausa w-full max-w-md [@media(max-height:500px)]:max-w-2xl">
+            <div className="grid gap-4 [@media(max-height:500px)]:grid-cols-[1.1fr_1fr] [@media(max-height:500px)]:gap-3">
+              <div>
+                <div className="flex items-end justify-between gap-3">
+                  <h2 id="pausa-titulo" className="hud-pausa-titulo pb-1.5 text-4xl leading-none [@media(max-height:500px)]:text-3xl">Pausa</h2>
+                  {hud && (
+                    <p className="hud-lectura pb-1 text-right text-xs text-[#c8c0e0]">
+                      Oleada {hud.wave}, {hud.score.toLocaleString('es-CL')} puntos
+                    </p>
+                  )}
+                </div>
+                <div className="mt-4 grid gap-2 [@media(max-height:500px)]:mt-3">
+                  <button type="button" autoFocus onClick={togglePause} className="hud-key hud-key-amarilla hud-opcion">
+                    <Px i="play" s={2} />
+                    <span>Seguir volando</span>
+                    {!touchUi && <kbd className="hud-tecla-hint">Esc</kbd>}
+                  </button>
+                  <button type="button" onClick={toHangar} className="hud-key hud-opcion">
+                    <Px i="hangar" s={2} />
+                    <span>Salir al hangar</span>
+                  </button>
+                  <button type="button" onClick={toMenu} className="hud-key hud-opcion">
+                    <Px i="casa" s={2} />
+                    <span>Menú principal</span>
+                  </button>
+                </div>
               </div>
-            )}
-            <label className="mt-4 flex cursor-pointer items-center justify-center gap-2 text-sm font-black text-[#6b4f3a]">
-              <input type="checkbox" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="h-5 w-5 accent-[#f0a45d]" />
-              Menos movimiento (sin sacudidas ni destellos fuertes)
-            </label>
+              <div className="hud-ajustes">
+                <h3 className="hud-stencil">Ajustes</h3>
+                <label className="hud-ajuste">
+                  <span className="flex items-center gap-2">
+                    <Px i={muted ? 'mudo' : 'parlante'} s={2} tinta="#fff8e7" />
+                    Sonido
+                  </span>
+                  <input type="checkbox" role="switch" checked={!muted} onChange={toggleMute} className="hud-switch" />
+                </label>
+                <label className="hud-ajuste">
+                  <span>
+                    Menos movimiento
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">Sin sacudidas ni destellos fuertes</small>
+                  </span>
+                  <input type="checkbox" role="switch" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="hud-switch" />
+                </label>
+                {touchUi && hud && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" aria-label={`Cielo: ${CIELO_NOMBRE[hud.sky]}. Cambiar`} onClick={() => game.current?.cycleSky()} className={`${TECLA} gap-1.5 px-2.5`}>
+                      <Px i={CIELO_ICONO[hud.sky] ?? 'auto'} s={2} />
+                      Cielo: {CIELO_NOMBRE[hud.sky]}
+                    </button>
+                    {hud.zoom[0] > 1 && (
+                      <button type="button" onClick={() => game.current?.zoom()} className={`${TECLA} gap-1.5 px-2.5`}>
+                        <Px i={hud.zoom[1] ? 'lupaMas' : 'lupaMenos'} s={2} />
+                        Zoom
+                      </button>
+                    )}
+                    <button type="button" onClick={() => navigate('/clasico')} className={`${TECLA} px-2.5`}>
+                      Versión clásica
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
