@@ -71,7 +71,7 @@ export const ESTELA_ENEMIGA: EstiloEstela = {
 const INTERVALO = 0.045; // s entre muestras de humo
 const MAX_PUNTOS = 60;
 const VIDA_EXTRA = 1.3; // la estela dura un poco más que su `largo` nominal
-const R_MIN = 2.5; // radio base mínimo del humo (las estelas finas se perdían)
+const R_MIN = 1.5; // radio base mínimo del humo: finas, pero que no se pierdan
 const MAX_CHISPAS = 12;
 /** Cuánto se exagera la ondulación del humo respecto de la amplitud de cada estilo. */
 const ONDULA_MUL = 2.6;
@@ -398,7 +398,8 @@ export function dibujarEstela(
   t: number,
 ): void {
   const p = e.p, pal = e.pal;
-  const rb = Math.min(MAX_R - 2, Math.max(R_MIN, e.estilo.ancho * 0.62));
+  // Estelas finas: el humo nace delgado (los colores y la ondulación siguen igual de vivos).
+  const rb = Math.min(MAX_R - 2, Math.max(R_MIN, e.estilo.ancho * 0.38));
   const amp = e.estilo.ondula ?? 0;
   const alfa0 = g.globalAlpha;
   const W = g.canvas.width + MARGEN, H = g.canvas.height + MARGEN;
@@ -513,7 +514,7 @@ export function dibujarEstela(
       fX[j] = q[0];
       fY[j] = q[1];
     }
-    const r0 = Math.max(3, rb * 0.72);
+    const r0 = Math.max(2, rb * 0.72);
     for (let pasada = 0; pasada < 2; pasada++) {
       let rec = 0;
       for (let j = 1; j < fn && rec < largoMax; j++) {

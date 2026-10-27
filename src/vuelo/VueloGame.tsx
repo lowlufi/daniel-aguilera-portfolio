@@ -321,6 +321,32 @@ const TIPO_AVION: Record<Avion, string> = {
   tomcat: 'Caza de portaaviones', a10: 'Ataque a tierra', spitfire: 'Caza clásico de hélice',
 };
 
+/** The mice's radio: a little transmission card, the line typing itself out. */
+function Radio({ quien, texto, top }: { quien: string; texto: string; top: number }) {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    setN(0);
+    const id = window.setInterval(() => setN((k) => (k >= texto.length ? k : k + 1)), 28);
+    return () => window.clearInterval(id);
+  }, [texto]);
+  return (
+    <div role="status" aria-live="polite" className="pointer-events-none absolute left-3 z-20 max-w-[min(22rem,70vw)] animate-[aparece_0.2s_ease-out]" style={{ top: top + 6 }}>
+      <div className="flex items-start gap-2 rounded-xl bg-[#1a1438]/85 px-2.5 py-1.5 text-white shadow-[0_3px_0_rgba(0,0,0,0.25)] ring-2 ring-[#7af0a0]/60">
+        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#2a2458] text-base ring-1 ring-[#7af0a0]/50" aria-hidden>🐭</span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-[#7af0a0]">
+            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#7af0a0]" aria-hidden />📻 {quien}
+          </div>
+          <div className="text-xs font-bold leading-snug">
+            {texto.slice(0, n)}
+            <span className="sr-only">{texto.slice(n)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Stars({ n }: { n: number }) {
   return (
     <span role="img" aria-label={`${n} de 5`} className="tracking-tight text-[#f0a45d]">
@@ -1013,6 +1039,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           </span>
         </div>
       )}
+      {phase === 'play' && hud?.radio && !paused && !hud.resumen && <Radio key={hud.radio.texto + hud.radio.quien} quien={hud.radio.quien} texto={hud.radio.texto} top={barraH + (hud.boss ? 48 : 0)} />}
       {phase === 'play' && hud?.boss && (
         <div className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4" style={{ top: barraH }}>
           <div className="w-full max-w-sm rounded-2xl bg-[#fff8e7]/95 px-3 py-1.5 shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-2 ring-[#f08a94]">

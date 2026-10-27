@@ -383,7 +383,8 @@ type Nombre =
   | 'mision' | 'uf' | 'vida' | 'nuke-recoge' | 'bumeran' | 'pista' | 'oleada'
   | 'vulcan' | 'canon30' | 'laser' | 'orbe' | 'crucero' | 'fosforo' | 'gas' | 'plasma-bomba' | 'chaff' | 'holograma' | 'trampa'
   | 'hangar-sel' | 'hangar-bloq' | 'desbloqueo'
-  | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae';
+  | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae'
+  | 'sin-municion' | 'recargada' | 'nitro-no' | 'nitro-listo' | 'bengala-vacia' | 'radio' | 'eyeccion' | 'paracaidas';
 
 const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
@@ -527,6 +528,14 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   'zepelin-cruje2': (sr) => hornoZepelinCruje(sr, true),
   'zepelin-flak': hornoZepelinFlak,
   'zepelin-cae': hornoZepelinCae,
+  'sin-municion': hornoSinMunicion,
+  recargada: hornoRecargada,
+  'nitro-no': hornoNitroNo,
+  'nitro-listo': hornoNitroListo,
+  'bengala-vacia': hornoBengalaVacia,
+  radio: hornoRadio,
+  eyeccion: hornoEyeccion,
+  paracaidas: hornoParacaidas,
 };
 
 function pieza(sr: number, vidrio: boolean) {
@@ -1945,6 +1954,170 @@ function hornoZepelinCae(sr: number) {
 }
 
 /** Racimos ya horneados por número de petardos (dos variantes de cada uno). */
+/* ── hornos de avisos de armas, nitro, radio y eyección ── */
+
+/** Gatillo en vacío: «clack» seco de percutor y el rebote del cerrojo (sin disparo). */
+function hornoSinMunicion(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.16));
+  const hp = new Bq(sr, 'hp', 1800, 0.7);
+  const bp = new Bq(sr, 'bp', 1650, 6);
+  const bp2 = new Bq(sr, 'bp', 1150, 5);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    // Dos golpes: el gatillo (agudo, seco) y el percutor que cae sobre nada (más grave).
+    const u = t - 0.032;
+    const c1 = hp.run(ruido()) * Math.exp(-t / 0.0012);
+    const c2 = u > 0 ? ruido() * Math.exp(-u / 0.0018) * Math.min(1, u / 0.0003) : 0;
+    a[i] = Math.tanh(c1 * 0.9 + bp.run(c1) * 4 + bp2.run(c2) * 5 + c2 * 0.35);
+  }
+  ping(sr, a, 0.033, 2650, 0.012, 0.08);
+  return normaliza(a, 0.8);
+}
+
+/** Arma lista: «chk» del cargador y un «ti-tin» corto que sube una cuarta. */
+function hornoRecargada(sr: number) {
+  const n = Math.floor(sr * 0.42);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  const chk = new Float32Array(n);
+  const hp = new Bq(sr, 'hp', 2200, 0.7);
+  for (let i = 0; i < Math.floor(sr * 0.03); i++) chk[i] = hp.run(ruido()) * Math.exp(-i / sr / 0.003) * 0.6;
+  ping(sr, chk, 0.002, 2100, 0.01, 0.12);
+  for (let i = 0; i < n; i++) {
+    L[i] += chk[i];
+    R[i] += chk[i];
+  }
+  nota(sr, L, R, 0.04, 1046.5, 0.05, 0.36, -0.08);
+  nota(sr, L, R, 0.1, 1396.9, 0.1, 0.4, 0.08);
+  return normalizaEst([L, R], 0.7);
+}
+
+/** Nitro aún cargando: «bonk» blando y grave que cae (sin trémolo ni vibrato). */
+function hornoNitroNo(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.22));
+  const lp = new Bq(sr, 'lp', 900, 0.7);
+  let ph = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    ph += (190 - 60 * Math.min(1, t / 0.16)) / sr;
+    const s = Math.sin(TAU * ph) + 0.35 * Math.sin(TAU * 2 * ph) + 0.12 * Math.sin(TAU * 3 * ph);
+    const env = Math.min(1, t / 0.004) * Math.exp(-t / 0.07);
+    a[i] = lp.run(s * env);
+  }
+  // Un soplo de tobera ahogada debajo: «quiere y no puede».
+  const bp = new Bq(sr, 'bp', 500, 1.2);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    a[i] += bp.run(ruido()) * Math.min(1, t / 0.01) * Math.exp(-t / 0.05) * 0.25;
+  }
+  return normaliza(a, 0.7);
+}
+
+/** Nitro listo: siseo que sube abriéndose en estéreo y tres destellos FM en ascenso. */
+function hornoNitroListo(sr: number) {
+  const n = Math.floor(sr * 1.1);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  const bpL = new Bq(sr, 'bp', 600, 3);
+  const bpR = new Bq(sr, 'bp', 650, 3);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    if ((i & 31) === 0) {
+      const f = 600 * Math.pow(8, Math.min(1, t / 0.45));
+      bpL.f(f);
+      bpR.f(f * 1.06);
+    }
+    const env = Math.pow(Math.min(1, t / 0.4), 2) * (t < 0.45 ? 1 : Math.exp(-(t - 0.45) / 0.09));
+    L[i] += bpL.run(ruido()) * env * 0.5;
+    R[i] += bpR.run(ruido()) * env * 0.5;
+  }
+  [1174.66, 1567.98, 2349.3].forEach((f, k) => campana(sr, L, R, 0.3 + k * 0.07, f, 0.22 + k * 0.06, 0.2, -0.4 + k * 0.4, 0.9, 2));
+  nota(sr, L, R, 0.44, 587.33, 0.25, 0.14, 0);
+  return normalizaEst([L, R], 0.75);
+}
+
+/** Lanzabengalas vacío: «tic» hueco de plástico y un resorte que no empuja nada. */
+function hornoBengalaVacia(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.14));
+  const bp = new Bq(sr, 'bp', 900, 4);
+  const hp = new Bq(sr, 'hp', 2500, 0.7);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const c = ruido() * Math.exp(-t / 0.0015);
+    a[i] = bp.run(c) * 3 + hp.run(c) * 0.4;
+  }
+  ping(sr, a, 0.018, 3400, 0.018, 0.05);
+  ping(sr, a, 0.02, 4700, 0.012, 0.03);
+  return normaliza(a, 0.7);
+}
+
+/** Radio: chasquido de squelch, un soplo de estática de banda estrecha y el corte. */
+function hornoRadio(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.2));
+  const bp = new Bq(sr, 'bp', 1800, 1.1);
+  const hp = new Bq(sr, 'hp', 600, 0.7);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const clic = ruido() * Math.exp(-t / 0.0008) * 1.5;
+    const est = t > 0.004 && t < 0.15 ? Math.min(1, (t - 0.004) / 0.006) * (t < 0.13 ? 1 : 1 - (t - 0.13) / 0.02) : 0;
+    // Estática áspera: ruido recortado (no un tono), con crujidos irregulares.
+    const cruje = Math.random() < 0.004 ? ruido() * 3 : 0;
+    a[i] = hp.run(clic + bp.run(Math.sign(ruido()) * 0.6 + cruje) * est * 0.8);
+  }
+  // Clic de cierre.
+  const i1 = Math.floor(sr * 0.15);
+  for (let k = 0; k < sr * 0.004 && i1 + k < a.length; k++) a[i1 + k] += ruido() * Math.exp(-k / sr / 0.0006) * 0.8;
+  return normaliza(a, 0.6);
+}
+
+/** Eyección: la cúpula salta («pop» + cristal que vibra) y el cohete del asiento sopla y se aleja. */
+function hornoEyeccion(sr: number) {
+  const n = Math.floor(sr * 1.6);
+  const L = new Float32Array(n);
+  const R = new Float32Array(n);
+  const pop = new Float32Array(n);
+  golpe(sr, pop, 0, 260, 90, 0.04, 1, 2600);
+  ping(sr, pop, 0.006, 1900, 0.05, 0.12);
+  ping(sr, pop, 0.009, 3100, 0.03, 0.08);
+  const bp = new Bq(sr, 'bp', 400, 1.3);
+  const rug = new Bq(sr, 'lp', 300, 0.7);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const u = t - 0.09;
+    let y = pop[i];
+    if (u > 0) {
+      if ((i & 31) === 0) bp.f(400 * Math.pow(6, Math.min(1, u / 0.35)) / (1 + Math.max(0, u - 0.4) * 1.5));
+      const env = Math.min(1, u / 0.03) * (u < 0.3 ? 1 : Math.exp(-(u - 0.3) / 0.28));
+      y += (bp.run(ruido()) * 1.1 + rug.run(ruido()) * 0.9) * env;
+      // El asiento sube y se va: el soplo cruza de abajo-centro hacia un lado.
+      aEstereo(L, R, i, y, clamp(u * 0.5, 0, 0.35));
+    } else aEstereo(L, R, i, y, 0);
+  }
+  return normalizaEst([L, R], 0.85);
+}
+
+/** Paracaídas: «fwump» de tela que se llena de aire y un aleteo irregular que se calma. */
+function hornoParacaidas(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.9));
+  const lp = new Bq(sr, 'lp', 350, 0.9);
+  const bp = new Bq(sr, 'bp', 900, 1.2);
+  let mod = 0, meta = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    if ((i & 31) === 0) lp.f(250 + 500 * Math.exp(-t / 0.06));
+    // Golpe de aire: entra en ~25 ms y se va en ~0.15 s.
+    const fw = Math.min(1, t / 0.025) * Math.exp(-t / 0.13);
+    // Aleteo de la tela: deriva aleatoria lenta (no periódica), cada vez más suave.
+    if ((i & 255) === 0) meta = Math.random();
+    mod += (meta - mod) * 0.004;
+    const ale = t > 0.08 ? Math.exp(-(t - 0.08) / 0.25) * (0.3 + 0.7 * mod) : 0;
+    a[i] = Math.tanh(lp.run(ruido()) * fw * 3.2) + bp.run(ruido()) * ale * 0.35;
+  }
+  // Las cuerdas se tensan: un golpecito sordo al final del «fwump».
+  golpe(sr, a, 0.06, 120, 70, 0.03, 0.35, 500);
+  return normaliza(a, 0.8);
+}
+
 const hornosRacimo = new Map<string, AudioBuffer>();
 function bufRacimo(m: Mezcla, n: number) {
   const clave = `${n}-${Math.random() < 0.5 ? 0 : 1}`;
@@ -3371,6 +3544,134 @@ export function fijacionFuerte(nivel: number): void {
   actualizaAlarma(m, t);
 }
 
+/* ────────────────────────── avisos de armas, nitro y cabina ────────────────────────── */
+
+/** Intenta lanzar misil o bomba con el soporte vacío o recargando: «clack» seco (máx. ~4/s). */
+export function sinMunicion(pan = 0): void {
+  evento('sin-municion', 0.25, (m, t) => unaVez(m, 'sin-municion', 0.3 * cede(), rand(0.95, 1.05), t, lado(pan) * 0.5, LIMITE + 4));
+}
+
+const TONO_RECARGA = { misil: 1, bomba: 0.84, bengala: 1.19 } as const;
+/** Un arma volvió a estar lista: «chk ti-tin» corto, tono distinto por arma (máx. ~3/s por arma). */
+export function armaRecargada(tipo: 'misil' | 'bomba' | 'bengala'): void {
+  const r = TONO_RECARGA[tipo] ?? 1;
+  evento('recargada-' + tipo, 0.33, (m, t) => unaVez(m, 'recargada', 0.2 * cede(), r, t, 0, LIMITE + 4));
+}
+
+/** Doble toque de nitro mientras se recarga: «bonk» blando de negación (máx. ~2/s). */
+export function nitroNoListo(): void {
+  evento('nitro-no', 0.5, (m, t) => unaVez(m, 'nitro-no', 0.26 * cede(), 1, t, 0, LIMITE + 4));
+}
+
+/** El nitro terminó de recargarse: siseo que sube con destellos (~1 s). */
+export function nitroListo(): void {
+  evento('nitro-listo', 1, (m, t) => unaVez(m, 'nitro-listo', 0.24 * cede(), 1, t, 0, LIMITE + 4));
+}
+
+/** Lanzabengalas vacío: «tic» hueco (máx. ~4/s). */
+export function bengalaVacia(): void {
+  evento('bengala-vacia', 0.25, (m, t) => unaVez(m, 'bengala-vacia', 0.26 * cede(), rand(0.96, 1.04), t, 0, LIMITE + 4));
+}
+
+/** Empieza una transmisión de radio: squelch + estática cortita (máx. ~1/s). */
+export function radioRaton(): void {
+  evento('radio', 1, (m, t) => unaVez(m, 'radio', 0.16, rand(0.97, 1.03), t, 0, LIMITE + 4));
+}
+
+/** Eyección: la cúpula salta y el cohete del asiento sopla (~1.5 s). */
+export function eyeccion(pan = 0): void {
+  evento('eyeccion', 1, (m, t) => unaVez(m, 'eyeccion', 0.42 * cede(), rand(0.97, 1.03), t, lado(pan) * 0.6, LIMITE + 6));
+}
+
+/** Se abre un paracaídas: «fwump» de tela (~0.8 s). */
+export function paracaidas(pan = 0): void {
+  evento('paracaidas', 1, (m, t) => unaVez(m, 'paracaidas', 0.32 * cede(), rand(0.95, 1.05), t, lado(pan) * 0.6, LIMITE + 4));
+}
+
+/*
+ * Receptor de alerta radar (RWR): un misil nos persigue. Bips de un tono
+ * propio (más grave y algo más áspero que la fijación y que la mira) que se
+ * aceleran y suben con la cercanía; muy cerca, tono continuo. Sin vibrato:
+ * el tono solo se desliza con `cerca`.
+ */
+type Rwr = { v: Voz; osc: OscillatorNode; g: GainNode; prox: number; continuo: boolean; quieto: number; activo: boolean };
+let rwr: Rwr | null = null;
+
+/**
+ * Llamar CADA CUADRO con 0…1 (0 = nadie nos persigue, 1 = impacto inminente).
+ * En 0 se calla en ~50 ms; si se deja de llamar, los bips agendados se
+ * acaban en ≤ 0.13 s y el tono continuo se corta solo en ≤ 0.2 s.
+ */
+export function alertaMisil(cerca: number): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const c = clamp(num(cerca), 0, 1);
+  if (c < 0.02) {
+    if (rwr) {
+      if (rwr.activo) {
+        sujeta(rwr.g.gain, t);
+        rwr.g.gain.setTargetAtTime(0, t, 0.012);
+        rwr.activo = rwr.continuo = false;
+        rwr.quieto = t;
+      } else if (t - rwr.quieto > 2) {
+        apagar(rwr.v, rwr.g, t);
+        rwr = null;
+      }
+    }
+    return;
+  }
+  if (!rwr) {
+    const osc = m.ctx.createOscillator();
+    osc.setPeriodicWave(m.ctx.createPeriodicWave(new Float32Array(6), new Float32Array([0, 1, 0.4, 0.2, 0.1, 0.05])));
+    osc.frequency.value = 820;
+    const lp = m.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2400;
+    lp.Q.value = 0.5;
+    const g = ganancia(m, 0);
+    const v = voz(osc, [lp, g], m.bus, false);
+    osc.start(t);
+    rwr = { v, osc, g, prox: t + 0.01, continuo: false, quieto: t, activo: false };
+  }
+  const f = rwr;
+  if (!f.activo) {
+    f.activo = true;
+    f.prox = t + 0.01;
+  }
+  // Si ya suena la alarma fuerte, el RWR da un paso atrás (no compiten).
+  const vol = (0.07 + 0.05 * c) * (1 - 0.5 * nivelFuerte);
+  hacia(f.osc.frequency, 820 + 420 * c, t, 0.03);
+  if (c >= 0.93) {
+    // Tono continuo que se sostiene mientras lo sigan llamando.
+    sujeta(f.g.gain, t);
+    if (!f.continuo) f.g.gain.linearRampToValueAtTime(vol, t + 0.01);
+    else f.g.gain.setValueAtTime(vol, t + 0.01);
+    f.g.gain.setValueAtTime(vol, t + 0.15);
+    f.g.gain.linearRampToValueAtTime(0, t + 0.19);
+    f.continuo = true;
+    f.prox = t + 0.2;
+    return;
+  }
+  if (f.continuo) {
+    sujeta(f.g.gain, t);
+    f.g.gain.setTargetAtTime(0, t, 0.01);
+    f.continuo = false;
+    f.prox = t + 0.06;
+  }
+  const intervalo = 0.07 + 0.55 * Math.pow(1 - c, 1.4);
+  const largo = Math.min(0.09, intervalo * 0.5);
+  if (f.prox < t) f.prox = t + 0.01;
+  while (f.prox < t + 0.13) {
+    const b = f.prox;
+    f.g.gain.setValueAtTime(0, b);
+    f.g.gain.linearRampToValueAtTime(vol, b + 0.004);
+    f.g.gain.setValueAtTime(vol, b + largo - 0.005);
+    f.g.gain.linearRampToValueAtTime(0, b + largo);
+    f.prox += intervalo;
+  }
+}
+
 /* ────────────────────────── apagar ────────────────────────── */
 
 function apagarContinuos(t: number, tc: number) {
@@ -3404,6 +3705,8 @@ function apagarContinuos(t: number, tc: number) {
   mira = null;
   if (nitroV) apagar(nitroV.v, nitroV.g, t, tc);
   nitroV = null;
+  if (rwr) apagar(rwr.v, rwr.g, t, tc);
+  rwr = null;
   if (mz) {
     sujeta(mz.explo.gain, t);
     mz.explo.gain.setTargetAtTime(1, t, 0.05);
@@ -3455,6 +3758,8 @@ function reiniciar() {
   if (mira) liberar(mira.v);
   mira = null;
   nitroV = null;
+  if (rwr) liberar(rwr.v);
+  rwr = null;
   balas.length = balasEnemigas.length = chapuzones.length = 0;
   tirosVulcan.length = tirosCanon.length = tirosLaser.length = 0;
   hornosRacimo.clear();

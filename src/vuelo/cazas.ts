@@ -114,7 +114,7 @@ let ids = 0;
 
 /** How many fighters a wave brings (none before wave 3). */
 export function cuantos(oleada: number): number {
-  return oleada < 3 ? 0 : Math.min(4, 1 + Math.floor((oleada - 3) / 2));
+  return oleada < 3 ? 0 : Math.min(6, 1 + Math.floor((oleada - 3) / 1.5));
 }
 
 /**

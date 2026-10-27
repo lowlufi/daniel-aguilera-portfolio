@@ -23,6 +23,7 @@ import { dibujarFondo, nombreZona, precalentarFondo, zonaAltitud } from './fondo
 import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, ModeloBase, Movil, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
 import * as HG from './hangar';
 import * as AD from './armas-dibujo';
+import { dibujarTransicion, precalentarTransicion, type MapaId } from './transiciones';
 
 /*
  * The plane game: Dui, Lulu or Almendrita fly over a strip of hills while
@@ -58,6 +59,8 @@ export type HangarInfo = {
 };
 
 export type Hud = {
+  /** The mice's radio chatter on screen, if any. */
+  radio: { quien: string; texto: string } | null;
   /** The plane, its weapons and the hangar picks. */
   hangar: HangarInfo;
   /** Fish was just stolen: the pantry chip flashes. */
@@ -313,6 +316,16 @@ const THEMES: Theme[] = ['dia', 'tarde', 'noche'];
 
 // She shows up when waves 2, 5, 8… are cleared, and comes back tougher.
 const BOSS_EVERY = 3;
+/** The mice's radio chatter and their cries when they bail out. */
+const RADIO = {
+  llegan: ['¡Escuadrilla Queso, al ataque!', '¡Ahí está el gato! ¡Rodéenlo!', '¡Formación cerrada, muchachos!', '¡Contacto! ¡Gato a las doce!', '¡Por el queso y la patria ratona!'],
+  fox: ['¡Fox dos! ¡Misil en el aire!', '¡Lo tengo! ¡Disparo!', '¡Toma esto, minino!', '¡Misil fuera!'],
+  fijado: ['¡Me tiene fijado! ¡Ayuda!', '¡Tengo al gato en la cola!', '¡Sáquenmelo de encima!', '¡Me fijó! ¡Me fijó!'],
+  bengalas: ['¡Bengalas, bengalas!', '¡Misil en mi cola! ¡Bengalas!', '¡Rompo a la izquierda!'],
+  caido: ['¡Me dieron! ¡Me eyecto!', '¡Perdimos a uno! ¡Paracaídas abierto!', '¡Noooo, mi avioncito!', '¡Ratón al aire, repito, ratón al aire!', '¡Base, nos derriban!'],
+  grito: ['¡Noooo!', '¡Noooooo!', '¡Mi quesito!', '¡Auxilio!', '¡Me eyecto!'],
+};
+
 const SAY = {
   intro: '¡¿Qué es tanto ruido?! ¡Ricachones $&#%"/&!',
   back: '¡Volví, ricachones! ¡Y traje más chanclas! &%#',
@@ -412,6 +425,8 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   sigilo?: boolean;
   /** A spent enemy missile falling under gravity. */
   cae?: boolean;
+  /** Enemy seeker: timer for its next look at flares already in the air. */
+  mira?: number;
   /** The player's missile: got its target over the datalink; seeker scan timer. */
   enlace?: boolean;
   busca?: number;
@@ -778,6 +793,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     resumen: null as Resumen | null,
     nuevos: [] as string[],
     flashMap: 0,
+    /** The reveal after a map trip (1 → 0 over a second): the curtain clears off the new place. */
+    revelar: 0,
     /** The map to fly off to at the next wave (the nitro trip), if any. */
     toMapa: '' as '' | Mapa,
     boost: '' as '' | Mejora,
@@ -816,6 +833,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     fighterQueue: 0,
     /** The one-on-one duel with Margarita's fighter is on: nothing else spawns. */
     duelo: false,
+    /** Press edges of missile and bomb, for the dry click when they aren't ready. */
+    fireWasDown: false,
+    bombWasDown: false,
+    /** Pilots who bailed out: popping up, then drifting down under a parachute. */
+    eyectados: [] as { x: number; y: number; vx: number; vy: number; t: number; jefa: boolean }[],
+    /** The mice's radio chatter: who's talking, the line, and how long it's been up. */
+    radio: null as { quien: string; texto: string; t: number } | null,
+    /** Seconds until a fighter may drop another special-upgrade balloon. */
+    especialCd: 0,
     /** Flares the enemy pops to shake off the player's missiles, and each flyer's cooldown (by object). */
     bengalasR: [] as (Cuerpo & { t: number })[],
     bengalaCd: new Map<object, number>(),
@@ -933,6 +959,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       threats.push({ id: sh.id, dx: sh.m.x - p.x, dy: sh.m.y - p.y, vx: sh.m.vx - p.vx, vy: sh.m.vy - p.vy, tipo: sh.m.tipo, guiado: sh.m.guiado });
     }
     AB.persecucion(threats, 0.08);
+    // Radar warning: beeps faster the closer the nearest guided missile chasing the plane.
+    let cercaMisil = 0;
+    for (const th of threats) if (th.guiado) cercaMisil = Math.max(cercaMisil, clamp(1 - Math.hypot(th.dx, th.dy) / 360, 0, 1));
+    AB.alertaMisil(cercaMisil);
     // A harder alarm when several guided missiles, or a long-range one, are on the plane.
     let guided = 0;
     for (const th of threats) if (th.guiado && Math.hypot(th.dx, th.dy) < 300) guided++;
@@ -1003,6 +1033,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.salva = null;
     s.nuke = null;
     s.bengalasR = [];
+    s.eyectados = [];
+    s.radio = null;
     s.bengalaCd.clear();
     s.bigQueue = [];
     s.jefe = null;
@@ -1246,7 +1278,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.waveSize = s.queue.length;
     s.mision = elegirMision();
     // First boss beaten: the plane lights the nitro and flies off to the sea.
-    if (s.toMapa && s.toMapa !== s.mapa) s.transT = TRANS_T;
+    if (s.toMapa && s.toMapa !== s.mapa) {
+      s.transT = TRANS_T;
+      precalentarTransicion(s.toMapa as MapaId, view.vw, view.vh);
+    }
     s.bigQueue = s.mapa === 'oceano' ? [] : G.elegirGrandes(s.wave, Math.random);
     s.fighterQueue = s.mapa === 'oceano' ? Math.max(1, CZ.cuantos(s.wave)) : CZ.cuantos(s.wave);
     s.fighterT = rand(7, 12);
@@ -1694,6 +1729,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (!s.attract) AB.nuclear();
   }
 
+  /** A line on the mice's radio. Low-priority chatter waits its turn; urgent lines cut in. */
+  function radio(quien: string, frases: string[], urgente = false) {
+    if (s.attract || s.mode !== 'play') return;
+    if (s.radio && s.radio.t < (urgente ? 1.2 : 3.2)) return;
+    s.radio = { quien, texto: frases[Math.floor(Math.random() * frases.length)], t: 0 };
+    AB.radioRaton();
+    s.hudKey = '';
+  }
+  /** A pilot bails out of a downed plane: a cry, a pop upwards and a parachute. */
+  function eyectar(x: number, y: number, vx: number, jefa: boolean) {
+    s.eyectados.push({ x, y, vx: vx * 0.3, vy: 110, t: 0, jefa });
+    if (!s.attract) AB.eyeccion(panOf(x));
+    if (!jefa) pop(x, y + 16, RADIO.grito[Math.floor(Math.random() * RADIO.grito.length)], '#ffd0e8');
+  }
+
   /** Damages a mouse fighter; at 0 it blows apart (scored only if the player did it). */
   function hurtFighter(f: CZ.Caza, dmg: number, byPlayer = true) {
     if (f.hp <= 0) return;
@@ -1716,6 +1766,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         s.meta++;
         pop(f.a.x, f.a.y + 30, '¡+1 pescado recuperado! 🐟', P.gold);
       }
+      eyectar(f.a.x, f.a.y, f.a.vx, true);
       // A little parachute: she bails out, of course.
       for (let i = 0; i < 6; i++) VFX.pieza(s.fx, f.a.x, f.a.y, f.a.vx * 0.4 + rand(-80, 80), rand(20, 110), null, i % 2 ? '#d02a3a' : '#e8e0d0');
       later(() => blast(f.a.x, f.a.y, FA.ENERGIA.bomba, 'nadie', 0), 40);
@@ -1725,8 +1776,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (byPlayer) {
       award(CZ.PUNTOS, x, y);
       avanzaMision('cazas');
-      // A downed fighter always leaves a golden balloon with a special upgrade.
-      releasePrize('especial', x, y + 10);
+      eyectar(x, y, vx, false);
+      radio(`Ratón ${1 + (f.id % 4)}`, RADIO.caido, true);
+      // Sometimes a downed fighter leaves a golden balloon with a special upgrade (not too often).
+      if (s.especialCd <= 0 && Math.random() < 0.3) {
+        releasePrize('especial', x, y + 10);
+        s.especialCd = 25;
+      }
     }
     for (let i = 0; i < 3; i++) VFX.pieza(s.fx, x, y, vx * 0.4 + rand(-60, 60), vy * 0.4 + rand(20, 90), null, '#7a5ad0');
     later(() => blast(x, y, FA.ENERGIA.vehiculo, 'jugador', 0.8), 30);
@@ -2152,7 +2208,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function maybePrize(): Premio | null {
     // A battered plane gets a way out of the spiral: a repair balloon.
     if (s.lost.length >= 2 && !s.prizes.some((q) => q.kind === 'reparar') && Math.random() < 0.5) return 'reparar';
-    if (Math.random() > 0.32) return null;
+    if (Math.random() > 0.2) return null;
     const room = (['misil', 'bomba', 'bengala'] as Arma[]).filter((k) => s.cap[k] < capMax(k));
     if (!room.length) return null;
     room.sort((a, b) => s.cap[a] / capMax(a) - s.cap[b] / capMax(b));
@@ -2276,7 +2332,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const before = s.lockT;
       s.lockT += dt;
       s.lockCand = b.f;
-      if (before < LOCK_TIME && s.lockT >= LOCK_TIME && !s.attract) AB.fijado();
+      if (before < LOCK_TIME && s.lockT >= LOCK_TIME && !s.attract) {
+        AB.fijado();
+        if (s.fighters.some((f) => b.f.pos() === f.a)) radio('Ratón en apuros', RADIO.fijado, true);
+      }
       else if (s.lockT < LOCK_TIME && s.lockT > 0.1 && !s.attract) AB.fijando(s.lockT / LOCK_TIME);
     } else if (b) {
       s.lockKey = b.key;
@@ -2343,6 +2402,37 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const v = Math.min(d, 160 * dt);
     o.x += (dx / d) * v;
     o.y += (dy / d) * v;
+  }
+
+  /** A pilot hanging under a parachute (a mouse, or Margarita with her red beanie). */
+  function dibujarEyectado(x: number, y: number, t: number, jefa: boolean) {
+    const X = Math.round(x), Y = Math.round(y);
+    const k = clamp((t - 0.55) / 0.3, 0, 1);
+    if (k > 0) {
+      const sw = Math.round(Math.sin(t * 2.2) * 1.5);
+      const w = Math.round(3 + 5 * k), h = Math.round(1 + 3 * k);
+      const cy = Y - 7 - Math.round(5 * k);
+      for (const dx of [-w + 1, w - 1]) for (let i = 0; i <= 5; i++) A.R(g, Math.round(X + sw + (dx * (5 - i)) / 5), Math.round(cy + ((Y - 3 - cy) * i) / 5), 1, 1, '#e8e0d0');
+      D.oval(g, X + sw, cy, w + 1, h + 1, '#3a2a4a');
+      D.oval(g, X + sw, cy, w, h, jefa ? '#ffd84a' : P.white);
+      for (let i = -w; i < w; i += 4) A.R(g, X + sw + i, cy - h + 1, 2, h, jefa ? '#e03a3a' : '#ff9ad0');
+    }
+    if (jefa) {
+      A.R(g, X - 2, Y - 4, 4, 5, '#7a5ad0');
+      A.R(g, X - 2, Y - 7, 4, 3, '#f0c8a8');
+      A.R(g, X - 2, Y - 9, 4, 2, '#e03a3a');
+      A.R(g, X - 3, Y - 7, 1, 2, '#d8d0ca');
+      A.R(g, X + 2, Y - 7, 1, 2, '#d8d0ca');
+    } else {
+      // A grey mouse in a red flight helmet, legs kicking.
+      A.R(g, X - 1, Y - 3, 3, 4, '#9a90b8');
+      A.R(g, X - 2, Y - 7, 5, 4, '#b8b0d0');
+      A.R(g, X - 3, Y - 8, 2, 2, '#c9b4ff');
+      A.R(g, X + 2, Y - 8, 2, 2, '#c9b4ff');
+      A.R(g, X - 1, Y - 8, 3, 1, '#e03a3a');
+      A.R(g, X + 1, Y - 6, 1, 1, '#1a1428');
+      A.R(g, X - 1 + (Math.floor(t * 6) % 2), Y + 1, 1, 1, '#9a90b8');
+    }
   }
 
   /** The nuke: a fat dark-green bomb with the trefoil, under a red-and-white parachute once it opens. */
@@ -2423,28 +2513,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     if (engano) pop(q.x, q.y + 14, '¡Bengalas! Misil engañado', '#ffb070');
+    radio('Ratón en apuros', RADIO.bengalas, true);
     if (!s.attract) fx('bengalas', sfx.flare, { vol: 0.35, rate: 0.9 }, q.x);
-  }
-
-  /** A missile's own seeker: the nearest enemy inside a cone ahead of its nose. */
-  function buscarBlanco(m: Misil): Fijable | null {
-    let best: Fijable | null = null, bd = 300;
-    const cx = Math.cos(m.rumbo), cy = Math.sin(m.rumbo);
-    const mira = (q: Movil, f: Fijable) => {
-      const dx = q.x - m.x, dy = q.y - m.y;
-      const d = Math.hypot(dx, dy);
-      if (d > bd || d < 8) return;
-      if ((dx * cx + dy * cy) / d < 0.85) return;
-      bd = d;
-      best = f;
-    };
-    for (const c of s.cars) if (c.hp > 0) mira(c.mid, { pos: () => c.mid, vivo: () => c.hp > 0 && s.cars.includes(c), r: 8 });
-    for (const a of s.aereos) if (a.hp > 0) mira(a, { pos: () => a, vivo: () => a.hp > 0 && s.aereos.includes(a), r: 8 });
-    for (const f of s.fighters) if (f.hp > 0) mira(f.a, { pos: () => f.a, vivo: () => f.hp > 0 && s.fighters.includes(f), r: 8 });
-    for (const u of s.gigantes) if (u.viva) { const q = { x: u.x, y: u.y + 8, vx: u.vx, vy: 0 }; mira(q, { pos: () => ({ x: u.x, y: u.y + 8, vx: u.vx, vy: 0 }), vivo: () => u.viva, r: 8 }); }
-    const j = s.jefe;
-    if (j) mira(j, { pos: () => j, vivo: () => s.jefe === j, r: 30 });
-    return best;
   }
 
   /** A bomb reaching its target, by load. */
@@ -2653,6 +2723,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function firePlayer() {
     const p = s.plane;
     const km = s.spec.kit.misil;
+    // Pressing a weapon that isn't ready: a dry click (once per press).
+    if (!s.attract) {
+      if (input.fire && !s.fireWasDown && (s.ammo < 1 || s.fireT > 0.05)) AB.sinMunicion(panOf(p.x));
+      if (input.bomb && !s.bombWasDown && (s.bombAmmo < 1 || s.bombT > 0.05)) AB.sinMunicion(panOf(p.x));
+      if (input.flare && !s.flareWasDown && s.flares <= 0) AB.bengalaVacia();
+    }
+    s.fireWasDown = input.fire;
+    s.bombWasDown = input.bomb;
     if (input.fire && s.ammo >= 1 && s.fireT <= 0) {
       const m = FA.misilJugador(p, s.wave);
       m.combustible = km.opts.quemado;
@@ -2991,7 +3069,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           p.vy = 0;
           p.rumbo = 0;
           p.alabeo = 1;
-          s.flashMap = 1;
+          s.revelar = 1;
           // A moment of grace on arrival, so nothing there catches the plane off guard.
           s.inv = Math.max(s.inv, 2.5);
           s.gracia = Math.max(s.gracia, 1.2);
@@ -3126,7 +3204,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.fireT -= dt;
       s.bombT -= dt;
       s.flareCd -= dt;
+      if (s.nitroCd > 0 && s.nitroCd - dt <= 0 && !s.attract) AB.nitroListo();
       s.nitroCd = Math.max(0, s.nitroCd - dt);
+      s.especialCd = Math.max(0, s.especialCd - dt);
       if (s.boostT > 0) {
         s.boostT -= dt;
         if (s.boost === 'cohetes') s.ammo = s.cap.misil;
@@ -3139,6 +3219,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.reloadT >= s.spec.reload) {
           s.ammo++;
           s.reloadT = 0;
+          if (!s.attract) AB.armaRecargada('misil');
         }
       }
       if (s.bombAmmo < s.cap.bomba) {
@@ -3146,6 +3227,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.bombReloadT >= BOMB_RELOAD) {
           s.bombAmmo++;
           s.bombReloadT = 0;
+          if (!s.attract) AB.armaRecargada('bomba');
         }
       }
       if (s.flares < s.cap.bengala) {
@@ -3153,6 +3235,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.flareT >= FLARE_RELOAD) {
           s.flares++;
           s.flareT = 0;
+          if (!s.attract) AB.armaRecargada('bengala');
         }
       }
       if (!s.congelado) {
@@ -3185,7 +3268,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.cars.push({
             ...v,
             kind,
-            hp: VEH[kind].hp,
+            // Every wave the mice come back tougher.
+            hp: VEH[kind].hp * Math.min(2.2, 1 + 0.08 * (s.wave - 1)),
             fireT: VEH[kind].cd * rand(0.5, 1),
             flash: 0,
             wheel: 0,
@@ -3221,6 +3305,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.fighterQueue--;
           const fromRight = Math.random() < 0.6;
           s.fighters.push(CZ.crear(clamp(s.camX + (fromRight ? view.vw + 80 : -80), 40, LEVEL - 40), clamp(p.y + rand(-40, 120), tormenta ? 360 : 150, CEIL - 100), !fromRight, s.wave, tormenta));
+          radio('Ratón Líder', RADIO.llegan);
           s.fighterT = tormenta ? rand(2.5, 4) : rand(9, 15);
           if (!s.banner) {
             s.banner = '✈️ ¡Cazas ratón en el aire!';
@@ -3423,7 +3508,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (c.mem.hielo > 0 || c.mem.emp > 0) c.fireT = Math.max(c.fireT, 0.3);
         else if (salvo.has(c.id) || (order.disparar && c.fireT <= 0)) {
           carFires(c);
-          c.fireT = Math.max(0.6, spec.cd * 0.8 * (1 - (s.wave - 1) * 0.04)) * rand(0.7, 1.2) * (order.cadencia ?? 1) * (1 + 0.33 * s.ayuda);
+          c.fireT = Math.max(0.5, spec.cd * 0.8 * Math.max(0.45, 1 - (s.wave - 1) * 0.05)) * rand(0.7, 1.2) * (order.cadencia ?? 1) * (1 + 0.33 * s.ayuda);
         }
       }
       if (c.x <= META_X && c.hp > 0) {
@@ -3535,6 +3620,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       if (!s.attract && flyingNow()) AB.pasadaCaza(f.a.x - p.x, f.a.y - p.y, Math.hypot(f.a.vx - p.vx, f.a.vy - p.vy), f.id);
       if (r.misil) {
+        radio(`Ratón ${1 + (f.id % 4)}`, RADIO.fox);
         for (const mm of MS.lanzar('buscador', f.a.x, f.a.y, p, s.wave, Math.random)) s.shots.push({ m: mm, enemy: true, tgt: p, trail: 0 });
         fx('misil', sfx.enemyLaunch, { vol: 0.4, rate: 1.1 }, f.a.x);
       }
@@ -3620,6 +3706,33 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }
         }
         const r = MS.paso(em, flying || sh.tgt !== p ? sh.tgt : null, dt, s.wave, ground);
+        // Flares already in the air keep pulling the seekers that are still after the plane,
+        // even ones launched after the flares went out.
+        if (em.guiado && sh.tgt === p && s.flareBodies.length) {
+          sh.mira = (sh.mira ?? 0) - dt;
+          if (sh.mira <= 0) {
+            sh.mira = 0.3;
+            for (const fl of s.flareBodies) {
+              if (fl.t > 2.2 || Math.hypot(fl.x - em.x, fl.y - em.y) > 260) continue;
+              if (MS.engana(em, fl, p)) {
+                sh.tgt = fl;
+                pop(em.x, em.y + 10, '¡Misil engañado!', P.gold);
+                break;
+              }
+            }
+          }
+        }
+        // Friendly fire: a missile that brushes another mouse flyer goes off on it.
+        if (em.t > 0.6 && r.estado === 'vuela') {
+          const rc = MS.MISILES[em.tipo].radioChoque;
+          const toca = s.fighters.some((f) => f.hp > 0 && CZ.tocado(f, em.x, em.y, rc)) || s.aereos.some((a) => a.hp > 0 && Math.hypot(a.x - em.x, a.y - em.y) < AE.radio(a) + rc);
+          if (toca) {
+            em.t = -1;
+            blast(em.x, em.y, Math.max(3, F.energia), 'caida', Math.max(2, F.danio * 2));
+            pop(em.x, em.y + 12, '¡Fuego amigo!', '#ffb070');
+            continue;
+          }
+        }
         // Outrunning: fast and not flying into it, the missile bleeds energy (it
         // can't keep pulling lead); if the gap keeps growing it gives up.
         if (flying && sh.tgt === p && em.t > 0.6 && !sh.perdido) {
@@ -3729,23 +3842,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       } else {
         // The player's rockets fly straight where the nose pointed.
-        // Modern guidance: a datalink hands in-flight missiles any lock the pilot gets after
-        // launch, and missiles with their own seeker look for a target ahead by themselves.
+        // A missile only homes on what the pilot locked: before launch, or over the
+        // datalink if the lock comes while it's already flying. Unlocked, it flies straight.
         if (!(sh.lock && sh.lock.vivo())) {
           if (s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo()) {
             sh.lock = s.lockCand;
             if (!sh.enlace) pop(m.x, m.y + 10, '📡 ¡Enlace!', '#9ad8ff');
             sh.enlace = true;
-          } else if ((sh.k ?? s.spec.kit.misil).buscador && m.t > 0.25) {
-            sh.busca = (sh.busca ?? 0) - dt;
-            if (sh.busca <= 0) {
-              sh.busca = 0.15;
-              const f = buscarBlanco(m);
-              if (f) {
-                sh.lock = f;
-                pop(m.x, m.y + 10, '🎯', '#ffd84a');
-              }
-            }
           }
         }
         const lk = sh.lock && sh.lock.vivo() ? sh.lock.pos() : null;
@@ -3918,6 +4021,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     s.shells = s.shells.filter((sh) => sh.fuse >= 0);
 
+    // Bailed-out pilots under their parachutes; the radio line fading.
+    if (s.radio) s.radio.t += dt;
+    for (const e of s.eyectados) {
+      if (e.t < 0.55 && e.t + dt >= 0.55 && !s.attract) AB.paracaidas(panOf(e.x));
+      e.t += dt;
+      if (e.t < 0.55) e.vy -= FA.GRAVEDAD * dt;
+      else {
+        // Canopy open: a slow swaying descent, drifting with the wind.
+        e.vx += (wind * 0.5 - e.vx) * Math.min(1, dt * 1.2);
+        e.vy += (-26 - e.vy) * Math.min(1, dt * 3);
+      }
+      e.x += (e.vx + Math.sin(e.t * 2.2) * 6) * dt;
+      e.y += e.vy * dt;
+    }
+    s.eyectados = s.eyectados.filter((e) => {
+      const llega = e.y <= ground(e.x) + 1;
+      if (llega && sobreMar(e.x)) chapoteo(e.x, 0.6);
+      return !llega && e.t < 16;
+    });
     // Flares, smoke, shards, crates.
     stepSalva(dt);
     stepNuke(dt);
@@ -4112,6 +4234,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     for (let i = splashes.length - 1; i >= 0; i--) if (splashes[i].t > 0.9) splashes.splice(i, 1);
     s.flashMap = Math.max(0, s.flashMap - dt);
+    s.revelar = Math.max(0, s.revelar - dt);
   }
 
   /* ── Drawing ── */
@@ -4502,6 +4625,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       g.globalAlpha = 1;
     }
+    for (const e of s.eyectados) dibujarEyectado(sx(e.x), sy(e.y), e.t, e.jefa);
     if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw);
 
     if (s.mapa === 'tormenta') dibujarTormenta(vw, vh, sx, sy);
@@ -4556,8 +4680,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Frost creeping in from the edges as the ice grows; cracks when frozen.
     if (s.hielo > 0.05 && s.mode === 'play') dibujarEscarcha(vw, vh);
 
-    // The jump between maps: white builds up, then fades over the new one.
-    const white = s.transT > 0 ? clamp((0.6 - s.transT) / 0.6, 0, 1) : s.flashMap;
+    // The jump between maps: a curtain in the destination's style sweeps in, hides
+    // the swap, and clears off the new place (transiciones.ts).
+    const fase = s.transT > 0 ? 1 - s.transT / TRANS_T : s.revelar > 0 ? 2 - s.revelar : 0;
+    if (fase > 0) {
+      const hacia = (s.transT > 0 ? s.toMapa || 'oceano' : s.mapa) as MapaId;
+      dibujarTransicion(g, vw, vh, fase, s.mapa as MapaId, hacia, s.t, still || s.calma);
+    }
+    // A plain white flash (the nuke).
+    const white = s.flashMap;
     if (white > 0) {
       g.globalAlpha = white;
       g.fillStyle = '#fff';
@@ -4689,75 +4820,89 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       A.R(g, ax - 2, altY(p.y) - 1, 6, 3, P.gold);
     }
 
-    // Minimap along the bottom: the whole valley side-on, with the terrain,
-    // the pantry, every enemy at its height, missiles, the plane and the view.
+    // Minimap along the bottom: the whole map side-on, with the terrain, the pantry,
+    // every enemy at its height, missiles, the plane and the view. It keeps the same
+    // size on screen at every zoom (u = virtual pixels per screen pixel step).
     {
-      const H = 13;
-      const rx = 8;
-      const rw = vw - 24;
-      const top = vh - H - 3;
+      const u = clamp(Math.round(2 / view.s), 1, 3);
+      const H = 17 * u;
+      const rx = 8 * u;
+      const rw = vw - 16 * u - 8;
+      const top = vh - H - 3 * u;
       const at = (x: number) => rx + Math.round((x / LEVEL) * rw);
       // Height on a square-root scale: the low sky, where the fight is, gets more room.
       const ht = (alt: number) => top + H - 1 - Math.round(Math.sqrt(clamp(alt, 0, CEIL) / CEIL) * (H - 2));
-      g.globalAlpha = 0.72;
-      A.R(g, rx - 2, top - 2, rw + 4, H + 4, '#3a2a6a');
+      // A dot with a dark outline so it reads on any terrain.
+      const punto = (x: number, y: number, w: number, h: number, c: string) => {
+        A.R(g, x - u, y - u, w + 2 * u, h + 2 * u, '#1a1438');
+        A.R(g, x, y, w, h, c);
+      };
+      g.globalAlpha = 0.85;
+      A.R(g, rx - 2 * u, top - 2 * u, rw + 4 * u, H + 4 * u, '#3a2a6a');
       g.globalAlpha = 1;
-      A.R(g, rx - 1, top - 1, rw + 2, H + 2, '#262048');
-      for (const z of [950, 1700, 2300]) A.R(g, rx, ht(z), rw, 1, 'rgba(255,255,255,0.08)');
-      // Terrain silhouette, sampled once per column.
-      // Painted once into a small canvas, redone only when the terrain changes.
-      const clave = `${mapaActual}|${rw}|${s.craters.length}|${s.bridges.length}|${s.gen}`;
+      A.R(g, rx - u, top - u, rw + 2 * u, H + 2 * u, '#262048');
+      for (const z of [950, 1700, 2300]) A.R(g, rx, ht(z), rw, 1, 'rgba(255,255,255,0.12)');
+      // Terrain silhouette, painted once into a small canvas, redone only when the ground changes.
+      const clave = `${mapaActual}|${rw}|${H}|${s.craters.length}|${s.bridges.length}|${s.gen}`;
       if (miniTerreno.clave !== clave) {
         miniTerreno.clave = clave;
         miniTerreno.cv.width = Math.max(1, rw);
         miniTerreno.cv.height = H;
         const mg = miniTerreno.cv.getContext('2d')!;
         mg.clearRect(0, 0, rw, H);
+        const conMar = mapaActual === 'oceano' || mapaActual === 'tormenta';
         for (let c = 0; c < rw; c++) {
-          const gy = ht(Math.max(0, ground(((c + 0.5) / rw) * LEVEL))) - top;
-          const sea = mapaActual === 'oceano' && (c + 0.5) / rw * LEVEL > ISLA;
-          A.R(mg, c, gy, 1, H - gy, sea ? '#3a6ab8' : '#4f8a5a');
-          A.R(mg, c, gy, 1, 1, sea ? '#9ad8ff' : '#8fd48a');
+          const gx = ((c + 0.5) / rw) * LEVEL;
+          const gy = ht(Math.max(0, ground(gx))) - top;
+          const sea = conMar && gx > ISLA;
+          const ciudad = mapaActual === 'valparaiso';
+          A.R(mg, c, gy, 1, H - gy, sea ? '#3a6ab8' : ciudad ? '#8a6a9a' : '#4f8a5a');
+          A.R(mg, c, gy, 1, u, sea ? '#9ad8ff' : ciudad ? '#f4a7b9' : '#8fd48a');
         }
       }
       g.drawImage(miniTerreno.cv, rx, top);
       // The view the camera shows.
       const v0 = at(s.camX);
-      const vwid = Math.max(3, Math.round((vw / LEVEL) * rw));
+      const vwid = Math.max(3 * u, Math.round((vw / LEVEL) * rw));
       const vt = ht(s.camY - A.DIRT + vh);
       const vb = ht(Math.max(0, s.camY - A.DIRT));
-      g.globalAlpha = 0.18;
+      g.globalAlpha = 0.16;
       A.R(g, v0, vt, vwid, Math.max(2, vb - vt + 1), '#ffffff');
-      g.globalAlpha = 0.6;
-      A.R(g, v0, vt, vwid, 1, '#ffffff');
-      A.R(g, v0, vb, vwid, 1, '#ffffff');
-      A.R(g, v0, vt, 1, vb - vt + 1, '#ffffff');
-      A.R(g, v0 + vwid - 1, vt, 1, vb - vt + 1, '#ffffff');
+      g.globalAlpha = 0.75;
+      A.R(g, v0, vt, vwid, u, '#ffffff');
+      A.R(g, v0, vb, vwid, u, '#ffffff');
+      A.R(g, v0, vt, u, vb - vt + 1, '#ffffff');
+      A.R(g, v0 + vwid - u, vt, u, vb - vt + 1, '#ffffff');
       g.globalAlpha = 1;
       // The pantry, with its fish left.
       const px0 = at(PANTRY.x0);
-      A.R(g, px0, ht(ground(PANTRY.x0)) - 3, 4, 3, P.b2);
-      for (let i = 0; i < s.meta; i++) A.R(g, px0 + 5 + i * 2, ht(ground(PANTRY.x0)) - 2, 1, 1, '#9ad8ff');
-      // Enemies: ground ones lilac, flyers pink, big ones and bosses bigger.
+      const pyy = ht(ground(PANTRY.x0)) - 4 * u;
+      punto(px0, pyy, 4 * u, 3 * u, P.b2);
+      for (let i = 0; i < s.meta; i++) A.R(g, px0 + 5 * u + i * 2 * u, pyy + u, u, u, '#9ad8ff');
+      // Enemies: ground ones lilac, flyers pink, fighters magenta, bosses big and blinking.
       const blink = Math.floor(s.t * 4) % 2 === 0;
-      for (const c of s.cars) A.R(g, at(c.x) - (isBoss(c.kind) ? 2 : 1), ht(c.y) - 2, c.kind === 'portaaviones' ? 7 : isBoss(c.kind) ? 4 : 2, isBoss(c.kind) ? 3 : 2, isBoss(c.kind) ? (blink ? P.red : P.r3) : '#c9b4ff');
-      for (const u of s.gigantes) if (u.viva) A.R(g, at(u.x) - 1, ht(u.y) - 2, u.tipo === 'tren' || u.tipo === 'ratonzilla' ? 4 : 1, 2, P.r2);
-      for (const a of s.aereos) A.R(g, at(a.x), ht(a.y), 2, 1, P.p1);
-      for (const f of s.fighters) A.R(g, at(f.a.x) - 1, ht(f.a.y) - 1, 3, 2, '#ff6ad5');
-      if (s.jefe) {
-        const jx = at(s.jefe.x) - 2;
-        const jy = ht(s.jefe.y) - 1;
-        A.R(g, jx, jy, 5, 3, blink ? P.red : P.gold);
+      for (const c of s.cars) {
+        const jefe = isBoss(c.kind);
+        const w = (c.kind === 'portaaviones' ? 7 : jefe ? 4 : 2) * u;
+        punto(at(c.x) - Math.floor(w / 2), ht(c.y) - 2 * u, w, (jefe ? 3 : 2) * u, jefe ? (blink ? P.red : P.r3) : '#c9b4ff');
       }
-      for (const q of s.prizes) A.R(g, at(q.x), ht(q.y), 1, 1, P.gold1);
-      for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) A.R(g, at(sh.m.x), ht(sh.m.y), 1, 1, sh.tgt === p ? P.red : '#ff9a3c');
-      // The plane: a little arrow showing where it heads.
+      for (const v of s.gigantes) if (v.viva) punto(at(v.x) - u, ht(v.y) - 2 * u, (v.tipo === 'tren' || v.tipo === 'ratonzilla' ? 4 : 2) * u, 2 * u, P.r2);
+      for (const a of s.aereos) if (a.hp > 0) punto(at(a.x), ht(a.y), 2 * u, 2 * u, a.tipo === 'ovni' ? '#7af0ff' : P.p1);
+      for (const f of s.fighters) punto(at(f.a.x) - u, ht(f.a.y) - u, 3 * u, 2 * u, f.jefa ? (blink ? P.red : '#ff6ad5') : '#ff6ad5');
+      if (s.jefe) punto(at(s.jefe.x) - 3 * u, ht(s.jefe.y) - 2 * u, 6 * u, 4 * u, blink ? P.red : P.gold);
+      for (const q of s.prizes) A.R(g, at(q.x), ht(q.y), u, u, P.gold1);
+      // Missiles: the ones chasing the plane blink red.
+      for (const sh of s.shots) {
+        if (!sh.enemy || sh.m.t < 0) continue;
+        if (sh.tgt === p && !blink) continue;
+        A.R(g, at(sh.m.x), ht(sh.m.y), u + (sh.tgt === p ? u : 0), u + (sh.tgt === p ? u : 0), sh.tgt === p ? P.red : '#ff9a3c');
+      }
+      // The plane: a bright arrow pointing where it heads.
       const ppx = at(p.x);
       const ppy = ht(p.y);
       const dir = Math.cos(p.rumbo) >= 0 ? 1 : -1;
-      A.R(g, ppx - 1, ppy - 1, 3, 3, '#3a2a6a');
-      A.R(g, ppx - 1, ppy, 3, 1, P.gold);
-      A.R(g, ppx + dir, ppy - 1, 1, 3, P.gold);
+      punto(ppx - 2 * u, ppy - u, 4 * u, 3 * u, P.gold);
+      A.R(g, ppx + dir * 2 * u - (dir < 0 ? u : 0), ppy, u, u, P.white);
     }
   }
 
@@ -4948,6 +5093,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       pista: s.mode !== 'play' || s.dead ? '' : s.despegue === 'subiendo' ? `${s.spec.pilot} sube al avión…` : s.despegue === 'pista'
         ? (view.touch ? 'Mantén ⏩ Acelerar y, con velocidad, mantén la mitad izquierda para despegar' : 'Mantén E para acelerar y, con velocidad, ↑ para despegar')
         : s.pista ? textoPista(s.pista) : '',
+      radio: s.mode === 'play' && s.radio && s.radio.t < 3.8 ? { quien: s.radio.quien, texto: s.radio.texto } : null,
       mision: s.mode === 'play' && s.mision ? { texto: s.mision.texto, prog: s.mision.prog, meta: s.mision.meta, hecha: s.mision.hecha, fallida: s.mision.fallida } : null,
     };
     const key = JSON.stringify(h);
@@ -5030,6 +5176,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       lastAcc = -1e9;
       return;
     }
+    if (now - lastAcc < 350 && s.nitroCd > 0 && s.mode === 'play' && !s.attract) AB.nitroNoListo();
     lastAcc = now;
   }
   /** Cuts the super nitro short: the unused part comes back as charge. */
