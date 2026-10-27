@@ -375,7 +375,7 @@ export function pasoAvion(
   const tch = Number.isFinite(techo) ? techo : 1e9;
   let impacto = -1;
   for (let i = 0; i < n; i++) {
-    const r = subpaso(a, m, mx, my, gas, h, suelo, tch, ev, agil);
+    const r = subpaso(a, m, mx, my, gas, h, suelo, tch, ev, agil, Math.sign(fin(mando.giro ?? 0)));
     if (r > impacto) impacto = r;
   }
   if (impacto >= 0) ev.push({ tipo: 'toqueSuelo', velocidad: impacto });
@@ -386,7 +386,7 @@ export function pasoAvion(
 /** One integration sub-step. Returns the ground impact speed (≥0) or -1. */
 function subpaso(
   a: Avion, m: ModeloAvion, mx: number, my: number, gas: number, h: number,
-  suelo: Suelo, techo: number, ev: EventoVuelo[], agil: boolean,
+  suelo: Suelo, techo: number, ev: EventoVuelo[], agil: boolean, giro = 0,
 ): number {
   const p = (agil ? AGILES : PARAMS)[m];
   const e = estado(a);
@@ -476,7 +476,11 @@ function subpaso(
   // would turn +α into −α and snap the wing into a negative stall.
   const cg = Math.cos(gam);
   const cr = Math.cos(a.rumbo);
-  if (mag > 0.2 && Math.abs(err) > 1.6) e.tonelObjetivo = err > 0 ? 0 : PI;
+  // Holding a continuous turn: no Immelmann half-roll at the top, keep pulling
+  // round the full loop (rolling would turn the pull into a weak push).
+  // Canopy up (alabeo +1) pulls counterclockwise; rolled over pulls clockwise.
+  if (giro) e.tonelObjetivo = giro > 0 ? 0 : PI;
+  else if (mag > 0.2 && Math.abs(err) > 1.6) e.tonelObjetivo = err > 0 ? 0 : PI;
   else if (cr < -0.15 && (Math.abs(gamDotD) < 1.5 || cg < -0.95)) e.tonelObjetivo = PI;
   else if (cr > 0.15 && (Math.abs(gamDotD) < 1.5 || cg > 0.95)) e.tonelObjetivo = 0;
   let phi = Math.acos(clamp(a.alabeo, -1, 1));

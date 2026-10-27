@@ -562,7 +562,7 @@ function writeBest(v: number) {
 
 export type Vuelo = ReturnType<typeof createVuelo>;
 
-export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: { onHud: (h: Hud) => void; onOver: (r: Result) => void }) {
+export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: { onHud: (h: Hud) => void; onOver: (r: Result) => void; onJefeVencido?: (tipo: JF.TipoJefe) => void }) {
   const g = canvas.getContext('2d')!;
   // `levels` are the zoom steps (whole-number pixel scales), `zi` the current one.
   const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1 };
@@ -2168,6 +2168,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     for (const f of JF.focos(j)) if (Math.random() < dt * 12) VFX.fuego(s.fx, f.x, f.y, j.vx, j.vy, f.intensidad);
     if (r.muerto) {
+      if (!s.attract) hooks.onJefeVencido?.(j.tipo);
       s.jefe = null;
       s.jefeEspacio = false;
       s.shake = 10;
@@ -3021,7 +3022,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       FV.pasoAvion(p, 'avioneta', { x: dir, y: clamp((ty - p.y) / 40, -1, 1), gas: 0 }, dt, ground, top);
     } else if (!s.dead) {
       if (s.attract) attractBot();
-      const mando: Mando = { x: input.x, y: input.y, gas: input.gas };
+      const mando: Mando = { x: input.x, y: input.y, gas: input.gas, giro: Math.sign(turn) };
       // Too high: the cold builds ice; full of it, the controls freeze and the
       // plane drops nose-down until it thaws lower down.
       if (s.mode === 'play' && !s.attract) {

@@ -25,7 +25,14 @@ export type BombaTipo = 'comun' | 'racimo' | 'fosforo' | 'gas' | 'plasma' | 'gui
  * throttle: 0 holds cruise speed, +1 is full power, -1 idles the engine and
  * opens the air brakes.
  */
-export type Mando = { x: number; y: number; gas: number };
+export type Mando = {
+  x: number; y: number; gas: number;
+  /**
+   * The pilot is holding a continuous turn (touch «hold a side»): +1 counterclockwise,
+   * -1 clockwise. The plane rolls so that turn is a pull, and keeps pulling round full loops.
+   */
+  giro?: number;
+};
 
 export type Avion = Movil & {
   /** Where the nose points. */

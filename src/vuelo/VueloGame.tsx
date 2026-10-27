@@ -7,6 +7,8 @@ import type { BombaTipo, ModeloBase as ModeloAvion, ModeloAvion as Avion } from 
 import * as HG from './hangar';
 import * as AB from './audio-batalla';
 import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
+import Cinematica from './Cinematica';
+import * as HI from './historia';
 
 /*
  * "Escuadrón Dui": the plane game around the canvas engine in motor.ts. This
@@ -187,6 +189,19 @@ function Contador({ v, cifras = 5 }: { v: number; cifras?: number }) {
     </span>
   );
 }
+
+/** Seconds as «m:ss» (2:05, 0:45) for the wave card. */
+const minSeg = (t: number) => {
+  const n = Math.max(0, Math.round(t));
+  return `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+};
+/** The same, in words for screen readers and the tooltip. */
+const duracion = (t: number) => {
+  const n = Math.max(0, Math.round(t));
+  const m = Math.floor(n / 60), sg = n % 60;
+  const ps = `${sg} ${sg === 1 ? 'segundo' : 'segundos'}`;
+  return m ? `${m} ${m === 1 ? 'minuto' : 'minutos'}${sg ? ` y ${ps}` : ''}` : ps;
+};
 
 const CIELO_NOMBRE: Record<string, string> = { auto: 'automático', dia: 'día', tarde: 'tarde', noche: 'noche' };
 const CIELO_ICONO: Record<string, PxIcon> = { auto: 'auto', dia: 'sol', tarde: 'tarde', noche: 'luna' };
@@ -562,15 +577,44 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const ic = movil ? 1.5 : 2;
   const [verticalOk, setVerticalOk] = useState(false);
 
+  /*
+   * The story (historia.ts, Cinematica.tsx): the prologue before the first
+   * take-off, a chapter on the first trip to each map and a short epilogue
+   * after each boss beaten for the first time. In-game scenes wait in a queue
+   * and play on the wave card (the game stopped, nothing to dodge).
+   */
+  const [cine, setCine] = useState<{ guion: HI.GuionId; luego?: () => void } | null>(null);
+  const [cola, setCola] = useState<HI.GuionId[]>([]);
+  const encolar = useCallback((id: HI.GuionId | null) => {
+    if (!id || HI.vista(id)) return;
+    setCola((c) => (c.includes(id) ? c : [...c, id]));
+  }, []);
+  // Development only: /aviones?cine=cap-oceano plays any script straight away.
   useEffect(() => {
-    const g = createVuelo(canvasRef.current!, boxRef.current!, {
+    if (!import.meta.env.DEV) return;
+    const id = new URLSearchParams(location.search).get('cine') as HI.GuionId | null;
+    if (id && id in HI.HISTORIA) setCine({ guion: id });
+  }, []);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
+  const jefeVencido = useRef<(tipo: string) => void>(() => {});
+  jefeVencido.current = (tipo) => {
+    if (phaseRef.current === 'play') encolar(HI.guionDeJefe(tipo));
+  };
+
+  useEffect(() => {
+    // A variable, not a literal: motor.ts may call the optional `onJefeVencido(tipo)`
+    // when a flying boss falls (see the story queue below).
+    const hooks = {
       onHud: setHud,
-      onOver: (r) => {
+      onOver: (r: Result) => {
         setResult(r);
         setSaved(readSave());
         setPhase('over');
       },
-    });
+      onJefeVencido: (tipo: string) => jefeVencido.current(tipo),
+    };
+    const g = createVuelo(canvasRef.current!, boxRef.current!, hooks);
     game.current = g;
     // The title screen's background: a game flown by the autopilot.
     g.attract();
@@ -690,7 +734,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     confirmTimer.current = window.setTimeout(() => {
       confirmando.current = false;
       setConfirmado(null);
-      play();
+      // A new game's first take-off waits for the prologue (once per device).
+      if (HI.vista('prologo')) play();
+      else setCine({ guion: 'prologo', luego: () => play() });
     }, 1300);
   }, [confirmado, plane, play]);
   useEffect(() => {
@@ -1018,6 +1064,49 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     return () => window.clearTimeout(id);
   }, [zone]);
 
+  // Story queue: a boss that leaves the HUD while the game goes on was beaten
+  // (Margarita on her cart, her carrier, her fighter); flying bosses come
+  // through `onJefeVencido`. Losing or leaving the game forgets the queue.
+  const jefeAntes = useRef<string | null>(null);
+  const jefeAhora = phase === 'play' ? hud?.boss?.name ?? null : null;
+  useEffect(() => {
+    const antes = jefeAntes.current;
+    jefeAntes.current = jefeAhora;
+    if (phase !== 'play') {
+      setCola((c) => (c.length ? [] : c));
+      return;
+    }
+    if (antes && antes !== jefeAhora) encolar(HI.guionDeJefe(antes));
+  }, [phase, jefeAhora, encolar]);
+  // The first trip to each map: its chapter, on the wave card that announces it.
+  const destino = tiendaAbierta ? hud?.resumen?.destino ?? '' : '';
+  useEffect(() => {
+    if (destino) encolar(HI.guionDeMapa(destino));
+  }, [destino, encolar]);
+  useEffect(() => {
+    if (phase !== 'play' || !tiendaAbierta || cine || paused || hangar || !cola.length) return;
+    // A beat after the card shows, so it doesn't jump in the player's face.
+    const id = window.setTimeout(() => {
+      setCola((c) => c.slice(1));
+      setCine({ guion: cola[0] });
+    }, 700);
+    return () => window.clearTimeout(id);
+  }, [phase, tiendaAbierta, cine, paused, hangar, cola]);
+  // The world holds still under an in-game scene (and its sounds stop).
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  const enCine = !!cine && phase === 'play';
+  useEffect(() => {
+    if (!enCine) return;
+    game.current?.setPaused(true);
+    return () => game.current?.setPaused(pausedRef.current);
+  }, [enCine]);
+  const finCine = useCallback(() => {
+    const luego = cine?.luego;
+    setCine(null);
+    luego?.();
+  }, [cine]);
+
   const spec = PLANES.find((p) => p.id === plane)!;
 
   return (
@@ -1250,11 +1339,16 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               {[
                 ['raton', hud.resumen.enemigos, 'enemigos'],
                 ['estrella', hud.resumen.puntos, 'puntos'],
-                ['reloj', `${hud.resumen.tiempo}s`, 'tiempo'],
+                ['reloj', minSeg(hud.resumen.tiempo), 'tiempo'],
                 ['pez', hud.resumen.pescado, 'pescado'],
                 ['avion', hud.resumen.aviones, 'aviones'],
               ].map(([icon, value, label]) => (
-                <div key={label as string} className="hud-panel flex-col justify-center gap-1 px-1 py-1.5 [@media(max-height:500px)]:gap-0.5 [@media(max-height:500px)]:py-1">
+                <div
+                  key={label as string}
+                  title={label === 'tiempo' ? `Tiempo de la oleada: ${duracion(hud.resumen!.tiempo)}` : undefined}
+                  role="group"
+                  aria-label={label === 'tiempo' ? `Tiempo: ${duracion(hud.resumen!.tiempo)}` : `${label}: ${value}`}
+                  className="hud-panel flex-col justify-center gap-1 px-1 py-1.5 [@media(max-height:500px)]:gap-0.5 [@media(max-height:500px)]:py-1">
                   <Px i={icon as PxIcon} s={2} />
                   <div className="hud-lectura text-sm">{value}</div>
                   <div className="text-[9px] font-bold text-[#c8c0e0]">{label}</div>
@@ -1509,6 +1603,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <button type="button" autoFocus={!saved} onClick={() => { menu.aceptar(); setPhase('menu'); }} className={saved ? `${BTN} h-12 w-full text-base` : `${GO} w-full`}>
               ✈️ {saved ? 'Nueva partida' : 'Jugar'}
             </button>
+            <button type="button" onClick={() => { menu.aceptar(); setCine({ guion: 'prologo' }); }} className={`${BTN} inline-flex h-12 w-full items-center justify-center gap-2 text-base`}>
+              <Px i="pez" s={2} />
+              Ver historia
+            </button>
             <button type="button" onClick={() => { menu.aceptar(); setPhase('ajustes'); }} className={`${BTN} h-12 w-full text-base`}>
               ⚙️ Ajustes
             </button>
@@ -1710,6 +1808,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
 
+      {cine && <Cinematica key={cine.guion} guion={cine.guion} piloto={plane} calma={calma} alTerminar={finCine} />}
+
       {phase === 'over' && result && (
         <div role="dialog" aria-modal="true" aria-label="Fin del vuelo" className="absolute inset-0 z-50 grid place-items-center overflow-y-auto p-4 [@media(max-height:500px)]:p-2">
           <div className="w-full max-w-md rounded-[2rem] bg-[#fff8e7]/95 p-6 [@media(max-height:500px)]:p-3 text-center shadow-[0_8px_0_rgba(91,70,54,0.18)] ring-4 ring-[#ead6b3]">
@@ -1884,14 +1984,17 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             )}
           </div>
           {/* Right thumb: two vertical columns along the right edge — the big flares and
-              missile on the outside, bomb and throttle on the inside (nuke on top when there is one). */}
-          <div className="absolute bottom-4 right-3 z-10 flex items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
-            <div className="flex flex-col items-center gap-2.5">
+              missile on the outside, machine gun, bomb and throttle on the inside (nuke on top when there is one). */}
+          <div className="absolute bottom-4 right-3 z-10 flex items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] [@media(max-height:420px)]:bottom-2 [@media(max-height:420px)]:gap-2">
+            <div className="flex flex-col items-center gap-2.5 [@media(max-height:420px)]:gap-1.5">
               {!!hud?.nukes && (
                 <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>
                   <Px i="nuclear" s={3} />
                 </TouchButton>
               )}
+              <TouchButton label={hud?.hot ? 'Metralla: recalentada' : 'Metralla'} active={!!hud?.hot} {...hold('gun')}>
+                <Px i="bala" s={3} />
+              </TouchButton>
               <TouchButton label="Bomba" {...hold('bomb')}>
                 <Px i="bomba" s={3} />
               </TouchButton>
@@ -1907,7 +2010,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <Px i="frenar" s={3} />
               </TouchButton>
             </div>
-            <div className="flex flex-col items-center gap-2.5">
+            <div className="flex flex-col items-center gap-2.5 [@media(max-height:420px)]:gap-1.5">
               <TouchButton label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} big alerta={!!hud?.warn} {...hold('flare')}>
                 <Px i="bengala" s={4} />
               </TouchButton>
