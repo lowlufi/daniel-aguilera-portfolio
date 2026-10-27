@@ -4629,7 +4629,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g.globalAlpha = 1;
     }
     for (const e of s.eyectados) dibujarEyectado(sx(e.x), sy(e.y), e.t, e.jefa);
-    if (s.say) A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw, clamp(Math.round(2 / view.s), 1, 3));
+    if (s.say) {
+      const esc = clamp(Math.round(2 / view.s), 1, 3);
+      // Phones: pinned at the top centre under the HUD, so the thumb buttons never cover it.
+      if (view.touch) A.drawBubble(g, vw / 2, Math.round(96 / view.s), s.say.text, vw, esc, true);
+      else A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw, esc);
+    }
 
     if (s.mapa === 'tormenta') dibujarTormenta(vw, vh, sx, sy);
 

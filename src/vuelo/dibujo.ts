@@ -1568,7 +1568,7 @@ export function drawJunk(g: Ctx, kind: 'chancla' | 'tomate' | 'macetero', x: num
  * A speech bubble with its tail pointing down at (x, y). Words are drawn with
  * the game's rounded font; the bubble wraps to two lines when it's long.
  */
-export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: number, escala = 1) {
+export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: number, escala = 1, arriba = false) {
   // Big and readable: 12px text (times the zoom factor so it keeps its size on screen).
   const fs = 12 * escala, lh = fs + 2 * escala, pad = 7 * escala;
   g.font = `bold ${fs}px "Fredoka", "Nunito", sans-serif`;
@@ -1586,16 +1586,17 @@ export function drawBubble(g: Ctx, x: number, y: number, text: string, vw: numbe
   const w = Math.ceil(Math.max(...lines.map((l) => g.measureText(l).width))) + pad * 2;
   const h = lines.length * lh + pad;
   // Clear of the altimeter strip on the right edge.
-  const bx = Math.round(Math.min(vw - w - 14, Math.max(2, x - w / 2)));
-  const by = Math.round(y - h - 6);
+  // `arriba`: pinned with its top at y, centred (phones, where the thumbs cover the bottom).
+  const bx = arriba ? Math.round(vw / 2 - w / 2) : Math.round(Math.min(vw - w - 14, Math.max(2, x - w / 2)));
+  const by = arriba ? Math.round(y) : Math.round(y - h - 6);
   R(g, bx + 1, by - 1, w - 2, h + 2, '#6a2a4a');
   R(g, bx - 1, by + 1, w + 2, h - 2, '#6a2a4a');
   R(g, bx, by, w, h, '#6a2a4a');
   R(g, bx + 1, by, w - 2, h, P.white);
   R(g, bx, by + 1, w, h - 2, P.white);
-  // Tail.
+  // Tail (pointing down at the speaker; none when pinned at the top).
   const tx = Math.round(Math.min(bx + w - 8, Math.max(bx + 6, x)));
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < (arriba ? 0 : 5); i++) {
     R(g, tx - 3 + i, by + h + i - 1, 6 - i * 1.2, 1, '#6a2a4a');
     R(g, tx - 2 + i, by + h + i - 1, Math.max(1, 4 - i * 1.2), 1, P.white);
   }
