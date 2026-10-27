@@ -450,6 +450,49 @@ function Radio({ quien, texto, top }: { quien: string; texto: string; top: numbe
   );
 }
 
+/**
+ * Turns /aviones into an installable app while the game is open: adds the manifest,
+ * the iOS home-screen tags and the offline service worker, and catches the browser's
+ * install prompt. Returns the cleanup (the rest of the site isn't the game app).
+ */
+function usarWebApp(alPedir: (e: { prompt: () => Promise<unknown> } | null) => void) {
+  const puestos: HTMLElement[] = [];
+  const poner = (tag: 'link' | 'meta', attrs: Record<string, string>) => {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    document.head.appendChild(el);
+    puestos.push(el);
+  };
+  poner('link', { rel: 'manifest', href: '/aviones.webmanifest' });
+  poner('link', { rel: 'apple-touch-icon', href: '/aviones-apple.png' });
+  poner('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' });
+  poner('meta', { name: 'mobile-web-app-capable', content: 'yes' });
+  poner('meta', { name: 'apple-mobile-web-app-title', content: 'Escuadrón Dui' });
+  poner('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' });
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/aviones-sw.js', { scope: '/aviones' }).catch(() => {});
+  const onPrompt = (e: Event) => {
+    e.preventDefault();
+    alPedir(e as unknown as { prompt: () => Promise<unknown> });
+  };
+  const onInstalada = () => alPedir(null);
+  window.addEventListener('beforeinstallprompt', onPrompt);
+  window.addEventListener('appinstalled', onInstalada);
+  return () => {
+    for (const el of puestos) el.remove();
+    window.removeEventListener('beforeinstallprompt', onPrompt);
+    window.removeEventListener('appinstalled', onInstalada);
+  };
+}
+
+/** Touch control schemes the player can pick in the pause menu. */
+type Control = 'mitades' | 'joystick' | 'volante' | 'tocar';
+const CONTROLES: { id: Control; nombre: string; texto: string }[] = [
+  { id: 'mitades', nombre: 'Pantalla dividida', texto: 'Mantén un lado para girar' },
+  { id: 'joystick', nombre: 'Joystick', texto: 'Arrastra a la izquierda hacia donde volar' },
+  { id: 'volante', nombre: 'Volante', texto: 'Inclina el teléfono para girar' },
+  { id: 'tocar', nombre: 'Tocar', texto: 'El avión va hacia tu dedo' },
+];
+
 function Stars({ n }: { n: number }) {
   return (
     <span role="img" aria-label={`${n} de 5`} className="tracking-tight text-[#f0a45d]">
@@ -469,6 +512,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const [saved, setSaved] = useState<SavedGame | null>(readSave);
   const [plane, setPlane] = useState<ModeloAvion>(() => readSave()?.pilot ?? 'caza');
   const [hud, setHud] = useState<Hud | null>(null);
+  // Installable web app: the game's manifest and offline cache while on /aviones,
+  // and the browser's install prompt (Android/desktop) or iOS instructions.
+  const [instalar, setInstalar] = useState<{ prompt: () => Promise<unknown> } | null>(null);
+  const [ayudaIos, setAyudaIos] = useState(false);
+  const instalada = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || window.matchMedia?.('(display-mode: fullscreen)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true);
+  const esIos = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent);
+  useEffect(() => usarWebApp((e) => setInstalar(e)), []);
   // «Seguir» gets the focus without scrolling the wave card (autoFocus would jump it to the bottom).
   const seguirRef = useRef<HTMLButtonElement>(null);
   // The top bar's real height (its chips wrap on phones), so the boss bar and banners sit under it.
@@ -754,8 +804,61 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
    * counterclockwise, the right half clockwise (flying left: left dives,
    * right climbs). A quick double tap fires the super nitro.
    */
+  // Touch control scheme, remembered on this device.
+  const [control, setControl] = useState<Control>(() => {
+    try {
+      const v = localStorage.getItem('vuelo-control') as Control | null;
+      if (v && CONTROLES.some((c) => c.id === v)) return v;
+    } catch {
+      /* private mode */
+    }
+    return 'mitades';
+  });
+  const elegirControl = (c: Control) => {
+    setControl(c);
+    try {
+      localStorage.setItem('vuelo-control', c);
+    } catch {
+      /* private mode */
+    }
+    // iOS asks for permission to read the tilt, and only from a tap.
+    const DM = (window as unknown as { DeviceMotionEvent?: { requestPermission?: () => Promise<string> } }).DeviceMotionEvent;
+    if (c === 'volante' && DM?.requestPermission) DM.requestPermission().catch(() => {});
+    neutro.current = null;
+    game.current?.girar(0);
+    game.current?.apuntar(null);
+    game.current?.touch({ x: 0, y: 0 });
+  };
+  // Joystick: where the thumb landed (the base) and where it is now, in screen px.
+  const [stick, setStick] = useState<{ id: number; bx: number; by: number; x: number; y: number } | null>(null);
+  const neutro = useRef<number | null>(null);
+  const [inclinacion, setInclinacion] = useState(0);
+  // «Volante»: tilt the phone like a steering wheel; the lean when it starts is neutral.
+  useEffect(() => {
+    if (phase !== 'play' || !touchUi || control !== 'volante' || paused) return;
+    const onMove = (e: DeviceMotionEvent) => {
+      const g = e.accelerationIncludingGravity;
+      if (!g || g.x == null || g.y == null) return;
+      const ang = ((screen.orientation?.angle ?? (window as unknown as { orientation?: number }).orientation ?? 0) * Math.PI) / 180;
+      // Gravity in screen coordinates: x across the screen.
+      const gx = g.x * Math.cos(ang) + g.y * Math.sin(ang);
+      if (neutro.current === null) neutro.current = gx;
+      const k = Math.max(-1, Math.min(1, -(gx - neutro.current) / 4.5));
+      game.current?.girar(k);
+      setInclinacion(Math.round(k * 10) / 10);
+    };
+    window.addEventListener('devicemotion', onMove);
+    return () => {
+      window.removeEventListener('devicemotion', onMove);
+      game.current?.girar(0);
+    };
+  }, [phase, touchUi, control, paused]);
+  // «Tocar»: the plane flies towards the finger.
+  const puntoEnCanvas = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const r = canvasRef.current?.getBoundingClientRect();
+    return r ? [e.clientX - r.left, e.clientY - r.top] as const : null;
+  };
   const fingers = useRef(new Map<number, 1 | -1>());
-  const lastTap = useRef({ t: -1e9, side: 0 });
   const [turning, setTurning] = useState(0);
   // The hint goes away once the player has turned a couple of times.
   const [turns, setTurns] = useState(0);
@@ -771,13 +874,33 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     if (dir) setTurns((n) => n + 1);
   };
   const onSkyDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (control === 'volante') return;
+    if (control === 'tocar') {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* a pointer that already ended */
+      }
+      const q = puntoEnCanvas(e);
+      if (q) game.current?.apuntar(q[0], q[1]);
+      return;
+    }
+    if (control === 'joystick') {
+      const box0 = e.currentTarget.getBoundingClientRect();
+      // The stick lives on the left half; the right is for the weapon buttons.
+      if (stick || e.clientX - box0.left > box0.width * 0.55) return;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* a pointer that already ended */
+      }
+      setStick({ id: e.pointerId, bx: e.clientX, by: e.clientY, x: e.clientX, y: e.clientY });
+      return;
+    }
     const box = e.currentTarget.getBoundingClientRect();
     const side: 1 | -1 = e.clientX - box.left < box.width / 2 ? 1 : -1;
-    const now = performance.now();
-    if (now - lastTap.current.t < 320 && lastTap.current.side === side) {
-      game.current?.nitro();
-      lastTap.current = { t: -1e9, side: 0 };
-    } else lastTap.current = { t: now, side };
+    // No nitro from the sky any more: quick taps there are turn nudges (the nitro is
+    // a double tap on the accelerate button).
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
@@ -786,7 +909,36 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     fingers.current.set(e.pointerId, side);
     applyTurn();
   };
+  const onSkyMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (control === 'tocar' && e.buttons) {
+      const q = puntoEnCanvas(e);
+      if (q) game.current?.apuntar(q[0], q[1]);
+    } else if (control === 'joystick' && stick && e.pointerId === stick.id) {
+      const R = 46;
+      let dx = e.clientX - stick.bx, dy = e.clientY - stick.by;
+      const d = Math.hypot(dx, dy);
+      if (d > R) {
+        dx = (dx / d) * R;
+        dy = (dy / d) * R;
+      }
+      setStick({ ...stick, x: stick.bx + dx, y: stick.by + dy });
+      // Screen direction where to fly (up is +y for the game), with a small dead zone.
+      const k = Math.max(0, (Math.min(d, R) - 6) / (R - 6));
+      game.current?.touch({ x: d > 6 ? (dx / Math.max(1, Math.hypot(dx, dy))) * k : 0, y: d > 6 ? (-dy / Math.max(1, Math.hypot(dx, dy))) * k : 0 });
+    }
+  };
   const onSkyUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (control === 'tocar') {
+      game.current?.apuntar(null);
+      return;
+    }
+    if (control === 'joystick') {
+      if (stick && e.pointerId === stick.id) {
+        setStick(null);
+        game.current?.touch({ x: 0, y: 0 });
+      }
+      return;
+    }
     if (!fingers.current.delete(e.pointerId)) return;
     applyTurn();
   };
@@ -1360,6 +1512,24 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <button type="button" onClick={() => { menu.aceptar(); setPhase('creditos'); }} className={`${BTN} h-12 w-full text-base`}>
               🎬 Créditos
             </button>
+            {!instalada && (instalar || esIos) && (
+              <button
+                type="button"
+                onClick={() => {
+                  menu.aceptar();
+                  if (instalar) instalar.prompt().then(() => setInstalar(null)).catch(() => {});
+                  else setAyudaIos((v) => !v);
+                }}
+                className={`${BTN} h-12 w-full text-base`}
+              >
+                ⬇️ Instalar la app
+              </button>
+            )}
+            {ayudaIos && (
+              <p className="rounded-xl bg-[#1a1438]/85 px-3 py-2 text-left text-xs font-bold text-white ring-2 ring-[#7af0a0]/60">
+                En iPhone/iPad: toca <b>Compartir</b> (el cuadrado con la flecha) y luego <b>«Agregar a inicio»</b>. Se abrirá a pantalla completa como una app.
+              </p>
+            )}
             <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/')} className={`${BTN} h-12 w-full text-base`}>
               🏠 danieleduardo.cl
             </button>
@@ -1567,6 +1737,26 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   </span>
                   <input type="checkbox" role="switch" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="hud-switch" />
                 </label>
+                {touchUi && (
+                  <div className="mt-2">
+                    <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-[#c8c0e0]">Control táctil</div>
+                    <div role="radiogroup" aria-label="Control táctil" className="grid grid-cols-2 gap-1.5">
+                      {CONTROLES.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={control === c.id}
+                          onClick={() => elegirControl(c.id)}
+                          className={`${TECLA} !h-auto flex-col items-start px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
+                        >
+                          <span className="text-xs font-black">{c.nombre}</span>
+                          <span className="text-[10px] font-bold opacity-75">{c.texto}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {touchUi && hud && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button type="button" aria-label={`Cielo: ${CIELO_NOMBRE[hud.sky]}. Cambiar`} onClick={() => game.current?.cycleSky()} className={`${TECLA} gap-1.5 px-2.5`}>
@@ -1604,7 +1794,23 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
       {phase === 'play' && touchUi && !paused && (
         <>
-          <div className="absolute inset-x-0 bottom-0 top-16 z-10 flex touch-none" onPointerDown={onSkyDown} onPointerUp={onSkyUp} onPointerCancel={onSkyUp} onLostPointerCapture={onSkyUp}>
+          <div className="absolute inset-x-0 bottom-0 top-16 z-10 flex touch-none" onPointerDown={onSkyDown} onPointerMove={onSkyMove} onPointerUp={onSkyUp} onPointerCancel={onSkyUp} onLostPointerCapture={onSkyUp}>
+            {control === 'joystick' && stick && (
+              <div aria-hidden className="pointer-events-none fixed z-20" style={{ left: stick.bx - 46, top: stick.by - 46 }}>
+                <div className="h-[92px] w-[92px] rounded-full border-2 border-[#fff8e7]/50 bg-[#1a1438]/35" />
+                <div className="absolute h-10 w-10 rounded-full border-2 border-[#1a1438] bg-[#ffd84a]/85" style={{ left: 26 + stick.x - stick.bx, top: 26 + stick.y - stick.by }} />
+              </div>
+            )}
+            {control === 'volante' && (
+              <div aria-hidden className="hud-panel pointer-events-none absolute left-1/2 top-[22%] -translate-x-1/2 px-3 py-1 text-[11px] font-black opacity-80">
+                Volante
+                <span className="ml-2 inline-block h-2 w-20 overflow-hidden rounded-sm bg-[#1a1438]">
+                  <span className="block h-full bg-[#ffd84a]" style={{ width: '4px', marginLeft: `${38 + inclinacion * 38}px` }} />
+                </span>
+              </div>
+            )}
+            {control === 'mitades' && (
+              <>
             {/* Two invisible halves: hold one to turn. Only a soft glow on that edge, and a small arrow, show it. */}
             <div className="pointer-events-none relative h-full w-1/2">
               <div className={`absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white/25 to-transparent transition-opacity duration-150 ${turning === 1 ? 'opacity-100' : 'opacity-0'}`} />
@@ -1620,14 +1826,16 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             </div>
             {turns < 3 && !hud?.enTierra && (
               <span className="hud-panel pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 gap-1.5 px-3 py-1 text-center text-[11px] font-black opacity-85">
-                Mantén un lado para girar · la metralla dispara sola · doble toque:
+                Mantén un lado para girar · la metralla dispara sola · doble toque en acelerar:
                 <Px i="llama" s={1.5} />
                 nitro
               </span>
             )}
+              </>
+            )}
           </div>
           {/* Left thumb: throttle in the corner. */}
-          <div className="absolute bottom-10 left-3 z-10 flex flex-col gap-2 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
+          <div className="absolute bottom-4 left-3 z-10 flex flex-col gap-2.5 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
             <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
               {hud?.nitro === 'activo' ? <Px i="llama" s={3} /> : (
                 <span className="relative inline-flex">
@@ -1640,35 +1848,29 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <Px i="frenar" s={3} />
             </TouchButton>
           </div>
-          {/* Right thumb: the missile big in the corner, the rest in an arc around it. */}
-          <div className="absolute bottom-7 right-0 z-10 h-48 w-48 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] [@media(max-height:420px)]:h-40 [@media(max-height:420px)]:w-40">
-            <div className="absolute bottom-3 right-3">
-              <TouchButton label="Misil" big {...hold('fire')}>
-                <Px i="misil" s={4} />
+          {/* Right thumb: two clean rows, the missile big in the corner; nothing overlaps. */}
+          <div className="absolute bottom-4 right-3 z-10 flex flex-col items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
+            <div className="flex items-end gap-2.5">
+              {!!hud?.nukes && (
+                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>
+                  <Px i="nuclear" s={3} />
+                </TouchButton>
+              )}
+              <TouchButton label="Tonel" {...hold('tonel')}>
+                <Px i="tonel" s={3} />
               </TouchButton>
-            </div>
-            <div className="absolute bottom-3 right-[6.2rem] [@media(max-height:420px)]:right-[5.4rem]">
-              <TouchButton label="Bomba" {...hold('bomb')}>
-                <Px i="bomba" s={3} />
-              </TouchButton>
-            </div>
-            <div className="absolute bottom-[4.6rem] right-[5.2rem] [@media(max-height:420px)]:bottom-[4rem] [@media(max-height:420px)]:right-[4.5rem]">
               <TouchButton label="Bengalas" {...hold('flare')}>
                 <Px i="bengala" s={3} />
               </TouchButton>
             </div>
-            <div className="absolute bottom-[6.2rem] right-3 [@media(max-height:420px)]:bottom-[5.4rem]">
-              <TouchButton label="Tonel" {...hold('tonel')}>
-                <Px i="tonel" s={3} />
+            <div className="flex items-end gap-2.5">
+              <TouchButton label="Bomba" {...hold('bomb')}>
+                <Px i="bomba" s={3} />
+              </TouchButton>
+              <TouchButton label="Misil" big {...hold('fire')}>
+                <Px i="misil" s={4} />
               </TouchButton>
             </div>
-            {!!hud?.nukes && (
-              <div className="absolute bottom-[9.4rem] right-3 [@media(max-height:420px)]:bottom-[8.4rem]">
-                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>
-                  <Px i="nuclear" s={3} />
-                </TouchButton>
-              </div>
-            )}
           </div>
         </>
       )}

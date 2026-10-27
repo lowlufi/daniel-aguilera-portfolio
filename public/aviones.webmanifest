@@ -1,0 +1,21 @@
+{
+  "name": "Escuadrón Dui",
+  "short_name": "Escuadrón Dui",
+  "description": "Juego de aviones en pixel art de Daniel Eduardo: Dui, Lulu y Almendrita contra los ratones y la vecina Margarita.",
+  "lang": "es-CL",
+  "id": "/aviones",
+  "start_url": "/aviones?app=1",
+  "scope": "/aviones",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#120c24",
+  "theme_color": "#3a2a6a",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "/aviones-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/aviones-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/aviones-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/aviones-icono.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

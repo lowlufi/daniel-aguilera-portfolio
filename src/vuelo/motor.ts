@@ -2996,8 +2996,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // right half clockwise. It starts gentle (a tap nudges the nose) and tightens
     // while held, up to 90° off the nose: the tightest turn.
     if (turn && s.mode === 'play' && !s.dead) {
-      turnK = Math.min(1, turnK + dt / 0.4);
-      const off = turn * (0.35 + 1.1 * turnK * turnK);
+      turnK = Math.min(1, turnK + dt / 0.22);
+      const off = turn * (0.75 + 0.7 * turnK);
       touch.x = Math.cos(p.rumbo + off);
       touch.y = Math.sin(p.rumbo + off);
       syncInput();
@@ -4830,11 +4830,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (!s.attract && s.mode === 'play') {
       const u = clamp(Math.round(2 / view.s), 1, 3);
       // Phones: a slightly smaller radar at the bottom centre, between the throttle and weapon thumbs.
-      const S = (view.touch ? 48 : 62) * u;
+      const S = (view.touch ? 46 : 62) * u;
       const ALC = 760; // world px from the plane to the radar's edge
       const k = S / (2 * ALC);
-      const rx = view.touch ? Math.round(vw / 2 - S / 2) : vw - S - 8 * u;
-      const ry = vh - S - 12 * u;
+      // Phones: top-right corner under the pause key (the bottom is for the thumbs and the road).
+      const rx = view.touch ? vw - S - 5 * u : vw - S - 8 * u;
+      const ry = view.touch ? 30 * u : vh - S - 12 * u;
       const cx = rx + S / 2, cy = ry + S / 2;
       const aX = (x: number) => Math.round(cx + (x - p.x) * k);
       const aY = (y: number) => Math.round(cy - (y - p.y) * k);
@@ -5177,16 +5178,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   let lastAcc = -1e9;
   function tapAccel() {
     const now = performance.now();
-    if (now - lastAcc < 350 && s.nitroT > 0) {
+    if (now - lastAcc < 260 && s.nitroT > 0) {
       apagarNitro();
       lastAcc = -1e9;
       return;
     }
-    if (now - lastAcc < 350 && startNitro()) {
+    if (now - lastAcc < 260 && startNitro()) {
       lastAcc = -1e9;
       return;
     }
-    if (now - lastAcc < 350 && s.nitroCd > 0 && s.mode === 'play' && !s.attract) AB.nitroNoListo();
+    if (now - lastAcc < 260 && s.nitroCd > 0 && s.mode === 'play' && !s.attract) AB.nitroNoListo();
     lastAcc = now;
   }
   /** Cuts the super nitro short: the unused part comes back as charge. */
@@ -5349,6 +5350,35 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     },
     /** Touch screens lift the ground above the on-screen buttons. */
     /** Touch turning: +1 turns the nose counterclockwise, -1 clockwise, 0 lets go. */
+    /** Tilt («volante»): a graded turn, -1…1 (0 lets go). */
+    girar(k: number) {
+      const v = clamp(k, -1, 1);
+      turn = Math.abs(v) < 0.08 ? 0 : v;
+      if (!turn) {
+        touch.x = touch.y = 0;
+        syncInput();
+      }
+    },
+    /**
+     * «Tocar»: fly towards a point on screen (CSS px inside the canvas), or let go with null.
+     * The nose is steered at the finger, as if pointing with the arrow keys.
+     */
+    apuntar(px: number | null, py = 0) {
+      if (px === null) {
+        touch.x = touch.y = 0;
+        syncInput();
+        return;
+      }
+      const p = s.plane;
+      const vx = px / view.s - (p.x - s.camX);
+      const vy = toS(p.y) - py / view.s;
+      const d = Math.hypot(vx, vy);
+      if (d < 6) return;
+      turn = 0;
+      touch.x = vx / d;
+      touch.y = vy / d;
+      syncInput();
+    },
     steer(dir: number) {
       turn = Math.sign(dir);
       if (!turn) {
