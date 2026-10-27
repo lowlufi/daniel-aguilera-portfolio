@@ -1834,29 +1834,29 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </>
             )}
           </div>
-          {/* Left thumb: throttle in the corner. */}
-          <div className="absolute bottom-4 left-3 z-10 flex flex-col gap-2.5 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
-            <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+          {/* Right thumb: throttle column, then the weapons in two clean rows (missile big in the corner). */}
+          <div className="absolute bottom-4 right-3 z-10 flex items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
+          <div className="flex flex-col gap-2.5">
+              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
               {hud?.nitro === 'activo' ? <Px i="llama" s={3} /> : (
-                <span className="relative inline-flex">
-                  <Px i="acelerar" s={3} />
+                  <span className="relative inline-flex">
+                    <Px i="acelerar" s={3} />
                   {hud?.nitro === 'listo' && <Px i="llama" s={1.5} className="absolute -right-2.5 -top-2" />}
-                </span>
+                  </span>
               )}
-            </TouchButton>
-            <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>
-              <Px i="frenar" s={3} />
-            </TouchButton>
+              </TouchButton>
+              <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>
+                <Px i="frenar" s={3} />
+              </TouchButton>
           </div>
-          {/* Right thumb: two clean rows, the missile big in the corner; nothing overlaps. */}
-          <div className="absolute bottom-4 right-3 z-10 flex flex-col items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
+          <div className="flex flex-col items-end gap-2.5">
             <div className="flex items-end gap-2.5">
               {!!hud?.nukes && (
                 <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>
                   <Px i="nuclear" s={3} />
                 </TouchButton>
               )}
-              <TouchButton label="Bengalas" {...hold('flare')}>
+              <TouchButton label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} alerta={!!hud?.warn} {...hold('flare')}>
                 <Px i="bengala" s={3} />
               </TouchButton>
             </div>
@@ -1869,18 +1869,19 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </TouchButton>
             </div>
           </div>
+          </div>
         </>
       )}
     </div>
   );
 }
 
-function TouchButton({ label, big, active, children, ...rest }: { label: string; big?: boolean; active?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+function TouchButton({ label, big, active, alerta, children, ...rest }: { label: string; big?: boolean; active?: boolean; alerta?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
     <button
       type="button"
       aria-label={label}
-      className={`hud-touch flex flex-col items-center justify-center ${active ? 'hud-touch-on' : ''} ${
+      className={`hud-touch flex flex-col items-center justify-center ${active ? 'hud-touch-on' : ''} ${alerta ? 'hud-touch-alerta' : ''} ${
         big ? 'h-20 w-20 [@media(max-height:420px)]:h-[4.5rem] [@media(max-height:420px)]:w-[4.5rem]' : 'h-14 w-14 [@media(max-height:420px)]:h-12 [@media(max-height:420px)]:w-12'
       }`}
       {...rest}

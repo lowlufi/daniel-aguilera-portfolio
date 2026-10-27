@@ -792,3 +792,16 @@ html.lite .liquid-glass-strong::before {
     filter: drop-shadow(1px 0 0 #22183f) drop-shadow(-1px 0 0 #22183f) drop-shadow(0 1px 0 #22183f) drop-shadow(0 -1px 0 #22183f);
   }
 }
+
+/* Flares touch key: flashes red/yellow while a missile is about to hit. */
+@keyframes hud-alerta-bengala {
+  0%, 49% { background-color: #ff4a5a; box-shadow: 0 0 0 3px #ffd84a; }
+  50%, 100% { background-color: #ffd84a; box-shadow: 0 0 0 3px #ff4a5a; }
+}
+.hud-touch.hud-touch-alerta {
+  animation: hud-alerta-bengala 0.32s steps(1) infinite;
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-touch.hud-touch-alerta { animation: none; background-color: #ff4a5a; box-shadow: 0 0 0 3px #ffd84a; }
+}
