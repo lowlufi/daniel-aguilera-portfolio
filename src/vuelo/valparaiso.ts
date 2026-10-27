@@ -809,45 +809,54 @@ function estadio(g: Ctx, x: number, y: number, w: number) {
   R(g, x0 + 2, y - 7, 4, 7, '#2a2438');
 }
 
-/** «El Roma»: a corner fuente de soda of Playa Ancha, striped awning and a red sign on the roof. */
+/** «El Roma»: the neighbourhood bar of Playa Ancha — an old wooden corner bar with warm windows, schops and a lit sign. */
 function elRoma(g: Ctx, x: number, y: number) {
   const W = 34;
+  // Old two-storey building: ochre plaster upstairs, dark varnished wood bar front below.
   R(g, x - 1, y - 28, W + 2, 28, NOCHE);
-  R(g, x, y - 27, W, 27, '#fff0d8');
-  R(g, x, y - 27, W, 2, '#e8d0b0');
-  // Upstairs windows with green shutters.
+  R(g, x, y - 27, W, 13, '#e8b86a');
+  R(g, x, y - 27, W, 2, '#f4d08a');
   for (const wx of [x + 4, x + 14, x + 24]) {
-    R(g, wx - 1, y - 24, 1, 6, '#2f9a6a');
-    R(g, wx, y - 24, 5, 6, P.gl1);
-    R(g, wx, y - 24, 5, 1, P.white);
-    R(g, wx + 5, y - 24, 1, 6, '#2f9a6a');
+    // Upstairs: little balconies with iron railings.
+    R(g, wx, y - 24, 5, 6, '#3a5a8a');
+    R(g, wx, y - 24, 5, 1, '#6a8ac8');
+    R(g, wx - 1, y - 18, 7, 1, '#2a2438');
+    for (let i = 0; i < 7; i += 2) R(g, wx - 1 + i, y - 20, 1, 2, '#2a2438');
   }
-  // Awning: green, white and red stripes, scalloped.
-  for (let i = 0; i < W + 4; i++) {
-    const c = ['#2f9a6a', P.white, '#e8504a'][Math.floor(i / 3) % 3];
-    R(g, x - 2 + i, y - 16, 1, 4 + (i % 3 === 1 ? 1 : 0), c);
+  R(g, x, y - 14, W, 14, '#5a3220');
+  R(g, x, y - 14, W, 1, '#8a5a3a');
+  // Two warm windows: the bar counter, bottles on the shelf, a schop being poured.
+  for (const wx of [x + 2, x + 13]) {
+    R(g, wx, y - 12, 9, 8, NOCHE);
+    R(g, wx + 1, y - 11, 7, 6, '#ffcf6a');
+    for (let i = 0; i < 6; i += 2) R(g, wx + 1 + i, y - 11, 1, 2, i % 4 ? '#3a8a4a' : '#8a3a2a');
+    R(g, wx + 1, y - 7, 7, 2, '#7a4a2a');
   }
-  R(g, x - 2, y - 17, W + 4, 1, NOCHE);
-  // Shop window with a cake and a schop, and the door.
-  R(g, x + 3, y - 10, 18, 9, NOCHE);
-  R(g, x + 4, y - 9, 16, 8, '#ffe8a0');
-  R(g, x + 6, y - 5, 5, 3, '#f4a7b9');
-  R(g, x + 6, y - 6, 5, 1, P.white);
-  R(g, x + 14, y - 7, 3, 5, '#ffb43a');
-  R(g, x + 14, y - 8, 3, 1, P.white);
-  R(g, x + 24, y - 11, 7, 11, NOCHE);
-  R(g, x + 25, y - 10, 5, 10, '#8a5a3a');
-  R(g, x + 29, y - 5, 1, 1, P.gold);
-  // Rooftop sign.
-  const txt = 'EL ROMA';
+  // A frothy schop painted on the glass of the second window.
+  R(g, x + 17, y - 10, 3, 4, '#ffb43a');
+  R(g, x + 17, y - 11, 3, 1, P.white);
+  R(g, x + 20, y - 9, 1, 2, '#ffb43a');
+  // Swinging bar doors.
+  R(g, x + 24, y - 12, 8, 12, NOCHE);
+  R(g, x + 25, y - 11, 6, 11, '#2a1a12');
+  R(g, x + 25, y - 8, 3, 5, '#a8703a');
+  R(g, x + 28, y - 8, 3, 5, '#a8703a');
+  // A barrel outside and the chalkboard: «HAY SCHOP».
+  D.disc(g, x - 4, y - 3, 3, '#8a5a3a');
+  R(g, x - 7, y - 4, 7, 1, '#3a2a2a');
+  R(g, x - 7, y - 2, 7, 1, '#3a2a2a');
+  // Lit sign over the door: «BAR EL ROMA».
+  const txt = 'BAR EL ROMA';
   const tw = anchoLetrero(txt);
-  const sx = x + Math.round((W - tw) / 2) - 3;
+  // Leaning left so the stadium next door doesn't cover its end.
+  const sx = x + W - tw - 12;
   R(g, sx + 3, y - 31, 1, 3, NOCHE);
   R(g, sx + tw + 2, y - 31, 1, 3, NOCHE);
   R(g, sx - 1, y - 40, tw + 8, 10, NOCHE);
-  R(g, sx, y - 39, tw + 6, 8, '#e8504a');
-  R(g, sx, y - 39, tw + 6, 1, '#ff8a7a');
-  escribir(g, txt, sx + 3, y - 37, P.white, '#8a2a2a');
+  R(g, sx, y - 39, tw + 6, 8, '#2a1a3a');
+  R(g, sx, y - 39, tw + 6, 1, '#ffcf6a');
+  R(g, sx, y - 32, tw + 6, 1, '#ffcf6a');
+  escribir(g, txt, sx + 3, y - 37, '#ffcf6a', '#8a3a1a');
 }
 
 /** Paseo Gervasoni on Cerro Concepción: a vine pergola over a bench and a coin telescope at the railing. */
