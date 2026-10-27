@@ -1742,12 +1742,14 @@ export function drawShell(g: Ctx, x: number, y: number) {
 }
 
 export function drawFlare(g: Ctx, x: number, y: number, t: number) {
+  // Small and fine: a hot white point in a thin gold halo, twinkling.
   const k = Math.floor(t * 20) % 2;
-  D.disc(g, x, y, 2 + k, P.gold);
-  R(g, x - 1, y - 1, 2, 2, P.white);
+  const X = Math.round(x), Y = Math.round(y);
+  R(g, X - 1, Y - 1, 3, 3, P.gold);
+  R(g, X, Y, 1, 1, P.white);
   if (k) {
-    R(g, x - 4, y, 9, 1, P.gold1);
-    R(g, x, y - 4, 1, 9, P.gold1);
+    R(g, X - 2, Y, 5, 1, P.gold1);
+    R(g, X, Y - 2, 1, 5, P.gold1);
   }
 }
 

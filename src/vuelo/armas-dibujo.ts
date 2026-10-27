@@ -287,18 +287,18 @@ export function drawChaff(g: Ctx, x: number, y: number, t: number, seed: number)
 function trampa(g: Ctx, x: number, y: number, t: number) {
   const a0 = g.globalAlpha;
   const X = Math.round(x), Y = Math.round(y);
-  for (let i = 1; i <= 9; i++) {
-    g.globalAlpha = a0 * 0.45 * (1 - i / 10);
-    D.disc(g, X + Math.round(Math.sin(t * 2 + i * 0.7) * i * 0.4), Y - i * 4, 1 + Math.round(i / 3), i < 3 ? '#e8d8c8' : '#c0b8c4');
+  // A thin smoke thread above a small orange point.
+  for (let i = 1; i <= 7; i++) {
+    g.globalAlpha = a0 * 0.4 * (1 - i / 8);
+    R(g, X + Math.round(Math.sin(t * 2 + i * 0.7) * i * 0.3), Y - i * 3, 1, 2, i < 3 ? '#e8d8c8' : '#c0b8c4');
   }
   g.globalAlpha = a0;
   const k = Math.floor(t * 18) % 2;
-  D.disc(g, X, Y, 3 + k, '#ff8a2a');
-  D.disc(g, X, Y, 2, P.gold);
-  R(g, X - 1, Y - 1, 2, 2, P.white);
+  R(g, X - 1, Y - 1, 3, 3, '#ff8a2a');
+  R(g, X, Y, 1, 1, P.white);
   if (k) {
-    R(g, X - 6, Y, 13, 1, '#ffc47a');
-    R(g, X, Y - 5, 1, 11, '#ffc47a');
+    R(g, X - 2, Y, 5, 1, '#ffc47a');
+    R(g, X, Y - 2, 1, 5, '#ffc47a');
   }
 }
 

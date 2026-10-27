@@ -2834,7 +2834,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
     }
-    L.luz(s.luces, f.x, f.y, 18, '#fff2c0', 0.12);
+    L.luz(s.luces, f.x, f.y, 10, '#fff2c0', 0.1);
     fx('bengalas', sfx.flare, { vol: 0.32, rate: 1.05 + sv.i * 0.025, dur: 0.16 }, p.x);
     sv.i++;
     if (sv.i >= SALVA_N) {
@@ -3645,8 +3645,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const b of s.bengalasR) {
       FV.pasoBengala(b, dt, wind);
       b.t += dt;
-      L.luz(s.luces, b.x, b.y, 16, '#ffb070', 0.06);
-      if (Math.random() < dt * 30) puff(b.x, b.y, rand(0.6, 1), false, 0.6, 0, 3);
+      L.luz(s.luces, b.x, b.y, 10, '#ffb070', 0.05);
+      if (Math.random() < dt * 25) puff(b.x, b.y, rand(0.4, 0.7), false, 0.55, 0, 3);
     }
     s.bengalasR = s.bengalasR.filter((b) => b.t < 2.4 && b.y > ground(b.x));
     for (const [k, v] of s.bengalaCd) if (v - dt <= 0) s.bengalaCd.delete(k); else s.bengalaCd.set(k, v - dt);
@@ -4058,9 +4058,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       f.t += dt;
       if (f.tipo === 'holograma') L.luz(s.luces, f.x, f.y, 14, '#7af0ff', 0.05);
       else if (f.tipo !== 'chaff') {
-        L.luz(s.luces, f.x, f.y, f.tipo === 'trampa' ? 20 : 18, f.tipo === 'trampa' ? '#ffc070' : '#fff2c0', 0.07);
+        L.luz(s.luces, f.x, f.y, 10, f.tipo === 'trampa' ? '#ffc070' : '#fff2c0', 0.06);
         // A thick white smoke trail: the arcs of the burst stay drawn in the sky for a moment.
-        if (Math.random() < dt * 50) puff(f.x, f.y, rand(0.6, 1), false, 0.7, 0, 3);
+        if (Math.random() < dt * 40) puff(f.x, f.y, rand(0.4, 0.7), false, 0.6, 0, 3);
       }
     }
     s.flareBodies = s.flareBodies.filter((f) => f.t < 2.6 && f.y > ground(f.x));
