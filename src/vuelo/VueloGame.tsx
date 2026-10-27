@@ -15,7 +15,7 @@ import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
  */
 
 /** intro → titulo (title menu over a self-playing game) → menu (hangar) → play → over. */
-type Phase = 'intro' | 'titulo' | 'creditos' | 'menu' | 'play' | 'over';
+type Phase = 'intro' | 'titulo' | 'creditos' | 'ajustes' | 'menu' | 'play' | 'over';
 
 const AUTOR = 'Daniel Aguilera Campusano';
 /** The four upgrades bought with points between waves. */
@@ -780,7 +780,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
       // Esc goes back from the credits and the hangar (Enter uses the focused button everywhere).
-      if (e.code === 'Escape' && (phase === 'creditos' || (phase === 'menu' && !confirmado))) setPhase('titulo');
+      if (e.code === 'Escape' && (phase === 'creditos' || phase === 'ajustes' || (phase === 'menu' && !confirmado))) setPhase('titulo');
     };
     const onHide = () => {
       if (document.hidden && phase === 'play' && !paused) togglePause();
@@ -1029,7 +1029,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {/* Top bar: the instrument panel on the left, the cockpit switches on the right. */}
       <div ref={barraRef} className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         <div className={`pointer-events-auto flex flex-wrap items-center ${movil ? 'gap-1.5' : 'gap-2'}`}>
-          {phase === 'intro' || phase === 'titulo' || phase === 'creditos' ? null : phase === 'menu' ? (
+          {phase === 'intro' || phase === 'titulo' || phase === 'creditos' || phase === 'ajustes' ? null : phase === 'menu' ? (
             <span className={`${chip} px-3`}>
               <Px i="avion" s={ic} />
               <span className="hud-lectura text-[#fff8e7]">Escuadrón Dui</span>
@@ -1509,6 +1509,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <button type="button" autoFocus={!saved} onClick={() => { menu.aceptar(); setPhase('menu'); }} className={saved ? `${BTN} h-12 w-full text-base` : `${GO} w-full`}>
               ✈️ {saved ? 'Nueva partida' : 'Jugar'}
             </button>
+            <button type="button" onClick={() => { menu.aceptar(); setPhase('ajustes'); }} className={`${BTN} h-12 w-full text-base`}>
+              ⚙️ Ajustes
+            </button>
             <button type="button" onClick={() => { menu.aceptar(); setPhase('creditos'); }} className={`${BTN} h-12 w-full text-base`}>
               🎬 Créditos
             </button>
@@ -1539,6 +1542,52 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       )}
 
       {/* Credits: a slow SNES-style roll; every role is the author's. */}
+      {/* Settings from the title menu: sound, reduced motion and the touch control scheme. */}
+      {phase === 'ajustes' && (
+        <div role="dialog" aria-modal="true" aria-label="Ajustes" className="absolute inset-0 z-30 grid place-items-center overflow-y-auto bg-[#120c24]/75 p-4">
+          <div className="hud-panel w-full max-w-md flex-col items-stretch gap-3 p-4 text-left">
+            <h2 className="logo-dui text-3xl font-black">Ajustes</h2>
+            <div className="hud-ajustes">
+              <label className="hud-ajuste">
+                <span className="flex items-center gap-2">
+                  <Px i={muted ? 'mudo' : 'parlante'} s={2} tinta="#fff8e7" />
+                  Sonido
+                </span>
+                <input type="checkbox" role="switch" autoFocus checked={!muted} onChange={toggleMute} className="hud-switch" />
+              </label>
+              <label className="hud-ajuste">
+                <span>
+                  Menos movimiento
+                  <small className="block text-[11px] font-bold text-[#c8c0e0]">Sin sacudidas ni destellos fuertes</small>
+                </span>
+                <input type="checkbox" role="switch" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="hud-switch" />
+              </label>
+              <div className="mt-2">
+                <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-[#c8c0e0]">Control táctil {touchUi ? '' : '(en teléfonos y tablets)'}</div>
+                <div role="radiogroup" aria-label="Control táctil" className="grid grid-cols-2 gap-1.5">
+                  {CONTROLES.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={control === c.id}
+                      onClick={() => elegirControl(c.id)}
+                      className={`${TECLA} !h-auto flex-col items-start px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
+                    >
+                      <span className="text-xs font-black">{c.nombre}</span>
+                      <span className="text-[10px] font-bold opacity-75">{c.texto}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <button type="button" onClick={() => { menu.volver(); setPhase('titulo'); }} className={`${TECLA} self-start px-3`}>
+              ← Volver
+            </button>
+          </div>
+        </div>
+      )}
+
       {phase === 'creditos' && (
         <div role="dialog" aria-modal="true" aria-label="Créditos" className="absolute inset-0 z-30 overflow-hidden bg-[#120c24]/85 text-center text-white motion-reduce:overflow-y-auto">
           <div className="creditos-rueda mx-auto max-w-lg px-6 pb-[60vh] pt-[100vh]">
@@ -1834,41 +1883,38 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </>
             )}
           </div>
-          {/* Right thumb: throttle column, then the weapons in two clean rows (missile big in the corner). */}
+          {/* Right thumb: two vertical columns along the right edge — the big flares and
+              missile on the outside, bomb and throttle on the inside (nuke on top when there is one). */}
           <div className="absolute bottom-4 right-3 z-10 flex items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)]">
-          <div className="flex flex-col gap-2.5">
-              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
-              {hud?.nitro === 'activo' ? <Px i="llama" s={3} /> : (
-                  <span className="relative inline-flex">
-                    <Px i="acelerar" s={3} />
-                  {hud?.nitro === 'listo' && <Px i="llama" s={1.5} className="absolute -right-2.5 -top-2" />}
-                  </span>
-              )}
-              </TouchButton>
-              <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>
-                <Px i="frenar" s={3} />
-              </TouchButton>
-          </div>
-          <div className="flex flex-col items-end gap-2.5">
-            <div className="flex items-end gap-2.5">
+            <div className="flex flex-col items-center gap-2.5">
               {!!hud?.nukes && (
                 <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>
                   <Px i="nuclear" s={3} />
                 </TouchButton>
               )}
-              <TouchButton label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} alerta={!!hud?.warn} {...hold('flare')}>
-                <Px i="bengala" s={3} />
-              </TouchButton>
-            </div>
-            <div className="flex items-end gap-2.5">
               <TouchButton label="Bomba" {...hold('bomb')}>
                 <Px i="bomba" s={3} />
+              </TouchButton>
+              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+                {hud?.nitro === 'activo' ? <Px i="llama" s={3} /> : (
+                  <span className="relative inline-flex">
+                    <Px i="acelerar" s={3} />
+                    {hud?.nitro === 'listo' && <Px i="llama" s={1.5} className="absolute -right-2.5 -top-2" />}
+                  </span>
+                )}
+              </TouchButton>
+              <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>
+                <Px i="frenar" s={3} />
+              </TouchButton>
+            </div>
+            <div className="flex flex-col items-center gap-2.5">
+              <TouchButton label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} big alerta={!!hud?.warn} {...hold('flare')}>
+                <Px i="bengala" s={4} />
               </TouchButton>
               <TouchButton label="Misil" big {...hold('fire')}>
                 <Px i="misil" s={4} />
               </TouchButton>
             </div>
-          </div>
           </div>
         </>
       )}
