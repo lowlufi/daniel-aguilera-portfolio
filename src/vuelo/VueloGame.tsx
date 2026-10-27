@@ -18,12 +18,12 @@ import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
 type Phase = 'intro' | 'titulo' | 'creditos' | 'menu' | 'play' | 'over';
 
 const AUTOR = 'Daniel Aguilera Campusano';
-/** The four upgrades bought with ⭐ between waves. */
-const MEJORAS: { k: Mejorable; icono: string; nombre: string; efecto: string }[] = [
-  { k: 'dano', icono: '💥', nombre: 'Daño', efecto: '+15 % por nivel' },
-  { k: 'salud', icono: '❤️', nombre: 'Salud', efecto: '+1 coraza por oleada' },
-  { k: 'defensa', icono: '🛡️', nombre: 'Defensa', efecto: '+10 % de desviar' },
-  { k: 'municion', icono: '🚀', nombre: 'Munición', efecto: '+1 puesto de cada arma' },
+/** The four upgrades bought with points between waves. */
+const MEJORAS: { k: Mejorable; icono: PxIcon; nombre: string; efecto: string }[] = [
+  { k: 'dano', icono: 'explosion', nombre: 'Daño', efecto: '+15 % por nivel' },
+  { k: 'salud', icono: 'corazon', nombre: 'Salud', efecto: '+1 coraza por oleada' },
+  { k: 'defensa', icono: 'escudo', nombre: 'Defensa', efecto: '+10 % de desviar' },
+  { k: 'municion', icono: 'misil', nombre: 'Munición', efecto: '+1 puesto de cada arma' },
 ];
 /** Every role in the credits, all of them by the author. */
 const ROLES = [
@@ -69,7 +69,7 @@ function readMuted() {
  */
 const PX_COL: Record<string, string> = {
   k: '#22183f', w: '#fff8e7', y: '#ffd84a', o: '#f0a45d', O: '#e8742a', r: '#ff5a6a', p: '#ff8ab8',
-  g: '#7af0a0', b: '#7ad8ff', B: '#4a7ae0', s: '#c8c0e0', m: '#ddd2ec',
+  g: '#7af0a0', b: '#7ad8ff', B: '#4a7ae0', s: '#c8c0e0', m: '#ddd2ec', f: '#ffd2b0', G: '#8a8aa8',
 };
 const PX = {
   avion: ['yy.........', 'yyy..bb....', 'yyyyyyyyyy.', '.oooooooyyw', '....ooo....'],
@@ -100,6 +100,20 @@ const PX = {
   lupaMenos: ['..kkk...', '.k...k..', 'k.....k.', 'k.kkk.k.', 'k.....k.', '.k...kk.', '..kkk.kk', '......kk'],
   casa: ['...k...', '..kkk..', '.kkkkk.', 'kkkkkkk', '.kkkkk.', '.kk.kk.', '.kk.kk.'],
   hangar: ['..kkk..', '.k...k.', 'k.kkk.k', 'k.k.k.k', 'k.k.k.k', 'kkkkkkk'],
+  alerta: ['...k...', '..kyk..', '..kyk..', '.kkykk.', '.kkkkk.', 'kkkykkk', 'kkkkkkk'],
+  bombilla: ['.yyyy.', 'ywyyyy', 'ywyyyy', 'yyyyyy', '.yyyy.', '.ssss.', '.ssss.', '..ss..'],
+  copo: ['...B...', '.B.B.B.', '..BBB..', 'BBBwBBB', '..BBB..', '.B.B.B.', '...B...'],
+  hielo: ['BBBBBBB', 'BwwbbbB', 'BwbbbbB', 'BbbbbbB', 'BbbbbbB', 'BbbbbwB', 'BBBBBBB'],
+  abuela: ['..sssss..', '.sssssss.', 'ssfffffss', 'sfkkfkkfs', 'spfffffps', '.ffkkkff.', '.fkfffkf.', '..fffff..'],
+  antena: ['.g...g.', 'g..s..g', 'g.sss.g', '.g.s.g.', '...s...', '..s.s..', '.s...s.'],
+  reloj: ['..www..', '.w...w.', 'w..y..w', 'w..yy.w', 'w.....w', '.w...w.', '..www..'],
+  candado: ['..sss..', '.s...s.', '.s...s.', 'yyyyyyy', 'yyykyyy', 'yyykyyy', 'yyyyyyy'],
+  escudo: ['bbbbbbb', 'bwbbbbb', 'bwbbbbb', 'bbbbbbb', '.bbbbb.', '.bbbbb.', '..bbb..', '...b...'],
+  explosion: ['o..y..o', '.o.y.o.', '..yry..', 'yyrwryy', '..yry..', '.o.y.o.', 'o..y..o'],
+  acelerar: ['kk...kk..', '.kk...kk.', '..kk...kk', '.kk...kk.', 'kk...kk..'],
+  frenar: ['.rrrrr.', 'rrrrrrr', 'rwwwwwr', 'rrrrrrr', '.rrrrr.'],
+  tonel: ['.BBBBB..', 'B.....B.', 'B.BBB..B', 'B.B.B..B', 'B.B....B', 'B..BBBB.', '.B......', '..BBBBBB'],
+  giro: ['...www.w.', '..w...ww.', '.w...www.', 'w........', 'w........', 'w.......w', '.w.....w.', '..wwwww..'],
 } as const;
 type PxIcon = keyof typeof PX;
 /** Each icon's runs of same-coloured pixels, worked out once. */
@@ -176,6 +190,25 @@ function Contador({ v, cifras = 5 }: { v: number; cifras?: number }) {
 
 const CIELO_NOMBRE: Record<string, string> = { auto: 'automático', dia: 'día', tarde: 'tarde', noche: 'noche' };
 const CIELO_ICONO: Record<string, PxIcon> = { auto: 'auto', dia: 'sol', tarde: 'tarde', noche: 'luna' };
+
+/** The engine's texts may carry emoji; the HUD draws its own icons, so they're taken out (with any «( / )» they leave). */
+const EMOJI = /(?:\p{Extended_Pictographic}|\p{Regional_Indicator})[\uFE0F\u200D\p{Extended_Pictographic}]*/gu;
+function limpio(t: string) {
+  return t
+    .replace(EMOJI, '')
+    .replace(/\s*\/\s*\)/g, ')')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.!?)])/g, '$1')
+    .trim();
+}
+/** A banner's leading emoji, as one of the HUD's pixel icons. */
+function iconoDe(t: string): PxIcon | null {
+  if (t.startsWith('🐟')) return 'pez';
+  if (t.startsWith('☢')) return 'nuclear';
+  if (t.startsWith('✈')) return 'avion';
+  return null;
+}
 
 /** A big pilot portrait, animated at the pose's own pace (pixel art scaled with CSS). */
 function Retrato({ m, pose, className }: { m: ModeloAvion; pose: Pose; className?: string }) {
@@ -398,15 +431,18 @@ function Radio({ quien, texto, top }: { quien: string; texto: string; top: numbe
   }, [texto]);
   return (
     <div role="status" aria-live="polite" className="pointer-events-none absolute left-3 z-20 max-w-[min(22rem,70vw)] animate-[aparece_0.2s_ease-out]" style={{ top: top + 6 }}>
-      <div className="flex items-start gap-2 rounded-xl bg-[#1a1438]/85 px-2.5 py-1.5 text-white shadow-[0_3px_0_rgba(0,0,0,0.25)] ring-2 ring-[#7af0a0]/60">
-        <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#2a2458] text-base ring-1 ring-[#7af0a0]/50" aria-hidden>🐭</span>
+      <div className="hud-panel hud-radio items-start gap-2 whitespace-normal px-2 py-1.5">
+        <span className="hud-socket mt-0.5 grid h-7 w-7 shrink-0 place-items-center" aria-hidden>
+          <Px i="raton" s={2} />
+        </span>
         <div className="min-w-0">
-          <div className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-[#7af0a0]">
-            <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[#7af0a0]" aria-hidden />📻 {quien}
+          <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-[#7af0a0]">
+            <Px i="antena" s={1.5} className="hud-parpadeo" />
+            {limpio(quien)}
           </div>
           <div className="text-xs font-bold leading-snug">
-            {texto.slice(0, n)}
-            <span className="sr-only">{texto.slice(n)}</span>
+            {limpio(texto).slice(0, n)}
+            <span className="sr-only">{limpio(texto).slice(n)}</span>
           </div>
         </div>
       </div>
@@ -1010,12 +1046,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <button type="button" aria-label={muted ? 'Activar sonido' : 'Silenciar'} title={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className={tecla}>
                 <Px i={muted ? 'mudo' : 'parlante'} s={ic} />
               </button>
-              <button type="button" onClick={() => navigate('/')} className={`${TECLA} px-3 hidden lg:inline-flex`}>
-                Isla
-              </button>
-              <button type="button" onClick={() => navigate('/clasico')} className={`${TECLA} hud-key-amarilla px-3`}>
-                <span className="lg:hidden">Clásica</span>
-                <span className="hidden lg:inline">Versión clásica</span>
+              <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/')} className={`${TECLA} hud-key-amarilla px-3`}>
+                danieleduardo.cl
               </button>
             </>
           )}
@@ -1025,28 +1057,34 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {/* Wave banner and missile alarm. */}
       {phase === 'play' && hud?.banner && (
         <div className={`pointer-events-none absolute inset-x-0 z-10 text-center ${hud.boss ? '' : movil ? 'top-[16%]' : 'top-[22%]'}`} style={hud.boss ? { top: barraH + 52 } : undefined}>
-          <span className={`inline-block font-black text-[#6b4f3a] shadow-[0_5px_0_rgba(91,70,54,0.2)] ${movil ? 'rounded-2xl bg-[#fff8e7]/85 px-3 py-1 text-sm' : 'rounded-3xl bg-[#fff8e7]/95 px-6 py-3 text-2xl md:text-3xl'}`}>
-            {hud.banner}
+          <span className={`hud-panel hud-panel-crema max-w-[90vw] justify-center whitespace-normal font-black ${movil ? 'gap-1.5 px-3 py-1 text-sm' : 'gap-3 px-6 py-3 text-2xl md:text-3xl'}`}>
+            {iconoDe(hud.banner) && <Px i={iconoDe(hud.banner)!} s={movil ? 2 : 4} />}
+            <span>{limpio(hud.banner)}</span>
           </span>
         </div>
       )}
       {phase === 'play' && zoneSign && !paused && (
         <div className="pointer-events-none absolute inset-x-0 top-[14%] z-10 text-center">
-          <span className="inline-block rounded-full bg-[#1d1544]/80 px-5 py-2 text-lg font-black tracking-wide text-[#fff6d0] shadow-[0_3px_0_rgba(0,0,0,0.25)] ring-2 ring-[#c8bcf4]">
-            {zoneSign}
+          <span className="hud-panel gap-2 px-5 py-2 text-lg font-black tracking-wide text-[#fff6d0]">
+            <Px i="montana" s={2} />
+            {limpio(zoneSign)}
           </span>
         </div>
       )}
       {phase === 'play' && hud?.warn && !paused && (
         <div className="pointer-events-none absolute inset-x-0 top-[38%] z-10 text-center">
-          <span className="inline-block animate-pulse rounded-full bg-[#ff4a5a] px-4 py-1.5 text-sm font-black text-white shadow-[0_3px_0_#a01a3a]">
-            ⚠️ ¡Misil! Gira fuerte o suelta bengalas
+          <span className="hud-panel hud-panel-roja hud-alerta-suave gap-2 px-4 py-1.5 text-sm font-black">
+            <Px i="alerta" s={2} />
+            ¡Misil! Gira fuerte o suelta bengalas
           </span>
         </div>
       )}
       {phase === 'play' && hud?.pista && !hud.resumen && !paused && (
         <div className={`pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 ${hud.enTierra && touchUi ? 'top-[38%]' : 'bottom-28 [@media(max-height:500px)]:bottom-24'}`}>
-          <span className={`rounded-full bg-[#3a2a6a]/75 px-4 py-1.5 text-center text-sm font-black text-white shadow ${touchUi ? 'max-w-[55%] rounded-2xl text-xs' : ''}`}>💡 {hud.pista}</span>
+          <span className={`hud-panel gap-2 whitespace-normal px-3 py-1.5 text-center text-sm font-black ${touchUi ? 'max-w-[55%] text-xs' : ''}`}>
+            <Px i="bombilla" s={2} />
+            <span>{limpio(hud.pista)}</span>
+          </span>
         </div>
       )}
       {phase === 'play' && hud?.resumen && !paused && (
@@ -1058,42 +1096,57 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             </div>
             <div className="mt-3 grid grid-cols-5 gap-1.5 text-[#6b4f3a]">
               {[
-                ['🐭', hud.resumen.enemigos, 'enemigos'],
-                ['⭐', hud.resumen.puntos, 'puntos'],
-                ['⏱️', `${hud.resumen.tiempo}s`, 'tiempo'],
-                ['🐟', hud.resumen.pescado, 'pescado'],
-                ['✈️', hud.resumen.aviones, 'aviones'],
+                ['raton', hud.resumen.enemigos, 'enemigos'],
+                ['estrella', hud.resumen.puntos, 'puntos'],
+                ['reloj', `${hud.resumen.tiempo}s`, 'tiempo'],
+                ['pez', hud.resumen.pescado, 'pescado'],
+                ['avion', hud.resumen.aviones, 'aviones'],
               ].map(([icon, value, label]) => (
-                <div key={label} className="rounded-xl bg-white/70 px-1 py-1.5">
-                  <div className="text-base leading-none">{icon}</div>
-                  <div className="mt-0.5 text-sm font-black tabular-nums">{value}</div>
-                  <div className="text-[9px] font-bold text-[#a08060]">{label}</div>
+                <div key={label as string} className="hud-panel flex-col justify-center gap-1 px-1 py-1.5 [@media(max-height:500px)]:gap-0.5 [@media(max-height:500px)]:py-1">
+                  <Px i={icon as PxIcon} s={2} />
+                  <div className="hud-lectura text-sm">{value}</div>
+                  <div className="text-[9px] font-bold text-[#c8c0e0]">{label}</div>
                 </div>
               ))}
             </div>
             {hud.resumen.mision && (
-              <p className={`mt-2 text-sm font-black ${hud.resumen.cumplida ? 'text-[#2f8a4a]' : 'text-[#a08060]'}`}>
-                {hud.resumen.cumplida ? '🏅' : '▫️'} Misión: {hud.resumen.mision} {hud.resumen.cumplida ? '✓' : ''}
+              <p className={`mt-2 flex items-center justify-center gap-1.5 text-sm font-black ${hud.resumen.cumplida ? 'text-[#2f8a4a]' : 'text-[#a08060]'}`}>
+                <Px i={hud.resumen.cumplida ? 'medalla' : 'diana'} s={2} tinta={hud.resumen.cumplida ? undefined : '#c8b89a'} />
+                <span>
+                  Misión: {limpio(hud.resumen.mision)} {hud.resumen.cumplida ? '✓' : ''}
+                </span>
               </p>
             )}
             {hud.resumen.destino ? (
-              <p className="mt-3 animate-pulse rounded-full bg-[#7ad8ff] px-3 py-1 text-sm font-black text-[#1a3a6a]">
-                🔥 ¡Super nitro! Rumbo{' '}
-                {({ oceano: 'al mar de San Antonio 🌊', valparaiso: 'a Valparaíso 🏘️', tormenta: 'a la tormenta ⛈️', valle: 'a San Antonio 🏠' } as Record<string, string>)[hud.resumen.destino]}
+              <p className="hud-panel hud-panel-cielo hud-alerta-suave mt-3 w-full justify-center gap-1.5 whitespace-normal px-3 py-1 text-sm font-black">
+                <Px i="llama" s={2} />
+                <span>
+                  ¡Super nitro! Rumbo{' '}
+                  {({ oceano: 'al mar de San Antonio', valparaiso: 'a Valparaíso', tormenta: 'a la tormenta', valle: 'a San Antonio' } as Record<string, string>)[hud.resumen.destino]}
+                </span>
               </p>
             ) : (
-              <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {hud.resumen.siguiente}</p>
+              <p className="mt-2 text-xs font-bold text-[#8a6e55]">Próxima oleada: {limpio(String(hud.resumen.siguiente))}</p>
             )}
             {hud.resumen.dato && (
-              <p className="mt-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a] [@media(max-height:500px)]:hidden">💡 ¿Sabías que…? {hud.resumen.dato}</p>
+              <p className="mt-2 flex items-start gap-2 rounded-xl bg-[#ffe3a3]/60 px-3 py-1.5 text-left text-xs font-bold text-[#6b4f3a] [@media(max-height:500px)]:hidden">
+                <Px i="bombilla" s={2} className="mt-0.5" />
+                <span>¿Sabías que…? {limpio(hud.resumen.dato)}</span>
+              </p>
             )}
             {hud.resumen.nuevos && hud.resumen.nuevos.length > 0 && (
-              <p className="mt-2 animate-pulse rounded-full bg-[#3a2a6a] px-3 py-1 text-sm font-black text-[#ffd84a]">🔓 Nuevo en el hangar: {HG.resumirNuevos(hud.resumen.nuevos)}</p>
+              <p className="hud-panel hud-alerta-suave mt-2 w-full justify-center gap-1.5 whitespace-normal px-3 py-1 text-sm font-black text-[#ffd84a]">
+                <Px i="candado" s={2} />
+                <span>Nuevo en el hangar: {limpio(HG.resumirNuevos(hud.resumen.nuevos))}</span>
+              </p>
             )}
             {hud.mejoras.tienda && (
               // The upgrade shop: the break waits until «Seguir».
-              <div className="pointer-events-auto mt-3 rounded-2xl bg-[#3a2a6a]/90 p-2 text-white">
-                <p className="text-sm font-black">⭐ Mejoras · tienes {hud.mejoras.puntos} {hud.mejoras.puntos === 1 ? 'punto' : 'puntos'}</p>
+              <div className="hud-panel pointer-events-auto mt-3 flex w-full flex-col items-stretch whitespace-normal p-2">
+                <p className="flex items-center justify-center gap-1.5 text-sm font-black">
+                  <Px i="estrella" s={2} />
+                  Mejoras: tienes <span className="hud-lectura">{hud.mejoras.puntos}</span> {hud.mejoras.puntos === 1 ? 'punto' : 'puntos'}
+                </p>
                 <div className="mt-1.5 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                   {MEJORAS.map((m) => {
                     const nivel = hud.mejoras.niv[m.k];
@@ -1108,24 +1161,34 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                         onClick={() => {
                           if (game.current?.mejorar(m.k)) menu.aceptar();
                         }}
-                        aria-label={`${m.nombre}: nivel ${nivel} de 5. ${max ? 'Al máximo' : `Cuesta ${costo} ⭐`}`}
-                        className={`rounded-xl px-1 py-1.5 text-center transition-transform ${puede ? 'bg-[#fff8e7] text-[#6b4f3a] hover:-translate-y-0.5' : 'bg-white/20 text-white/60'}`}
+                        aria-label={`${m.nombre}: nivel ${nivel} de 5. ${max ? 'Al máximo' : `Cuesta ${costo} ${costo === 1 ? 'punto' : 'puntos'}`}`}
+                        className="hud-key hud-mejora flex-col gap-1 px-1 py-1.5 text-center [@media(max-height:500px)]:gap-0.5 [@media(max-height:500px)]:py-1"
                       >
-                        <div className="text-lg leading-none">{m.icono}</div>
+                        <span className="hud-socket grid h-7 w-9 place-items-center [@media(max-height:500px)]:h-5 [@media(max-height:500px)]:w-8">
+                          <Px i={m.icono} s={2} />
+                        </span>
                         <div className="text-xs font-black">{m.nombre}</div>
-                        <div className="text-[10px] tracking-tight text-[#f0a45d]">{'●'.repeat(nivel)}<span className="opacity-40">{'●'.repeat(5 - nivel)}</span></div>
-                        <div className="text-[9px] font-bold opacity-80 [@media(max-height:500px)]:hidden">{m.efecto}</div>
-                        <div className="text-[10px] font-black">{max ? 'MÁX' : `${costo} ⭐`}</div>
+                        <Segs n={nivel} max={5} ancho={6} color="#f0a45d" />
+                        <div className="whitespace-normal text-[9px] font-bold opacity-80 [@media(max-height:500px)]:hidden">{m.efecto}</div>
+                        <div className="flex items-center gap-1 text-[10px] font-black">
+                          {max ? 'MÁX' : (
+                            <>
+                              {costo} <Px i="estrella" s={1.5} />
+                            </>
+                          )}
+                        </div>
                       </button>
                     );
                   })}
                 </div>
                 <div className="mt-2 flex items-center justify-center gap-2">
-                  <button type="button" onClick={() => { menu.aceptar(); setHangar(true); }} className={`${BTN} h-9`}>
-                    🛩️ Hangar · {HG.especDe(hud.hangar.avion).real ?? HG.especDe(hud.hangar.avion).name}
+                  <button type="button" onClick={() => { menu.aceptar(); setHangar(true); }} className={`${TECLA} px-3`}>
+                    <Px i="hangar" s={2} />
+                    Hangar: {HG.especDe(hud.hangar.avion).real ?? HG.especDe(hud.hangar.avion).name}
                   </button>
-                  <button type="button" ref={seguirRef} onClick={() => game.current?.cerrarTienda()} className={`${GO} py-2 text-sm`}>
-                    Seguir ▶
+                  <button type="button" ref={seguirRef} onClick={() => game.current?.cerrarTienda()} className={`${TECLA} hud-key-amarilla px-4`}>
+                    Seguir
+                    <Px i="play" s={1.5} />
                   </button>
                 </div>
               </div>
@@ -1150,33 +1213,47 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         <div className="pointer-events-none absolute inset-x-0 top-[30%] z-20 flex justify-center px-4">
           <span
             role={hud.congelado ? 'alert' : 'status'}
-            className={`rounded-full px-4 py-1.5 text-center text-sm font-black shadow-[0_3px_0_rgba(26,58,106,0.35)] ${
-              hud.congelado ? 'animate-pulse bg-[#e6f6ff] text-[#1a3a6a] ring-4 ring-[#9ad8ff]' : 'bg-[#bfe8ff] text-[#1a3a6a]'
-            }`}
+            className={`hud-panel hud-panel-hielo gap-2 whitespace-normal px-4 py-1.5 text-center text-sm font-black ${hud.congelado ? 'hud-alerta-suave' : ''}`}
           >
-            {hud.congelado
-              ? '🧊 ¡Avión congelado! Los controles no responden… cayendo hasta descongelar'
-              : `❄️ ¡Frío extremo! Baja o te congelarás · hielo ${Math.round(hud.hielo * 100)}%`}
+            <Px i={hud.congelado ? 'hielo' : 'copo'} s={2} />
+            {!hud.congelado && (
+              <Segs n={Math.round(hud.hielo * 6)} max={6} ancho={4} color="#4a7ae0" />
+            )}
+            <span>
+              {hud.congelado
+                ? '¡Avión congelado! Los controles no responden… cayendo hasta descongelar'
+                : `¡Frío extremo! Baja o te congelarás · hielo ${Math.round(hud.hielo * 100)}%`}
+            </span>
           </span>
         </div>
       )}
       {phase === 'play' && hud?.stall && !paused && (
         <div className="pointer-events-none absolute inset-x-0 bottom-20 z-10 text-center">
-          <span className="inline-block animate-pulse rounded-full bg-[#ffe048] px-4 py-1.5 text-sm font-black text-[#6b4f3a] shadow-[0_3px_0_#e08a10]">
-            ⚠️ ¡Vas muy lento! Apunta hacia abajo y acelera
+          <span className="hud-panel hud-panel-amarilla hud-alerta-suave gap-2 px-4 py-1.5 text-sm font-black">
+            <Px i="alerta" s={2} />
+            ¡Vas muy lento! Apunta hacia abajo y acelera
           </span>
         </div>
       )}
       {phase === 'play' && hud?.radio && !paused && !hud.resumen && <Radio key={hud.radio.texto + hud.radio.quien} quien={hud.radio.quien} texto={hud.radio.texto} top={barraH + (hud.boss ? 48 : 0)} />}
       {phase === 'play' && hud?.boss && (
         <div className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4" style={{ top: barraH }}>
-          <div className="w-full max-w-sm rounded-2xl bg-[#fff8e7]/95 px-3 py-1.5 shadow-[0_3px_0_rgba(91,70,54,0.2)] ring-2 ring-[#f08a94]">
-            <div className="flex items-center justify-between text-xs font-black text-[#a02a4a]">
-              <span>👵 {hud.boss.name}</span>
-              <span>{Math.ceil(hud.boss.hp * 100)}%</span>
-            </div>
-            <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-[#ffd8d8]">
-              <div className="h-full rounded-full bg-[#e0486a] transition-[width] duration-200" style={{ width: `${hud.boss.hp * 100}%` }} />
+          <div
+            className="hud-panel hud-jefe flex w-full max-w-sm items-center gap-2 px-2 py-1.5"
+            role="status"
+            aria-label={`${limpio(hud.boss.name)}: ${Math.ceil(hud.boss.hp * 100)} % de vida`}
+          >
+            <span className="hud-socket grid h-8 w-8 shrink-0 place-items-center" aria-hidden>
+              <Px i="abuela" s={2} />
+            </span>
+            <div className="min-w-0 flex-1" aria-hidden>
+              <div className="flex items-center justify-between gap-2 text-xs font-black text-[#ffc8d8]">
+                <span className="truncate">{limpio(hud.boss.name)}</span>
+                <span className="hud-lectura">{Math.ceil(hud.boss.hp * 100)}%</span>
+              </div>
+              <div className="hud-jefe-barra mt-1">
+                <div className="transition-[width] duration-200" style={{ width: `${hud.boss.hp * 100}%` }} />
+              </div>
             </div>
           </div>
         </div>
@@ -1283,8 +1360,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <button type="button" onClick={() => { menu.aceptar(); setPhase('creditos'); }} className={`${BTN} h-12 w-full text-base`}>
               🎬 Créditos
             </button>
-            <button type="button" onClick={() => navigate('/clasico')} className={`${BTN} h-12 w-full text-base`}>
-              🏠 Versión clásica del portafolio
+            <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/')} className={`${BTN} h-12 w-full text-base`}>
+              🏠 danieleduardo.cl
             </button>
           </nav>
           <p className="text-xs font-bold text-white/80 drop-shadow">© 2026 {AUTOR} · danieleduardo.cl</p>
@@ -1502,8 +1579,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                         Zoom
                       </button>
                     )}
-                    <button type="button" onClick={() => navigate('/clasico')} className={`${TECLA} px-2.5`}>
-                      Versión clásica
+                    <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/')} className={`${TECLA} px-2.5`}>
+                      <Px i="casa" s={2} />
+                      danieleduardo.cl
                     </button>
                   </div>
                 )}
@@ -1530,42 +1608,65 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             {/* Two invisible halves: hold one to turn. Only a soft glow on that edge, and a small arrow, show it. */}
             <div className="pointer-events-none relative h-full w-1/2">
               <div className={`absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-white/25 to-transparent transition-opacity duration-150 ${turning === 1 ? 'opacity-100' : 'opacity-0'}`} />
-              <span className={`absolute left-2 top-1/2 -translate-y-1/2 text-2xl font-black text-white drop-shadow transition-opacity ${turning === 1 ? 'opacity-90' : 'opacity-30'}`}>⟲</span>
+              <span aria-hidden className={`hud-giro absolute left-2 top-1/2 -translate-y-1/2 transition-opacity ${turning === 1 ? 'opacity-90' : 'opacity-30'}`}>
+                <Px i="giro" s={3} style={{ transform: 'scaleX(-1)' }} />
+              </span>
             </div>
             <div className="pointer-events-none relative h-full w-1/2">
               <div className={`absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-white/25 to-transparent transition-opacity duration-150 ${turning === -1 ? 'opacity-100' : 'opacity-0'}`} />
-              <span className={`absolute right-2 top-[38%] -translate-y-1/2 text-2xl font-black text-white drop-shadow transition-opacity ${turning === -1 ? 'opacity-90' : 'opacity-30'}`}>⟳</span>
+              <span aria-hidden className={`hud-giro absolute right-2 top-[38%] -translate-y-1/2 transition-opacity ${turning === -1 ? 'opacity-90' : 'opacity-30'}`}>
+                <Px i="giro" s={3} />
+              </span>
             </div>
             {turns < 3 && !hud?.enTierra && (
-              <span className="pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 rounded-full bg-[#3a2a6a]/55 px-3 py-1 text-center text-[11px] font-black text-white">
-                Mantén un lado para girar · la metralla dispara sola · doble toque: 🔥 nitro
+              <span className="hud-panel pointer-events-none absolute left-1/2 top-[30%] -translate-x-1/2 gap-1.5 px-3 py-1 text-center text-[11px] font-black opacity-85">
+                Mantén un lado para girar · la metralla dispara sola · doble toque:
+                <Px i="llama" s={1.5} />
+                nitro
               </span>
             )}
           </div>
           {/* Left thumb: throttle in the corner. */}
           <div className="absolute bottom-10 left-3 z-10 flex flex-col gap-2 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
-            <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2🔥' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
-              {hud?.nitro === 'activo' ? '🔥' : '⏩'}
+            <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar ×2' : 'Acelerar'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+              {hud?.nitro === 'activo' ? <Px i="llama" s={3} /> : (
+                <span className="relative inline-flex">
+                  <Px i="acelerar" s={3} />
+                  {hud?.nitro === 'listo' && <Px i="llama" s={1.5} className="absolute -right-2.5 -top-2" />}
+                </span>
+              )}
             </TouchButton>
-            <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>🛑</TouchButton>
+            <TouchButton label="Frenar" active={hud?.throttle === -1} {...throttle(-1)}>
+              <Px i="frenar" s={3} />
+            </TouchButton>
           </div>
           {/* Right thumb: the missile big in the corner, the rest in an arc around it. */}
           <div className="absolute bottom-7 right-0 z-10 h-48 w-48 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] [@media(max-height:420px)]:h-40 [@media(max-height:420px)]:w-40">
             <div className="absolute bottom-3 right-3">
-              <TouchButton label="Misil" big {...hold('fire')}>🚀</TouchButton>
+              <TouchButton label="Misil" big {...hold('fire')}>
+                <Px i="misil" s={4} />
+              </TouchButton>
             </div>
             <div className="absolute bottom-3 right-[6.2rem] [@media(max-height:420px)]:right-[5.4rem]">
-              <TouchButton label="Bomba" {...hold('bomb')}>💣</TouchButton>
+              <TouchButton label="Bomba" {...hold('bomb')}>
+                <Px i="bomba" s={3} />
+              </TouchButton>
             </div>
             <div className="absolute bottom-[4.6rem] right-[5.2rem] [@media(max-height:420px)]:bottom-[4rem] [@media(max-height:420px)]:right-[4.5rem]">
-              <TouchButton label="Bengalas" {...hold('flare')}>✨</TouchButton>
+              <TouchButton label="Bengalas" {...hold('flare')}>
+                <Px i="bengala" s={3} />
+              </TouchButton>
             </div>
             <div className="absolute bottom-[6.2rem] right-3 [@media(max-height:420px)]:bottom-[5.4rem]">
-              <TouchButton label="Tonel" {...hold('tonel')}>🌀</TouchButton>
+              <TouchButton label="Tonel" {...hold('tonel')}>
+                <Px i="tonel" s={3} />
+              </TouchButton>
             </div>
             {!!hud?.nukes && (
               <div className="absolute bottom-[9.4rem] right-3 [@media(max-height:420px)]:bottom-[8.4rem]">
-                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>☢️</TouchButton>
+                <TouchButton label={`Nuclear ×${hud.nukes}`} {...hold('nuke')}>
+                  <Px i="nuclear" s={3} />
+                </TouchButton>
               </div>
             )}
           </div>
@@ -1580,9 +1681,9 @@ function TouchButton({ label, big, active, children, ...rest }: { label: string;
     <button
       type="button"
       aria-label={label}
-      className={`flex flex-col items-center justify-center rounded-full shadow-[0_3px_0_rgba(91,70,54,0.25)] ring-2 active:scale-95 active:opacity-100 transition-transform ${
-        active ? 'bg-[#ffe3a3] ring-[#f0a45d]' : 'bg-[#fff8e7]/70 ring-white/60'
-      } ${big ? 'h-20 w-20 text-3xl [@media(max-height:420px)]:h-[4.5rem] [@media(max-height:420px)]:w-[4.5rem]' : 'h-14 w-14 text-xl [@media(max-height:420px)]:h-12 [@media(max-height:420px)]:w-12'} opacity-85`}
+      className={`hud-touch flex flex-col items-center justify-center ${active ? 'hud-touch-on' : ''} ${
+        big ? 'h-20 w-20 [@media(max-height:420px)]:h-[4.5rem] [@media(max-height:420px)]:w-[4.5rem]' : 'h-14 w-14 [@media(max-height:420px)]:h-12 [@media(max-height:420px)]:w-12'
+      }`}
       {...rest}
       onPointerDown={(e) => {
         // A short buzz under the thumb.
@@ -1594,8 +1695,8 @@ function TouchButton({ label, big, active, children, ...rest }: { label: string;
         rest.onPointerDown?.(e);
       }}
     >
-      <span aria-hidden className="leading-none">{children}</span>
-      <span aria-hidden className="mt-0.5 text-[8px] font-black leading-none text-[#6b4f3a]">{label}</span>
+      <span aria-hidden className="grid min-h-6 place-items-center leading-none">{children}</span>
+      <span aria-hidden className="mt-1 text-[8px] font-black leading-none text-[#3a2a6a]">{label}</span>
     </button>
   );
 }

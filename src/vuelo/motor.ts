@@ -608,8 +608,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
   /** Splash columns where things hit the sea: screen-independent, world coords. */
   const splashes: { x: number; t: number }[] = [];
-  /** The minimap's terrain, cached until the ground changes. */
-  const miniTerreno = { clave: '', cv: document.createElement('canvas') };
   /** Scratch canvas to tint a sinking plane blue. */
   const aguaTinte = Object.assign(document.createElement('canvas'), { width: 80, height: 60 });
   /** True over open sea (not the island). */
@@ -4830,89 +4828,96 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       A.R(g, ax - 2, altY(p.y) - 1, 6, 3, P.gold);
     }
 
-    // Minimap along the bottom: the whole map side-on, with the terrain, the pantry,
-    // every enemy at its height, missiles, the plane and the view. It keeps the same
-    // size on screen at every zoom (u = virtual pixels per screen pixel step).
-    {
+    // Radar (GTA-style): a square around the plane showing the ground or sea beneath,
+    // nearby enemies and missiles, arrows at the rim pointing to the ones out of range,
+    // and under it a thin strip with where the plane is along the whole map. It keeps
+    // its size on screen at every zoom (u = virtual pixels per step). Not on the title screen.
+    if (!s.attract && s.mode === 'play') {
       const u = clamp(Math.round(2 / view.s), 1, 3);
-      const H = 17 * u;
-      const rx = 8 * u;
-      const rw = vw - 16 * u - 8;
-      const top = vh - H - 3 * u;
-      const at = (x: number) => rx + Math.round((x / LEVEL) * rw);
-      // Height on a square-root scale: the low sky, where the fight is, gets more room.
-      const ht = (alt: number) => top + H - 1 - Math.round(Math.sqrt(clamp(alt, 0, CEIL) / CEIL) * (H - 2));
-      // A dot with a dark outline so it reads on any terrain.
-      const punto = (x: number, y: number, w: number, h: number, c: string) => {
-        A.R(g, x - u, y - u, w + 2 * u, h + 2 * u, '#1a1438');
-        A.R(g, x, y, w, h, c);
-      };
-      g.globalAlpha = 0.85;
-      A.R(g, rx - 2 * u, top - 2 * u, rw + 4 * u, H + 4 * u, '#3a2a6a');
+      // Phones: a slightly smaller radar at the bottom centre, between the throttle and weapon thumbs.
+      const S = (view.touch ? 48 : 62) * u;
+      const ALC = 760; // world px from the plane to the radar's edge
+      const k = S / (2 * ALC);
+      const rx = view.touch ? Math.round(vw / 2 - S / 2) : vw - S - 8 * u;
+      const ry = vh - S - 12 * u;
+      const cx = rx + S / 2, cy = ry + S / 2;
+      const aX = (x: number) => Math.round(cx + (x - p.x) * k);
+      const aY = (y: number) => Math.round(cy - (y - p.y) * k);
+      const dentro = (X: number, Y: number) => X >= rx && X < rx + S && Y >= ry && Y < ry + S;
+      // Frame: the same pixel instrument plate as the HUD.
+      A.R(g, rx - 3 * u, ry - 3 * u, S + 6 * u, S + 6 * u, '#1a1438');
+      A.R(g, rx - 2 * u, ry - 2 * u, S + 4 * u, S + 4 * u, '#3a2a6a');
+      A.R(g, rx - 2 * u, ry - 2 * u, S + 4 * u, u, '#6a5aa8');
+      g.save();
+      g.beginPath();
+      g.rect(rx, ry, S, S);
+      g.clip();
+      // Sky by altitude: deep blue high up, lighter near the ground.
+      A.R(g, rx, ry, S, S, p.y > 1700 ? '#1a1848' : '#2a3a78');
+      // Range rings and the cross-hair.
+      g.globalAlpha = 0.18;
+      A.R(g, rx, cy, S, 1, '#ffffff');
+      A.R(g, cx, ry, 1, S, '#ffffff');
       g.globalAlpha = 1;
-      A.R(g, rx - u, top - u, rw + 2 * u, H + 2 * u, '#262048');
-      for (const z of [950, 1700, 2300]) A.R(g, rx, ht(z), rw, 1, 'rgba(255,255,255,0.12)');
-      // Terrain silhouette, painted once into a small canvas, redone only when the ground changes.
-      const clave = `${mapaActual}|${rw}|${H}|${s.craters.length}|${s.bridges.length}|${s.gen}`;
-      if (miniTerreno.clave !== clave) {
-        miniTerreno.clave = clave;
-        miniTerreno.cv.width = Math.max(1, rw);
-        miniTerreno.cv.height = H;
-        const mg = miniTerreno.cv.getContext('2d')!;
-        mg.clearRect(0, 0, rw, H);
-        const conMar = mapaActual === 'oceano' || mapaActual === 'tormenta';
-        for (let c = 0; c < rw; c++) {
-          const gx = ((c + 0.5) / rw) * LEVEL;
-          const gy = ht(Math.max(0, ground(gx))) - top;
-          const sea = conMar && gx > ISLA;
-          const ciudad = mapaActual === 'valparaiso';
-          A.R(mg, c, gy, 1, H - gy, sea ? '#3a6ab8' : ciudad ? '#8a6a9a' : '#4f8a5a');
-          A.R(mg, c, gy, 1, u, sea ? '#9ad8ff' : ciudad ? '#f4a7b9' : '#8fd48a');
+      // Ground and sea under the plane, one column per radar pixel.
+      const conMar = mapaActual === 'oceano' || mapaActual === 'tormenta';
+      const ciudad = mapaActual === 'valparaiso';
+      for (let c = 0; c < S; c += u) {
+        const wx = p.x + (c - S / 2) / k;
+        if (wx < 0 || wx > LEVEL) {
+          A.R(g, rx + c, ry, u, S, '#141030');
+          continue;
         }
+        const gy = aY(ground(wx));
+        if (gy >= ry + S) continue;
+        const sea = conMar && wx > ISLA;
+        A.R(g, rx + c, Math.max(ry, gy), u, ry + S - Math.max(ry, gy), sea ? '#2f5aa8' : ciudad ? '#8a5a8a' : '#4f8a4a');
+        if (gy >= ry) A.R(g, rx + c, gy, u, u, sea ? '#9ad8ff' : ciudad ? '#ffb4cc' : '#9ae08a');
       }
-      g.drawImage(miniTerreno.cv, rx, top);
-      // The view the camera shows.
-      const v0 = at(s.camX);
-      const vwid = Math.max(3 * u, Math.round((vw / LEVEL) * rw));
-      const vt = ht(s.camY - A.DIRT + vh);
-      const vb = ht(Math.max(0, s.camY - A.DIRT));
-      g.globalAlpha = 0.16;
-      A.R(g, v0, vt, vwid, Math.max(2, vb - vt + 1), '#ffffff');
-      g.globalAlpha = 0.75;
-      A.R(g, v0, vt, vwid, u, '#ffffff');
-      A.R(g, v0, vb, vwid, u, '#ffffff');
-      A.R(g, v0, vt, u, vb - vt + 1, '#ffffff');
-      A.R(g, v0 + vwid - u, vt, u, vb - vt + 1, '#ffffff');
-      g.globalAlpha = 1;
-      // The pantry, with its fish left.
-      const px0 = at(PANTRY.x0);
-      const pyy = ht(ground(PANTRY.x0)) - 4 * u;
-      punto(px0, pyy, 4 * u, 3 * u, P.b2);
-      for (let i = 0; i < s.meta; i++) A.R(g, px0 + 5 * u + i * 2 * u, pyy + u, u, u, '#9ad8ff');
-      // Enemies: ground ones lilac, flyers pink, fighters magenta, bosses big and blinking.
+      // The pantry (home).
+      const hx = aX(PANTRY.x0 + 30), hy = aY(ground(PANTRY.x0 + 30));
+      A.R(g, hx - 2 * u, hy - 3 * u, 4 * u, 3 * u, P.b2);
+      g.restore();
+      // A blip; out of range it becomes a small arrow on the rim pointing at it.
+      const blip = (x: number, y: number, w: number, c: string, borde = '#1a1438') => {
+        const X = aX(x), Y = aY(y);
+        if (dentro(X, Y)) {
+          A.R(g, X - Math.floor(w / 2) - u, Y - Math.floor(w / 2) - u, w + 2 * u, w + 2 * u, borde);
+          A.R(g, X - Math.floor(w / 2), Y - Math.floor(w / 2), w, w, c);
+          return;
+        }
+        const dx = X - cx, dy = Y - cy;
+        const m = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
+        const ex = Math.round(cx + (dx / m) * (S / 2 - 2 * u)), ey = Math.round(cy + (dy / m) * (S / 2 - 2 * u));
+        A.R(g, ex - u, ey - u, 2 * u, 2 * u, c);
+      };
       const blink = Math.floor(s.t * 4) % 2 === 0;
-      for (const c of s.cars) {
-        const jefe = isBoss(c.kind);
-        const w = (c.kind === 'portaaviones' ? 7 : jefe ? 4 : 2) * u;
-        punto(at(c.x) - Math.floor(w / 2), ht(c.y) - 2 * u, w, (jefe ? 3 : 2) * u, jefe ? (blink ? P.red : P.r3) : '#c9b4ff');
+      for (const c of s.cars) blip(c.mid.x, c.mid.y, (isBoss(c.kind) ? 4 : 2) * u, isBoss(c.kind) ? (blink ? P.red : P.r3) : '#c9b4ff');
+      for (const v of s.gigantes) if (v.viva) blip(v.x, v.y + 6, 2 * u, P.r2);
+      for (const a of s.aereos) if (a.hp > 0) blip(a.x, a.y, 2 * u, a.tipo === 'ovni' ? '#7af0ff' : P.p1);
+      for (const f of s.fighters) blip(f.a.x, f.a.y, (f.jefa ? 3 : 2) * u, f.jefa && blink ? P.red : '#ff6ad5');
+      if (s.jefe) blip(s.jefe.x, s.jefe.y, 5 * u, blink ? P.red : P.gold);
+      for (const q of s.prizes) {
+        const X = aX(q.x), Y = aY(q.y);
+        if (dentro(X, Y)) A.R(g, X, Y, u, u, P.gold1);
       }
-      for (const v of s.gigantes) if (v.viva) punto(at(v.x) - u, ht(v.y) - 2 * u, (v.tipo === 'tren' || v.tipo === 'ratonzilla' ? 4 : 2) * u, 2 * u, P.r2);
-      for (const a of s.aereos) if (a.hp > 0) punto(at(a.x), ht(a.y), 2 * u, 2 * u, a.tipo === 'ovni' ? '#7af0ff' : P.p1);
-      for (const f of s.fighters) punto(at(f.a.x) - u, ht(f.a.y) - u, 3 * u, 2 * u, f.jefa ? (blink ? P.red : '#ff6ad5') : '#ff6ad5');
-      if (s.jefe) punto(at(s.jefe.x) - 3 * u, ht(s.jefe.y) - 2 * u, 6 * u, 4 * u, blink ? P.red : P.gold);
-      for (const q of s.prizes) A.R(g, at(q.x), ht(q.y), u, u, P.gold1);
-      // Missiles: the ones chasing the plane blink red.
       for (const sh of s.shots) {
         if (!sh.enemy || sh.m.t < 0) continue;
-        if (sh.tgt === p && !blink) continue;
-        A.R(g, at(sh.m.x), ht(sh.m.y), u + (sh.tgt === p ? u : 0), u + (sh.tgt === p ? u : 0), sh.tgt === p ? P.red : '#ff9a3c');
+        const X = aX(sh.m.x), Y = aY(sh.m.y);
+        if (!dentro(X, Y) || (sh.tgt === p && !blink)) continue;
+        A.R(g, X, Y, sh.tgt === p ? 2 * u : u, sh.tgt === p ? 2 * u : u, sh.tgt === p ? P.red : '#ff9a3c');
       }
-      // The plane: a bright arrow pointing where it heads.
-      const ppx = at(p.x);
-      const ppy = ht(p.y);
-      const dir = Math.cos(p.rumbo) >= 0 ? 1 : -1;
-      punto(ppx - 2 * u, ppy - u, 4 * u, 3 * u, P.gold);
-      A.R(g, ppx + dir * 2 * u - (dir < 0 ? u : 0), ppy, u, u, P.white);
+      // The plane in the middle, with a little line where its nose points.
+      A.R(g, cx - 2 * u, cy - 2 * u, 4 * u, 4 * u, '#1a1438');
+      A.R(g, cx - u, cy - u, 2 * u, 2 * u, P.gold);
+      for (let i = 2; i <= 5; i++) A.R(g, Math.round(cx + Math.cos(p.rumbo) * i * u), Math.round(cy - Math.sin(p.rumbo) * i * u), u, u, P.white);
+      // Strip under the radar: where the plane is along the whole map, home at the left.
+      const by = ry + S + 4 * u;
+      A.R(g, rx - u, by - u, S + 2 * u, 4 * u, '#1a1438');
+      A.R(g, rx, by, S, 2 * u, '#3a2a6a');
+      A.R(g, rx, by, 2 * u, 2 * u, P.b2);
+      if (s.jefe) A.R(g, rx + Math.round((s.jefe.x / LEVEL) * (S - u)), by, u, 2 * u, P.red);
+      A.R(g, rx + Math.round((p.x / LEVEL) * (S - 2 * u)), by - u, 2 * u, 4 * u, P.gold);
     }
   }
 

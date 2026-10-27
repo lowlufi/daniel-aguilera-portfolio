@@ -672,3 +672,123 @@ html.lite .liquid-glass-strong::before {
   outline: 3px solid #ffd84a;
   outline-offset: 4px;
 }
+
+/* ── Escuadrón Dui: the rest of the in-game layer on the same plates ──
+   Warning plates (missile, stall, frost), the radio, the boss gauge, the wave
+   card's tiles and shop, and the touch controls as translucent key caps. */
+@layer components {
+  .hud-panel-roja {
+    background: #ff5a6a;
+    color: #fff8e7;
+    text-shadow: 0 1px 0 #a01a3a;
+  }
+  .hud-panel-amarilla {
+    background: #ffd84a;
+    color: #22183f;
+  }
+  .hud-panel-hielo {
+    background: #dff3ff;
+    color: #1a3a6a;
+  }
+  .hud-panel-cielo {
+    background: #7ad8ff;
+    color: #1a3a6a;
+  }
+  .hud-panel-amarilla .hud-segs,
+  .hud-panel-hielo .hud-segs {
+    background: #1a3a6a;
+  }
+  /* A warning that needs the eye: the plate dims and comes back, in steps. */
+  .hud-alerta-suave {
+    animation: hud-respira 0.9s steps(2, jump-none) infinite;
+  }
+  @keyframes hud-respira {
+    50% {
+      opacity: 0.72;
+    }
+  }
+  /* A dark recessed socket for a portrait or an icon. */
+  .hud-socket {
+    background: #22183f;
+    box-shadow: inset 2px 2px 0 #140c2c, inset -1px -1px 0 rgba(200, 188, 244, 0.25);
+  }
+  .hud-radio {
+    display: flex;
+    background: rgba(34, 24, 63, 0.9);
+  }
+  /* The boss: a plate framed in red with a ticked life gauge. */
+  .hud-jefe {
+    box-shadow:
+      inset 2px 2px 0 rgba(200, 188, 244, 0.28),
+      inset -2px -2px 0 rgba(20, 12, 44, 0.45),
+      0 -2px 0 0 #ff5a6a, 0 2px 0 0 #ff5a6a, -2px 0 0 0 #ff5a6a, 2px 0 0 0 #ff5a6a,
+      0 5px 0 0 rgba(160, 26, 58, 0.45);
+  }
+  .hud-jefe-barra {
+    height: 12px;
+    padding: 2px;
+    background: #22183f;
+  }
+  .hud-jefe-barra > div {
+    height: 100%;
+    background:
+      repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), #22183f calc(10% - 1px) 10%),
+      linear-gradient(#ff8a96 0 35%, #ff5a6a 35% 100%);
+    background-size: 100% 100%;
+  }
+  /* Shop buttons that can't be bought yet: sunk into the plate. */
+  .hud-mejora {
+    white-space: normal;
+  }
+  .hud-mejora:disabled {
+    cursor: not-allowed;
+    color: rgba(255, 248, 231, 0.6);
+    background: rgba(20, 12, 44, 0.45);
+    box-shadow:
+      inset 2px 2px 0 rgba(20, 12, 44, 0.6),
+      0 -2px 0 0 #22183f, 0 2px 0 0 #22183f, -2px 0 0 0 #22183f, 2px 0 0 0 #22183f;
+    transform: none;
+  }
+  .hud-mejora:disabled svg {
+    opacity: 0.55;
+  }
+  /* The turn arrows over the sky: white pixels with an ink drop. */
+  .hud-giro {
+    filter: drop-shadow(1px 0 0 #22183f) drop-shadow(-1px 0 0 #22183f) drop-shadow(0 1px 0 #22183f) drop-shadow(0 -1px 0 #22183f);
+  }
+  /* Touch controls: translucent cream key caps that sink when held. */
+  .hud-touch {
+    color: #3a2a6a;
+    background: rgba(255, 248, 231, 0.72);
+    box-shadow:
+      inset 2px 2px 0 rgba(255, 255, 255, 0.7), inset -2px -3px 0 rgba(234, 214, 179, 0.85),
+      0 -2px 0 0 rgba(34, 24, 63, 0.75), 0 2px 0 0 rgba(34, 24, 63, 0.75),
+      -2px 0 0 0 rgba(34, 24, 63, 0.75), 2px 0 0 0 rgba(34, 24, 63, 0.75),
+      0 5px 0 0 rgba(34, 24, 63, 0.55);
+    opacity: 0.88;
+  }
+  .hud-touch:active,
+  .hud-touch-on {
+    opacity: 1;
+    background: #ffd84a;
+    box-shadow:
+      inset 2px 2px 0 #fff3b0, inset -2px -3px 0 #e8a92a,
+      0 -2px 0 0 #22183f, 0 2px 0 0 #22183f, -2px 0 0 0 #22183f, 2px 0 0 0 #22183f,
+      0 5px 0 0 #22183f;
+  }
+  .hud-touch:active {
+    transform: translateY(3px);
+    box-shadow:
+      inset 2px 2px 0 #e8a92a,
+      0 -2px 0 0 #22183f, 0 2px 0 0 #22183f, -2px 0 0 0 #22183f, 2px 0 0 0 #22183f;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hud-alerta-suave {
+      animation: none;
+    }
+  }
+  /* Light pixels (missile body, bomb) need an ink edge on the cream caps. */
+  .hud-touch svg {
+    filter: drop-shadow(1px 0 0 #22183f) drop-shadow(-1px 0 0 #22183f) drop-shadow(0 1px 0 #22183f) drop-shadow(0 -1px 0 #22183f);
+  }
+}
