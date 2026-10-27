@@ -589,6 +589,26 @@ function trabajo(): CanvasRenderingContext2D {
   }
   return lienzo.getContext('2d', { willReadFrequently: true })!;
 }
+/**
+ * CPU copies of the airframe sprites. The work canvas above lives in memory
+ * (it's read back every frame); drawing a GPU-backed sprite into it would make
+ * each getImageData wait for a GPU readback (1–5 ms a fighter on a desktop,
+ * worse on phones). The copy pays that once per sprite.
+ */
+const copiasCPU = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+function copiaCPU(c: HTMLCanvasElement): HTMLCanvasElement {
+  let k = copiasCPU.get(c);
+  if (!k) {
+    k = document.createElement('canvas');
+    k.width = c.width;
+    k.height = c.height;
+    // Pixels, not a drawImage: a drawn copy keeps pointing at the GPU texture
+    // and would still read it back on every use.
+    if (c.width > 0 && c.height > 0) k.getContext('2d', { willReadFrequently: true })!.putImageData(c.getContext('2d')!.getImageData(0, 0, c.width, c.height), 0, 0);
+    copiasCPU.set(c, k);
+  }
+  return k;
+}
 
 /** Roll for each of the 7 frames of giro.ts (alabeo = cos φ). */
 const ALABEO_FRAME = [0, 1, 2, 3, 4, 5, 6].map((f) => Math.cos((f * PI) / 6));
@@ -611,7 +631,7 @@ function mascara(m: ModeloAvion, f: number): Mascara {
   for (const pl of PILOTOS) {
     A.fijarPiloto(pl);
     g.clearRect(0, 0, OW, OH);
-    drawPlaneGiro(g, m, OX, OY, 0, ALABEO_FRAME[f], 1, 0, 0, false, []);
+    A.conFuenteSprite(copiaCPU, () => drawPlaneGiro(g, m, OX, OY, 0, ALABEO_FRAME[f], 1, 0, 0, false, []));
     capas.push(g.getImageData(0, 0, OW, OH).data);
   }
   A.fijarPiloto(antes);
@@ -659,7 +679,9 @@ function recolorear(d: Uint8ClampedArray, pal: Paleta, mk: Mascara, blanco: bool
     if (Math.min(r, g, b) > 245) continue;
     let L = (0.3 * r + 0.59 * g + 0.11 * b) / 255;
     L = clamp((L - 0.08) / 0.8, 0, 1);
-    const [p, q, k] = L < 0.5 ? [pal.osc, pal.med, L / 0.5] : [pal.med, pal.luz, (L - 0.5) / 0.5];
+    // (No [p, q, k] destructuring here: it allocated an array for every pixel.)
+    const bajo = L < 0.5;
+    const p = bajo ? pal.osc : pal.med, q = bajo ? pal.med : pal.luz, k = bajo ? L / 0.5 : (L - 0.5) / 0.5;
     d[o] = p[0] + (q[0] - p[0]) * k;
     d[o + 1] = p[1] + (q[1] - p[1]) * k;
     d[o + 2] = p[2] + (q[2] - p[2]) * k;
@@ -718,7 +740,7 @@ export function dibujar(g: Ctx, c: Caza, x: number, y: number, t: number): void 
   const mk = mascara(c.modelo, f);
   const w = trabajo();
   w.clearRect(0, 0, OW, OH);
-  drawPlaneGiro(w, c.modelo, OX, OY, 0, a.alabeo, a.carga, t, a.gas, false, []);
+  A.conFuenteSprite(copiaCPU, () => drawPlaneGiro(w, c.modelo, OX, OY, 0, a.alabeo, a.carga, t, a.gas, false, []));
   const img = w.getImageData(0, 0, OW, OH);
   recolorear(img.data, c.jefa ? ROJA : LILA, mk, c.flash > 0);
   w.putImageData(img, 0, 0);

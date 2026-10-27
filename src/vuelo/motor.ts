@@ -565,7 +565,8 @@ export type Vuelo = ReturnType<typeof createVuelo>;
 export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: { onHud: (h: Hud) => void; onOver: (r: Result) => void; onJefeVencido?: (tipo: JF.TipoJefe) => void }) {
   const g = canvas.getContext('2d')!;
   // `levels` are the zoom steps (whole-number pixel scales), `zi` the current one.
-  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1 };
+  /** `sinLejos`: the quality governor (see the loop) dropped the 1/3 zoom on a struggling phone. */
+  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1, sinLejos: false };
   mapaActual = 'valle';
   resetHeights();
   const valleStrip = A.groundStrip(LEVEL, ground, PANTRY);
@@ -901,7 +902,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (let e = sc + 2; e > sc; e--) if (cw / e >= 200) view.levels.push(e);
     for (let e = sc; e >= 1; e--) view.levels.push(e);
     view.levels.push(0.75, 0.5);
-    if ((window.devicePixelRatio || 1) >= 2) view.levels.push(1 / 3);
+    if ((window.devicePixelRatio || 1) >= 2 && !view.sinLejos) view.levels.push(1 / 3);
     // Keep the scale the player chose (1:1 by default) when the window changes.
     let best = 0;
     for (let i = 0; i < view.levels.length; i++) if (Math.abs(view.levels[i] - view.want) < Math.abs(view.levels[best] - view.want)) best = i;
@@ -4532,7 +4533,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
     // Blasts and shards, then the plane over them so it never gets lost.
     for (const e of s.shards) A.R(g, sx(e.x), sy(e.y), 2, 2, e.c);
-    VFX.dibujar(g, s.fx, (x, y) => [sx(x), sy(y)], s.t);
+    // One reused tuple: the effects read it at once, so no array per particle per frame.
+    const tupFx: [number, number] = [0, 0];
+    VFX.dibujar(g, s.fx, (x, y) => {
+      tupFx[0] = sx(x);
+      tupFx[1] = sy(y);
+      return tupFx;
+    }, s.t);
     L.dibujarLuces(g, s.luces, toScreen, s.t);
     const blink = s.inv > 0 && Math.floor(s.t * 14) % 2 === 0;
     // Boarding: the pilot walks out of the house to the plane and hops in.
@@ -5062,6 +5069,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   /* ── HUD ── */
 
+  /*
+   * The wind gauge only shows a direction and 0–3 bars, but the exact value
+   * changed the HUD key five times a second and re-rendered the whole React
+   * overlay each time. It's sent again when what's drawn would change, or once
+   * a second (the screen reader's number), not on every 1 km/h wobble.
+   */
+  let vientoHud = 0;
+  let vientoHudT = 0;
+  const barrasViento = (w: number) => Math.sign(w) * Math.min(3, Math.ceil(Math.abs(w) / 4));
+  function vientoParaHud() {
+    const w = Math.round(FV.viento(s.t, s.plane.x, s.plane.y));
+    const ahora = performance.now();
+    if (barrasViento(w) !== barrasViento(vientoHud) || ahora - vientoHudT > 1000) {
+      vientoHud = w;
+      vientoHudT = ahora;
+    }
+    return vientoHud;
+  }
+
   function hud() {
     const h: Hud = {
       hangar: hangarInfo(),
@@ -5088,7 +5114,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       bombs: s.bombAmmo,
       bombMax: s.cap.bomba,
       left: (s.jefe ? 1 : 0) + s.queue.length + s.cars.length + s.aereos.length + s.airQueue.length + s.bigQueue.length + s.gigantes.filter((u) => u.viva).length,
-      wind: Math.round(FV.viento(s.t, s.plane.x, s.plane.y)),
+      wind: vientoParaHud(),
       altitude: Math.round((s.plane.y * FV.ESCALA.metrosPorPx) / 50) * 50,
       sky: s.themePick,
       zone: s.mapa === 'tormenta' ? 'Tormenta' : nombreZona(zonaAltitud(s.plane.y), s.mapa),
@@ -5252,8 +5278,35 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   let raf = 0;
   let last = performance.now();
+  /*
+   * Quality governor, phones only: frames are counted in 3 s windows while a
+   * game is really being flown at the 1/3 zoom. If two windows in a row have more than 8% of
+   * frames slower than 20 ms (a p95 well over budget), the 1/3 zoom (a canvas
+   * nine times the 1:1 size) is taken off the list and the view steps in to
+   * 1/2. Nothing else changes, and capable devices never trigger it.
+   */
+  const gob = { t0: 0, n: 0, lentos: 0, malas: 0 };
+  function gobernar(now: number, ms: number) {
+    if (view.sinLejos || !view.touch || view.s > 0.4 || s.mode !== 'play' || s.paused || s.attract || s.transT > 0 || document.visibilityState !== 'visible' || ms > 250) {
+      gob.t0 = now;
+      gob.n = gob.lentos = 0;
+      return;
+    }
+    gob.n++;
+    if (ms > 20) gob.lentos++;
+    if (now - gob.t0 < 3000) return;
+    gob.malas = gob.n >= 60 && gob.lentos > gob.n * 0.08 ? gob.malas + 1 : 0;
+    gob.t0 = now;
+    gob.n = gob.lentos = 0;
+    if (gob.malas >= 2 && view.levels.includes(1 / 3)) {
+      view.sinLejos = true;
+      fit();
+      s.hudKey = '';
+    }
+  }
   const frame = (now: number) => {
     raf = requestAnimationFrame(frame);
+    gobernar(now, now - last);
     let dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (s.hitStop > 0) {

@@ -822,6 +822,26 @@ export function partSprite(m: ModeloAvion, part: Parte) {
 }
 
 /**
+ * Who supplies the airframe sprite to drawPlane/drawPlaneGiro. Normally the
+ * cached canvas itself; cazas.ts swaps in CPU copies while it paints into its
+ * read-back canvas, so getImageData there never waits on a GPU readback.
+ */
+let fuenteSprite: ((c: HTMLCanvasElement) => CanvasImageSource) | null = null;
+export function spriteParaDibujar(c: HTMLCanvasElement): CanvasImageSource {
+  return fuenteSprite ? fuenteSprite(c) : c;
+}
+/** Runs `fn` with the airframe sprites taken from `f` (see spriteParaDibujar). */
+export function conFuenteSprite<T>(f: (c: HTMLCanvasElement) => CanvasImageSource, fn: () => T): T {
+  const antes = fuenteSprite;
+  fuenteSprite = f;
+  try {
+    return fn();
+  } finally {
+    fuenteSprite = antes;
+  }
+}
+
+/**
  * The plane at (x, y) on screen, nose along `angle` (screen radians, y down),
  * flipped by `roll` (+1 canopy up, -1 rolled over). `t` animates the
  * propeller, the jet flame and the scarf; `gas` makes the flame bigger.
@@ -848,7 +868,7 @@ export function drawPlane(g: Ctx, m: ModeloAvion, x: number, y: number, angle: n
       R(g, sx0 - 3 - i * 2, sy0 + wave + (i > 1 ? 1 : 0), 2, 1, L.scarfC[i % 2]);
     }
   }
-  if (!blink) g.drawImage(img, -L.w / 2, -L.h / 2);
+  if (!blink) g.drawImage(spriteParaDibujar(img), -L.w / 2, -L.h / 2);
   if (m === 'ovni' && !blink && !lost.includes('ala')) ovniLuces(g, 2, 1, t, false);
   if (L.prop && engine) {
     const [px, py, r] = L.prop;

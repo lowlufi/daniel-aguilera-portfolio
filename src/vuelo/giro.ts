@@ -1,6 +1,6 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
-import { LOOKS, R, drawPlane, miniHead, ovniGlow, ovniLuces, pilotoActual, type Parte } from './dibujo';
+import { LOOKS, R, drawPlane, miniHead, ovniGlow, ovniLuces, pilotoActual, spriteParaDibujar, type Parte } from './dibujo';
 import type { ModeloAvion, ModeloBase } from './fisica-tipos';
 
 /*
@@ -1051,7 +1051,7 @@ export function drawPlaneGiro(
   // The saucer's underglow: below the disc while tilted, a halo round it from above.
   if (L.glow && engine) ovniGlow(g, 0, ri(6 * v.c), 6 + ri(10 * v.s), 2 + ri(14 * v.s), t);
   if (k === 1 && !L.cupula) scarf();
-  if (!blink) g.drawImage(img, -L.w / 2, -H / 2);
+  if (!blink) g.drawImage(spriteParaDibujar(img), -L.w / 2, -H / 2);
   if (k > 1 && !L.cupula) scarf();
   if (m === 'ovni' && !blink && !lost.includes('ala')) ovniLuces(g, 0, ovniRy(v) - 1, t, true);
   if (engine) {
