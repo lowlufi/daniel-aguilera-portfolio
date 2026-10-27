@@ -894,11 +894,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const ch = Math.max(1, box.clientHeight);
     let sc = Math.max(1, Math.round(ch / 250));
     while (sc > 1 && cw / sc < 300) sc--;
-    // Zooming out drops to smaller whole-number scales down to 1:1, plus one
-    // farther step (half size on sharp screens, where it stays crisp).
+    // Zoom levels: two closer steps (big pixels, while the view stays at least
+    // ~200 px wide), the whole-number scales down to 1:1, then farther steps
+    // (3/4 and 1/2; on sharp screens also 1/3 for a very wide view).
     view.levels = [];
+    for (let e = sc + 2; e > sc; e--) if (cw / e >= 200) view.levels.push(e);
     for (let e = sc; e >= 1; e--) view.levels.push(e);
-    view.levels.push((window.devicePixelRatio || 1) >= 2 ? 0.5 : 0.75);
+    view.levels.push(0.75, 0.5);
+    if ((window.devicePixelRatio || 1) >= 2) view.levels.push(1 / 3);
     // Keep the scale the player chose (1:1 by default) when the window changes.
     let best = 0;
     for (let i = 0; i < view.levels.length; i++) if (Math.abs(view.levels[i] - view.want) < Math.abs(view.levels[best] - view.want)) best = i;
@@ -4630,7 +4633,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     for (const e of s.eyectados) dibujarEyectado(sx(e.x), sy(e.y), e.t, e.jefa);
     if (s.say) {
-      const esc = clamp(Math.round(2 / view.s), 1, 3);
+      const esc = clamp(Math.round(2 / view.s), 1, 6);
       // Phones: pinned at the top centre under the HUD, so the thumb buttons never cover it.
       if (view.touch) A.drawBubble(g, vw / 2, Math.round(96 / view.s), s.say.text, vw, esc, true);
       else A.drawBubble(g, sx(s.say.x), sy(s.say.y + 60), s.say.text, vw, esc);
@@ -4833,7 +4836,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // and under it a thin strip with where the plane is along the whole map. It keeps
     // its size on screen at every zoom (u = virtual pixels per step). Not on the title screen.
     if (!s.attract && s.mode === 'play') {
-      const u = clamp(Math.round(2 / view.s), 1, 3);
+      const u = clamp(Math.round(2 / view.s), 1, 6);
       // Phones: a slightly smaller radar at the bottom centre, between the throttle and weapon thumbs.
       const S = (view.touch ? 46 : 62) * u;
       const ALC = 760; // world px from the plane to the radar's edge
