@@ -1856,9 +1856,6 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <Px i="nuclear" s={3} />
                 </TouchButton>
               )}
-              <TouchButton label="Tonel" {...hold('tonel')}>
-                <Px i="tonel" s={3} />
-              </TouchButton>
               <TouchButton label="Bengalas" {...hold('flare')}>
                 <Px i="bengala" s={3} />
               </TouchButton>
