@@ -208,6 +208,13 @@ const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
 const NITRO_T = 3;
 /** Held nitro: how long it keeps burning after each frame the throttle is held (s), seconds to full heat, and to cool from full. */
 const NITRO_SOSTEN = 0.4;
+/** Nitro tiers: push (× NITRO_ACC), heat rate (× normal), flame light and the shout. */
+const NITRO_NIVEL = [
+  { empuje: 0.65, calor: 1, luz: '#ffb347', texto: '¡Nitro!' },
+  { empuje: 1.35, calor: 1.6, luz: '#7ad8ff', texto: '¡SUPER NITRO!' },
+  { empuje: 1.9, calor: 2.2, luz: '#b48aff', texto: '¡HIPER NITRO!' },
+  { empuje: 2.6, calor: 3, luz: '#ff5ad8', texto: '¡¡MEGA NITRO!!' },
+] as const;
 const NITRO_CALOR_T = 4;
 const NITRO_ENFRIA_T = 3.5;
 const NITRO_ACC = 4.2 * FA.GRAVEDAD;
@@ -900,6 +907,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     nitroQuemado: false,
     /** Rapid taps on the throttle before holding it: the stronger super nitro (until it's let go). */
     nitroSuper: false,
+    /** Nitro tier from rapid taps before holding: 0 nitro, 1 super, 2 hiper, 3 mega. */
+    nitroNivel: 0,
     /** Seconds of auto-brake left after letting go of the nitro. */
     frenoAutoT: 0,
     lockCand: null as Fijable | null,
@@ -1055,6 +1064,20 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (!s.despegue && s.ammo < 1) a.push({ k: 'misiles', t: 'Sin misiles', nivel: 'ambar' });
     if (!s.despegue && s.flares <= 0) a.push({ k: 'bengalas', t: 'Sin bengalas', nivel: 'ambar' });
     return a;
+  }
+  /**
+   * Each plane's nitro, from its physics: props (water-methanol boost) and heavy planes push
+   * less and only reach Super; jets scale with their thrust-to-weight and reach Mega; the saucer
+   * is the strongest. Works for any plane in PARAMS.
+   */
+  function nitroAvion() {
+    const id = s.spec.id;
+    const P = FV.PARAMS[id];
+    if (id === 'ovni') return { fuerza: 1.3, max: 3, calor: 0.8 };
+    const twr = P.empujeMax / Math.max(0.1, P.masa * FA.GRAVEDAD);
+    const fuerza = clamp(0.55 + twr * 0.35, 0.6, 1.25);
+    const max = P.helice ? 1 : P.masa >= 3 ? 1 : P.masa >= 2.2 ? 2 : 3;
+    return { fuerza, max, calor: P.helice ? 1.25 : P.masa >= 3 ? 1.15 : 1 };
   }
   /** Enemy missiles already announced with the launch warning. */
   const avisados = new Set<number>();
@@ -1218,6 +1241,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.nitroCalor = 0;
     s.nitroQuemado = false;
     s.nitroSuper = false;
+    s.nitroNivel = 0;
     s.frenoAutoT = 0;
     s.enfriaT = 0;
     s.hielo = 0;
@@ -3231,7 +3255,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       disparar: t ? 'La metralla dispara sola · toca 🚀 Misil para lanzar uno' : 'Espacio: misil · H: metralla',
       fijar: 'Mantén la nariz 1 s sobre un enemigo: se fija y el misil lo persigue',
       bengala: t ? '¡Misil! Toca ✨ Bengalas o gira fuerte' : '¡Misil! L suelta bengalas, o gira fuerte',
-      nitro: t ? 'Mantén Gas: nitro · toca 3 veces rápido y mantén: super nitro' : 'Mantén E: nitro · E E E rápido y mantén: super nitro',
+      nitro: t ? 'Mantén Gas: nitro · 3, 5 o 7 toques rápidos y mantén: super, hiper o mega (según el avión)' : 'Mantén E: nitro · 3, 5 o 7 toques rápidos y mantén: super, hiper o mega (según el avión)',
     }[k];
   }
   /** Picks the hint that fits the moment, if the player hasn't learned it yet. */
@@ -3505,10 +3529,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.nitroT <= 0) encenderNitro();
         s.nitroT = NITRO_SOSTEN;
         // The super nitro heats up faster.
-        s.nitroCalor = Math.min(1, s.nitroCalor + (dt / NITRO_CALOR_T) * (s.nitroSuper ? 1.6 : 1));
+        s.nitroCalor = Math.min(1, s.nitroCalor + (dt / NITRO_CALOR_T) * NITRO_NIVEL[s.nitroNivel].calor * nitroAvion().calor);
         if (s.nitroCalor >= 1) {
           s.nitroQuemado = true;
           s.nitroSuper = false;
+          s.nitroNivel = 0;
           s.nitroT = 0;
           s.enfriaT = ENFRIA_T;
           pop(p.x, p.y + 18, '¡Nitro recalentado!', '#ff9a5a');
@@ -3518,7 +3543,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       } else {
         // Letting go of the nitro brakes on its own: back down to cruise in a second or so.
         if (s.nitroT > 0 && !s.attract) s.frenoAutoT = 1.6;
-        if (!input.gas || input.gas <= 0) s.nitroSuper = false;
+        if (!input.gas || input.gas <= 0) {
+          s.nitroSuper = false;
+          s.nitroNivel = 0;
+        }
         s.nitroCalor = Math.max(0, s.nitroCalor - dt / NITRO_ENFRIA_T);
         if (s.nitroQuemado && s.nitroCalor < 0.35) {
           s.nitroQuemado = false;
@@ -3543,7 +3571,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.nitroT <= 0 && !s.attract) AB.nitroFin();
         L.luz(s.luces, p.x - Math.cos(p.rumbo) * (s.spec.hit + 4), p.y - Math.sin(p.rumbo) * (s.spec.hit + 4), 14, '#ffb347', 0.05);
         // Held: the plain nitro. Tapped fast a few times and then held: the super nitro, harder.
-        const acc = NITRO_ACC * (s.nitroSuper ? 1.35 : 0.65);
+        const nv = NITRO_NIVEL[s.nitroNivel];
+        const acc = NITRO_ACC * nv.empuje * nitroAvion().fuerza;
+        // Higher tiers: a hotter, bluer flame and sonic rings now and then.
+        if (s.nitroNivel >= 2 && Math.random() < dt * (s.nitroNivel === 3 ? 4 : 2)) VFX.explosion(s.fx, p.x - Math.cos(p.rumbo) * 16, p.y - Math.sin(p.rumbo) * 16, 0.6 + 0.3 * s.nitroNivel, { quieto: still || s.calma, color: 'humo' });
+        L.luz(s.luces, p.x - Math.cos(p.rumbo) * (s.spec.hit + 6), p.y - Math.sin(p.rumbo) * (s.spec.hit + 6), 10 + 6 * s.nitroNivel, nv.luz, 0.04 * s.nitroNivel);
         p.vx += Math.cos(p.rumbo) * acc * dt;
         p.vy += Math.sin(p.rumbo) * acc * dt;
         if (Math.random() < dt * 40) puff(p.x - Math.cos(p.rumbo) * 12, p.y - Math.sin(p.rumbo) * 12, rand(1, 2.5), false, 0.6, -p.vx * 0.2, -p.vy * 0.2);
@@ -5731,11 +5763,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const now = performance.now();
     toques = now - ultimoToque < 350 ? toques + 1 : 1;
     ultimoToque = now;
-    if (toques >= 3 && !s.nitroSuper && s.mode === 'play' && !s.attract && !s.despegue) {
+    // 3 quick taps: super; 5: hiper; 7: mega. Each tier pushes harder and heats faster.
+    const nivel = Math.min(nitroAvion().max, toques >= 7 ? 3 : toques >= 5 ? 2 : toques >= 3 ? 1 : 0);
+    if (nivel > s.nitroNivel && s.mode === 'play' && !s.attract && !s.despegue) {
+      s.nitroNivel = nivel;
       s.nitroSuper = true;
-      pop(s.plane.x, s.plane.y + 18, '¡SUPER NITRO!', '#7ad8ff');
+      const nv = NITRO_NIVEL[nivel];
+      pop(s.plane.x, s.plane.y + 18, nv.texto, nv.luz);
       AB.nitro();
-      VFX.explosion(s.fx, s.plane.x - Math.cos(s.plane.rumbo) * 14, s.plane.y - Math.sin(s.plane.rumbo) * 14, 1.4, { quieto: still || s.calma, color: 'humo' });
+      VFX.explosion(s.fx, s.plane.x - Math.cos(s.plane.rumbo) * 14, s.plane.y - Math.sin(s.plane.rumbo) * 14, 1 + 0.5 * nivel, { quieto: still || s.calma, color: 'humo' });
+      if (nivel === 3 && !s.calma && !still) s.shake = Math.max(s.shake, 3);
     }
   }
   /** Cuts the nitro (braking): the engine glows as it cools. */
