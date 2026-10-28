@@ -11,6 +11,7 @@ import * as G from './gigantes';
 import * as JF from './jefes';
 import * as CZ from './cazas';
 import * as OC from './oceano';
+import * as AG from './agua';
 import * as VP from './valparaiso';
 import * as L from './luces';
 import { drawPlaneGiro } from './giro';
@@ -781,8 +782,34 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   let filaBajo: HTMLCanvasElement | null = filaDeFondo(valleStrip.canvas);
   /** Splash columns where things hit the sea: screen-independent, world coords. */
   const splashes: { x: number; t: number }[] = [];
-  /** Duds: missiles that hit the sea without going off and sink, trailing bubbles. */
-  const hundidos: { x: number; y: number; ang: number; t: number; largo: number; color: string }[] = [];
+  /** Everything that meets the sea: spouts, columns, domes, foam, duds sinking, bubbles, wrecks (agua.ts). */
+  const mar = AG.crearMar();
+  // A dud with a delayed fuse goes off down there: a dome heaves up and the blast reaches the surface.
+  mar.alDetonar = (x, prof, tipo) => {
+    if (!sobreMar(x)) return;
+    const antes = s.golpeBomba;
+    s.golpeBomba = tipo === 1;
+    try {
+      blast(x, OC.NIVEL_MAR - Math.min(10, prof), tipo === 1 ? FA.ENERGIA.bombaJugador : FA.ENERGIA.misilJugador, 'jugador', tipo === 1 ? 4 : 2.5);
+    } finally {
+      s.golpeBomba = antes;
+    }
+  };
+  /** A bomb into open sea: some are duds that sink, some go off down there a moment later. True when handled. */
+  function bombaAlAgua(b: BombaJ): boolean {
+    if (!sobreMar(b.x) || b.y > ground(b.x) + 2 || (s.mapa === 'tormenta' && s.despeje <= 0)) return false;
+    if (b.tipo !== 'comun' && b.tipo !== 'guiada' && !(b.tipo === 'racimo' && b.sub) && b.tipo !== 'rebote') return false;
+    if (s.cars.some((c) => Math.abs(b.x - c.x) < A.VEH_LOOK[c.kind].w / 2 + 6)) return false;
+    const r = Math.random();
+    if (r > 0.42) return false;
+    const mecha = r < 0.16 ? 0 : rand(0.7, 1.3);
+    AG.hundir(mar, b.x, b.vx, b.vy, 1, 7, b.sub ? '#7a7a6a' : '#5a6a5a', mecha);
+    VFX.salpicar(s.fx, b.x, OC.NIVEL_MAR, 1.6, still || s.calma);
+    if (splashes.length < 30) splashes.push({ x: b.x, t: 0.1 });
+    if (!s.attract) AB.salpicadura(panOf(b.x), 1.6);
+    if (s.mode === 'play' && !b.sub) pop(b.x, OC.NIVEL_MAR + 14, mecha ? '¡Carga de profundidad!' : 'glu glu…', '#9ad8ff');
+    return true;
+  }
   /**
    * Some missiles that hit open water don't go off: a plume, a plop, and they sink.
    * True when this one was a dud (the caller skips the blast).
@@ -792,9 +819,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (splashes.length < 30) splashes.push({ x, t: 0.1 });
     VFX.salpicar(s.fx, x, OC.NIVEL_MAR, 1.4, still || s.calma);
     if (!s.attract) AB.salpicadura(panOf(x), 1.2);
-    // Nose down into the water, it keeps some of its dive angle.
-    const ang = vy < -1 ? Math.atan2(vy, vx) : vx < 0 ? -Math.PI + 0.6 : -0.6;
-    if (hundidos.length < 12) hundidos.push({ x, y: OC.NIVEL_MAR, ang, t: 0, largo, color });
+    // Nose down into the water it keeps some of its dive angle, tips over and sinks, trailing bubbles (agua.ts).
+    AG.hundir(mar, x, vx, vy, 0, largo, color);
     if (s.mode === 'play') pop(x, OC.NIVEL_MAR + 14, 'glu glu…', '#9ad8ff');
     return true;
   }
@@ -1311,7 +1337,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.viaje = 0;
     s.enValpo = false;
     splashes.length = 0;
-    hundidos.length = 0;
+    AG.limpiarMar(mar);
     s.cars = [];
     s.shots = [];
     s.bombs = [];
@@ -1774,6 +1800,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Energies span 0.6 (flak) to 10 (bomb); effects scale with the cube root, like the blast.
     const size = Math.cbrt(energy);
     const enAgua = sobreMar(x) && y - OC.NIVEL_MAR < ex.radio;
+    if (enAgua && !(s.mapa === 'tormenta' && s.despeje <= 0)) AG.explosion(mar, x, y - OC.NIVEL_MAR, energy, s.golpeBomba || energy >= 10, !s.golpeBomba);
     VFX.explosion(s.fx, x, y, energy, { suelo: y - ground(x) < ex.radio * 0.6, quieto: still || s.calma, color: enAgua ? 'agua' : undefined });
     const ce = Math.cbrt(Math.max(0.1, energy));
     // The screen only shakes for powerful blasts close to the plane.
@@ -2107,6 +2134,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const h = JF.golpear(s.jefe, s.jefe.x + rand(-40, 40), s.jefe.y + rand(-20, 20), 6);
       if (h.derrotado) award(h.puntos ?? 0, s.jefe.x, s.jefe.y);
     }
+    if (sobreMar(nx)) AG.nuclear(mar, nx);
     // The mushroom: a column of fireballs climbing from the ground zero, and a ring along the ground.
     for (let i = 0; i < 7; i++) VFX.explosion(s.fx, nx + rand(-12, 12), ny + i * 22, 9 - i * 0.6, { quieto: still || s.calma });
     for (const dx of [-90, -50, 50, 90]) VFX.explosion(s.fx, nx + dx, ground(nx + dx) + 4, 5, { quieto: still || s.calma, suelo: true });
@@ -2347,6 +2375,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     releasePrize(s.carPrize.get(c.id), c.mid.x, c.y + A.VEH_LOOK[c.kind].h + 6);
     s.carPrize.delete(c.id);
     VFX.restos(s.fx, c.mid.x, ground(c.mid.x), A.VEH_LOOK[c.kind].w);
+    if (sobreMar(c.mid.x)) AG.naufragio(mar, c.mid.x, A.VEH_LOOK[c.kind].w, spec.color, isBoss(c.kind));
     // The crew bails out and fights on foot.
     if (s.mapa !== 'oceano' && !isBoss(c.kind) && Math.random() < (s.wave < 4 ? 0.3 : 0.6)) s.gigantes.push(...G.desembarcar(c.x, c.y, 1 + Math.floor(Math.random() * 2), Math.random, s.wave));
     // Gore mode: not all of the crew makes it out.
@@ -2453,6 +2482,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Into the sea: no fireball, a huge splash and the plane sinks out of sight.
     if (sobreMar(p.x) && p.y - OC.NIVEL_MAR < 30) {
       s.hundido = { x: p.x, vx: p.vx * 0.25, ang: p.rumbo };
+      AG.explosion(mar, p.x, 0, 4, false, true);
+      AG.naufragio(mar, p.x, 22, A.LOOKS[s.spec.id].ink, false);
       VFX.salpicar(s.fx, p.x, OC.NIVEL_MAR, 4, still || s.calma);
       for (let i = -2; i <= 2; i++) if (splashes.length < 30) splashes.push({ x: p.x + i * 9, t: Math.abs(i) * 0.08 });
       for (let i = 0; i < 8; i++) puff(p.x + rand(-16, 16), OC.NIVEL_MAR + rand(2, 10), rand(1.5, 3), false, 0.8, rand(-20, 20), rand(20, 50));
@@ -3355,7 +3386,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       let hit = false;
       if (b.y <= ground(b.x)) {
         hit = true;
-        if (sobreMar(b.x)) chapoteo(b.x, 0.35);
+        if (sobreMar(b.x)) {
+          chapoteo(b.x, 0.2 + 0.15 * b.k.impacto);
+          AG.bala(mar, b.x, b.vx, b.vy, b.k.impacto, b.c === 'laser', !!b.k.humo);
+        }
         else puff(b.x, ground(b.x) + 1, 1, false, 0.4);
       }
       for (const c of s.cars) {
@@ -3995,6 +4029,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       chapoteoT -= dt;
       rozarT -= dt;
       const rasante = p.y - OC.NIVEL_MAR;
+      if (sobreMar(p.x) && rasante < 34 && rasante > -2 && speed > 60) AG.rasante(mar, p.x, p.vx, 1 - rasante / 34, dt);
       if (sobreMar(p.x) && rasante < 34 && rasante > -2 && speed > 60 && rozarT <= 0) {
         const k = 1 - rasante / 34;
         rozarT = 0.05 - 0.025 * k;
@@ -4492,7 +4527,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         else blast(q.x, q.y, FA.ENERGIA.obus, 'raton', 1);
       } else if (st !== 'vuela') {
         if (q.tipo === 'mina') blast(q.x, q.y, FA.ENERGIA.obus, 'nadie', 0);
-        else if (sobreMar(q.x) && q.y <= ground(q.x) + 3) chapoteo(q.x, q.tipo === 'balin' ? 0.3 : 0.8);
+        else if (sobreMar(q.x) && q.y <= ground(q.x) + 3) {
+          chapoteo(q.x, q.tipo === 'balin' ? 0.3 : 0.8);
+          if (q.tipo === 'balin') AG.bala(mar, q.x, q.vx, q.vy, 0.6);
+          else AG.plop(mar, q.x, 1.2);
+        }
         q.t = -1;
       }
     }
@@ -4866,7 +4905,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         b.y = ground(b.x) + 1;
         b.vy = Math.abs(b.vy) * 0.55 + 25;
         b.vx *= 0.85;
-        if (sobreMar(b.x)) chapoteo(b.x, 0.8);
+        if (sobreMar(b.x)) {
+          chapoteo(b.x, 0.8);
+          AG.plop(mar, b.x, 1.4);
+        }
         else puff(b.x, b.y, 2, false, 0.6);
         continue;
       }
@@ -4880,6 +4922,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (!u.viva) continue;
         const bx = G.caja(u);
         if (b.x > bx.x0 && b.x < bx.x1 && b.y > bx.y0 && b.y < bx.y1) hit = true;
+      }
+      if (hit && bombaAlAgua(b)) {
+        b.t = -1;
+        continue;
       }
       if (hit) {
         b.t = -1;
@@ -4920,7 +4966,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     s.eyectados = s.eyectados.filter((e) => {
       const llega = e.y <= ground(e.x) + 1;
-      if (llega && sobreMar(e.x)) chapoteo(e.x, e.roto ? 1.4 : 0.6);
+      if (llega && sobreMar(e.x)) {
+        chapoteo(e.x, e.roto ? 1.4 : 0.6);
+        AG.plop(mar, e.x, e.roto ? 1.4 : 0.7);
+      }
       // Without a canopy the landing is the end of him.
       if (llega && e.roto && e.t < 16) {
         if (s.gore) {
@@ -5100,14 +5149,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.costa += (target - s.costa) * Math.min(1, dt * 0.6);
     }
     for (const w of splashes) w.t += dt;
-    for (let i = hundidos.length - 1; i >= 0; i--) {
-      const h = hundidos[i];
-      h.t += dt;
-      // Slows as it goes down, the nose tipping towards the bottom.
-      h.y -= dt * 26 * Math.max(0.25, 1 - h.t * 0.25);
-      h.x += Math.cos(h.ang) * dt * 10 * Math.max(0, 1 - h.t);
-      if (h.t > 3.2) hundidos.splice(i, 1);
-    }
+    if (sobreMar(ISLA + 1)) AG.actualizar(mar, dt, FV.viento(s.t, s.plane.x, 0), s.luces, s.camX, s.camX + view.vw, ISLA, s.mapa === 'tormenta' ? clamp(1 - s.despeje, 0, 1) : 0, s.mapa === 'oceano' || s.despeje > 0.2);
+    else if (AG.cuantos(mar)) AG.limpiarMar(mar);
     s.relampago = Math.max(0, s.relampago - dt * 2.5);
     if (s.mapa === 'tormenta' && s.mode === 'play') {
       // Half the fighters down: the rain stops and the clouds part over a moonlit sea.
@@ -5277,21 +5320,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     g.globalAlpha = 1;
     const marTormenta = s.mapa === 'tormenta' && s.despeje > 0;
     if (s.mapa === 'oceano' || marTormenta) {
-      OC.dibujarOlas(g, cam, sy(OC.NIVEL_MAR), vw, s.t, still, marTormenta ? 'noche' : theme);
-      for (const h of hundidos) {
-        const k = 1 - h.t / 3.2;
-        const X = sx(h.x), Y = sy(h.y);
-        // Under the surface: a faded body tinted by the water, and bubbles rising from it.
-        g.globalAlpha = 0.65 * k;
-        const ux = Math.cos(h.ang), uy = -Math.sin(h.ang);
-        for (let i = 0; i < h.largo; i++) A.R(g, Math.round(X - ux * i), Math.round(Y - uy * i), 2, 2, i < 2 ? '#3a4a5a' : h.color);
-        g.globalAlpha = 0.8 * k;
-        for (let i = 0; i < 4; i++) {
-          const ft = (h.t * 1.3 + i * 0.27) % 1;
-          const by = Y - ft * (Y - sy(OC.NIVEL_MAR));
-          A.R(g, Math.round(X + Math.sin(s.t * 6 + i * 2) * 2 + i - 2), Math.round(by), 1 + (i % 2), 1 + (i % 2), '#cfefff');
-        }
-      }
+      OC.dibujarOlas(g, cam, sy(OC.NIVEL_MAR), vw, s.t, still, marTormenta ? 'noche' : theme, marTormenta ? clamp(1 - s.despeje, 0, 1) : 0, marTormenta ? 0.72 : undefined);
+      // Duds sinking and bubbles are drawn with the sea's effects (agua.ts), on the graded layer.
       g.globalAlpha = 1;
       // The cleared storm: bioluminescent sea and whales under the moon.
       if (marTormenta) {
@@ -5326,7 +5356,20 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g = gFrente;
     }
     // Splash columns on the sea (in front, so they take the hour's light).
-    if (s.mapa === 'oceano' || marTormenta) for (const w of splashes) OC.dibujarSalpicadura(g, sx(w.x), sy(OC.NIVEL_MAR), 1 - w.t / 0.9);
+    // (The richer sea effects live in agua.ts; `splashes` still stirs the magic sea.)
+    if (s.mapa === 'oceano' || marTormenta) {
+      const ys = sy(OC.NIVEL_MAR), hora = marTormenta ? 'noche' : theme;
+      AG.dibujarBajo(g, mar, cam, ys, vw, vh, hora);
+      for (const c of s.cars) {
+        if ((c.kind !== 'lancha' && c.kind !== 'fragata' && c.kind !== 'portaaviones') || !sobreMar(c.mid.x)) continue;
+        const X = sx(c.mid.x);
+        if (X > -200 && X < vw + 200) AG.estelaBarco(g, X, ys, c.vx, A.VEH_LOOK[c.kind].w, s.t, hora);
+      }
+      AG.dibujarSobre(g, mar, cam, ys, vw, vh, s.t, hora);
+      const pl = s.plane, alto = pl.y - OC.NIVEL_MAR;
+      if (!s.dead && s.mode !== 'demo' && sobreMar(pl.x) && alto < 40) AG.soplo(g, sx(pl.x), ys, 1 - Math.max(0, alto) / 40, s.t, hora);
+      for (const b of s.bullets) if (b.tr && b.y - OC.NIVEL_MAR < 80 && sobreMar(b.x)) AG.reflejoTrazadora(g, sx(b.x), ys, b.y - OC.NIVEL_MAR, b.k.c2);
+    }
     // Gore mode: blood stains on the ground and pink patches on the water.
     GR.dibujarSuelo(g, s.sangre, sx, sy, vw, OC.NIVEL_MAR);
 
@@ -6435,7 +6478,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, AB, ground, abatirAereo, hurtCar, spawnAir };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, AB, ground, abatirAereo, hurtCar, spawnAir, mar, AG, blast };
 
   return {
     start,
