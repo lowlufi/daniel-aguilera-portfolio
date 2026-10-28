@@ -217,6 +217,10 @@ const NUKE_CAIDA = 0.55;
 const ENFRIA_T = 1.4;
 /** Seconds holding the nose on an enemy before the missiles lock on. */
 const LOCK_TIME = 0.4;
+/** Lock-on: half-angle of the cone that picks a target, the wider one that keeps it, and the range (world px). */
+const LOCK_CONO = 0.5;
+const LOCK_CONO_MANTIENE = 0.8;
+const LOCK_ALCANCE = 1100;
 /** The trip to a new map: seconds of autopilot, with the nitro lit one second in. */
 const TRANS_T = 3.4;
 const FLARE_RELOAD = 4;
@@ -2473,20 +2477,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /* ── Firing ── */
 
   /**
-   * Lock-on: keep the nose on one enemy (within ~11°, up to 760 px) for a
+   * Lock-on: keep the nose on one enemy (within LOCK_CONO, up to LOCK_ALCANCE) for a
    * second and it locks; the next missile homes on it.
    */
   function stepLock(dt: number) {
     const p = s.plane;
     let best: { key: object; f: Fijable } | null = null;
-    let bestA = 0.28;
+    // A wide cone (~29°) out to a long range; the target already being locked keeps
+    // the lock in an even wider one (~46°), so a turning fight doesn't drop it.
+    let bestA = LOCK_CONO;
     const consider = (key: object, f: Fijable) => {
       const q = f.pos();
       const dx = q.x - p.x, dy = q.y - p.y;
       const d = Math.hypot(dx, dy);
-      if (d < 40 || d > 760) return;
+      if (d < 40 || d > LOCK_ALCANCE) return;
       const a = Math.abs(((Math.atan2(dy, dx) - p.rumbo + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-      if (a < bestA) {
+      if (key === s.lockKey && a < LOCK_CONO_MANTIENE) {
+        bestA = -1;
+        best = { key, f };
+      } else if (a < bestA) {
         bestA = a;
         best = { key, f };
       }
