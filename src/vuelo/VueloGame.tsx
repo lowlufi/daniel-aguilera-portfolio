@@ -1042,13 +1042,19 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       if (r) g.ratonEn(e.clientX - r.left, e.clientY - r.top);
     };
     const sale = () => g.ratonEn(null);
+    // Left: machine gun; right: flares; middle: bomb (missiles on Space).
     const baja = (e: MouseEvent) => {
       if (e.button === 0) g.touch({ gun: true });
-      else if (e.button === 2) g.touch({ fire: true });
+      else if (e.button === 2) g.touch({ flare: true });
+      else if (e.button === 1) {
+        e.preventDefault();
+        g.touch({ bomb: true });
+      }
     };
     const sube = (e: MouseEvent) => {
       if (e.button === 0) g.touch({ gun: false });
-      else if (e.button === 2) g.touch({ fire: false });
+      else if (e.button === 2) g.touch({ flare: false });
+      else if (e.button === 1) g.touch({ bomb: false });
     };
     const menu = (e: Event) => e.preventDefault();
     box.style.cursor = 'crosshair';
@@ -1064,7 +1070,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       box.removeEventListener('mousedown', baja);
       window.removeEventListener('mouseup', sube);
       box.removeEventListener('contextmenu', menu);
-      g.touch({ gun: false, fire: false });
+      g.touch({ gun: false, flare: false, bomb: false });
       g.ratonEn(null);
     };
   }, [conRaton]);
@@ -1848,8 +1854,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <>
                     <Key k="Mouse" label="El avión sigue al cursor" />
                     <Key k="Clic izq." label="Metralla" />
-                    <Key k="Clic der." label="Misil" />
-                    <Key k="Espacio · K" label="Bomba" />
+                    <Key k="Clic der." label="Bengalas" />
+                    <Key k="Espacio" label="Misil" />
+                    <Key k="B · K · rueda clic" label="Bomba" />
                   </>
                 ) : (
                   <>
@@ -2012,7 +2019,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <label className="hud-ajuste">
                   <span>
                     Apuntar con el mouse
-                    <small className="block text-[11px] font-bold text-[#c8c0e0]">El avión sigue al cursor. Clic izquierdo: metralla · clic derecho: misil · Espacio: bomba</small>
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">El avión sigue al cursor. Clic izquierdo: metralla · clic derecho: bengalas · Espacio: misil · B: bomba</small>
                   </span>
                   <input type="checkbox" role="switch" checked={ratonOn} onChange={(e) => toggleRaton(e.target.checked)} className="hud-switch" />
                 </label>
@@ -2284,7 +2291,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <label className="hud-ajuste">
                     <span>
                       Apuntar con el mouse
-                      <small className="block text-[11px] font-bold text-[#c8c0e0]">El avión sigue al cursor. Clic izquierdo: metralla · clic derecho: misil · Espacio: bomba</small>
+                      <small className="block text-[11px] font-bold text-[#c8c0e0]">El avión sigue al cursor. Clic izquierdo: metralla · clic derecho: bengalas · Espacio: misil · B: bomba</small>
                     </span>
                     <input type="checkbox" role="switch" checked={ratonOn} onChange={(e) => toggleRaton(e.target.checked)} className="hud-switch" />
                   </label>

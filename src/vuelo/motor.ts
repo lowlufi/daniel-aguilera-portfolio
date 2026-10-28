@@ -6021,7 +6021,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   const CODES: Record<string, string> = {
     ArrowLeft: 'l', KeyA: 'l', ArrowRight: 'r', KeyD: 'r', ArrowUp: 'u', KeyW: 'u', ArrowDown: 'd', KeyS: 'd',
-    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyL: 'flare', Enter: 'flare', NumpadEnter: 'flare', KeyH: 'gun', KeyF: 'gun', KeyN: 'nuke', KeyR: 'tonel',
+    Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyB: 'bomb', KeyL: 'flare', Enter: 'flare', NumpadEnter: 'flare', KeyH: 'gun', KeyF: 'gun', KeyN: 'nuke', KeyR: 'tonel',
     KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
   };
   const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false };
@@ -6068,8 +6068,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     input.tonel = keys.has('tonel') || touch.tonel;
   }
   const onKey = (e: KeyboardEvent) => {
-    // Mouse mode: the right button fires missiles, so Space drops bombs.
-    const k = modoRaton && e.code === 'Space' ? 'bomb' : CODES[e.code];
+    const k = CODES[e.code];
     // Menus (the title's self-playing game) and the pause keep their keys for the buttons.
     if (!k || s.mode !== 'play' || ((s.attract || s.paused) && e.type === 'keydown')) return;
     // With the wave card's shop (and its hangar) open, Enter presses the focused button.
