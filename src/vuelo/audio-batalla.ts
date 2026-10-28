@@ -384,7 +384,8 @@ type Nombre =
   | 'vulcan' | 'canon30' | 'laser' | 'orbe' | 'crucero' | 'fosforo' | 'gas' | 'plasma-bomba' | 'chaff' | 'holograma' | 'trampa'
   | 'hangar-sel' | 'hangar-bloq' | 'desbloqueo'
   | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae'
-  | 'sin-municion' | 'recargada' | 'nitro-no' | 'nitro-listo' | 'bengala-vacia' | 'radio' | 'eyeccion' | 'paracaidas';
+  | 'sin-municion' | 'recargada' | 'nitro-no' | 'nitro-listo' | 'bengala-vacia' | 'radio' | 'eyeccion' | 'paracaidas'
+  | 'sirena-picada' | 'silbo-picada' | 'rugido-picada' | 'estampido';
 
 const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
@@ -498,6 +499,10 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   chispa: hornoChispa,
   lluvia: hornoLluvia,
   escarcha: hornoEscarcha,
+  'sirena-picada': hornoSirena,
+  'silbo-picada': hornoSilbo,
+  'rugido-picada': hornoRugido,
+  estampido: hornoEstampido,
   'hielo-alerta': hornoHieloAlerta,
   congelado: hornoCongelado,
   deshielo: hornoDeshielo,
@@ -1243,6 +1248,58 @@ function hornoEscarcha(sr: number) {
     }),
     0.9,
   );
+}
+
+/**
+ * La sirena del bombardero en picada: un aullido ronco de hélice (dos tonos casi
+ * iguales que baten, con muchos armónicos) y aire. Se le sube el tono con la velocidad.
+ */
+function hornoSirena(sr: number) {
+  const L = 2;
+  const bp = new Bq(sr, 'bp', 1400, 1.4);
+  // Ciclos enteros por bucle: sin costura.
+  const fs = [300, 301.5, 450];
+  return bucle(sr, L, (_i, t) => {
+    let s = 0;
+    fs.forEach((f, k) => {
+      const ph = TAU * f * t;
+      let v = 0;
+      for (let h = 1; h <= 7; h++) v += Math.sin(ph * h + k) / (h * 0.9);
+      s += v * (k === 2 ? 0.25 : 0.5);
+    });
+    const aire = bp.run(ruido()) * 0.35;
+    return Math.tanh(s * 0.6) + aire;
+  });
+}
+
+/** Silbido de picada: el aire en las tomas del ala (el «Corsario» silbaba así) o la hélice pasada de vueltas. */
+function hornoSilbo(sr: number) {
+  const L = 2;
+  const bp = new Bq(sr, 'bp', 2400, 14);
+  const bp2 = new Bq(sr, 'bp', 1200, 6);
+  return bucle(sr, L, (_i, t) => bp.run(ruido()) * 1.4 + bp2.run(ruido()) * 0.5 + Math.sin(TAU * 2400 * t) * 0.08 * (1 + Math.sin((TAU * t) / L)));
+}
+
+/** El rugido de un jet que baja a fondo: aire rasgado grave con un siseo encima. */
+function hornoRugido(sr: number) {
+  const L = 3;
+  const lp = new Bq(sr, 'lp', 420, 0.9);
+  const bp = new Bq(sr, 'bp', 1600, 0.8);
+  return bucle(sr, L, (_i, t) => lp.run(ruido()) * 1.6 * (0.85 + 0.15 * Math.sin((TAU * 3 * t) / L)) + bp.run(ruido()) * 0.35);
+}
+
+/** Estampido al romper la barrera: dos golpes secos y graves (la onda en N). */
+function hornoEstampido(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 1.4));
+  const lp = new Bq(sr, 'lp', 260, 0.8);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const g1 = t < 0.02 ? 1 : Math.exp(-(t - 0.02) / 0.09);
+    const t2 = t - 0.13;
+    const g2 = t2 < 0 ? 0 : t2 < 0.02 ? 1 : Math.exp(-(t2 - 0.02) / 0.12);
+    a[i] = lp.run(ruido()) * (g1 + g2 * 0.9) * 3 + Math.sin(TAU * 38 * t) * Math.exp(-t / 0.35) * 0.5;
+  }
+  return normaliza(a, 0.95);
 }
 
 /** Campanita FM (para los avisos y jingles nuevos). */
@@ -3672,13 +3729,62 @@ export function alertaMisil(cerca: number): void {
   }
 }
 
+/* ────────────────────────── picada ────────────────────────── */
+
+let picadaL: Loop | null = null;
+let picadaNombre: Nombre | null = null;
+let estampidoListo = true;
+
+/** Cómo suena cada avión al lanzarse en picada. */
+export type ClasePicada = 'sirena' | 'silbo' | 'helice' | 'jet' | null;
+const PICADA: Record<Exclude<ClasePicada, null>, { n: Nombre; vol: number; rate: [number, number] }> = {
+  sirena: { n: 'sirena-picada', vol: 0.5, rate: [0.62, 1.25] },
+  silbo: { n: 'silbo-picada', vol: 0.32, rate: [0.8, 1.2] },
+  helice: { n: 'silbo-picada', vol: 0.16, rate: [0.45, 0.7] },
+  jet: { n: 'rugido-picada', vol: 0.3, rate: [0.8, 1.3] },
+};
+
+/**
+ * La picada del avión: `k` 0…1 cuánto se está tirando hacia abajo (ángulo y
+ * velocidad juntos), `v` la velocidad relativa a su máxima. El Stuka aúlla con su
+ * sirena, el Corsario silba, las hélices chillan y los jets rugen; y los jets dan
+ * un estampido al pasar de su velocidad máxima.
+ */
+export function picada(clase: ClasePicada, k: number, v: number): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const kk = clamp(num(k), 0, 1);
+  const vv = clamp(num(v), 0, 1.3);
+  const cfg = clase ? PICADA[clase] : null;
+  if (picadaL && (!cfg || cfg.n !== picadaNombre)) {
+    apagar(picadaL.v, picadaL.g, t, 0.15);
+    picadaL = null;
+  }
+  picadaNombre = cfg?.n ?? null;
+  const vol = cfg ? cfg.vol * Math.pow(kk, 1.3) * ambiente() * (0.4 + 0.6 * aire) : 0;
+  if (cfg) {
+    picadaL = loop(m, picadaL, cfg.n, vol);
+    if (picadaL && vol > 0) {
+      hacia(picadaL.g.gain, vol, t, 0.15);
+      hacia(picadaL.src.playbackRate, cfg.rate[0] + (cfg.rate[1] - cfg.rate[0]) * clamp(vv, 0, 1) * (0.6 + 0.4 * kk), t, 0.25);
+    }
+  }
+  if (clase === 'jet') {
+    if (vv > 0.97 && estampidoListo) {
+      estampidoListo = false;
+      unaVez(m, 'estampido', 0.55 * ambiente(), 1, t, 0, LIMITE + 4);
+    } else if (vv < 0.8) estampidoListo = true;
+  }
+}
+
 /* ────────────────────────── apagar ────────────────────────── */
 
 function apagarContinuos(t: number, tc: number) {
   for (const vm of vocesMisil) apagar(vm.v, vm.g, t, tc);
   vocesMisil.length = 0;
-  for (const l of [motorL, fuegoL, vientoL, tormentaL, escarchaL]) if (l) apagar(l.v, l.g, t, tc);
-  motorL = fuegoL = vientoL = tormentaL = escarchaL = null;
+  for (const l of [motorL, fuegoL, vientoL, tormentaL, escarchaL, picadaL]) if (l) apagar(l.v, l.g, t, tc);
+  motorL = fuegoL = vientoL = tormentaL = escarchaL = picadaL = null;
   hieloAviso = 0;
   if (fij) apagar(fij.v, fij.g, t, tc);
   fij = null;
@@ -3730,8 +3836,8 @@ export function detener(): void {
 function reiniciar() {
   for (const vm of vocesMisil) liberar(vm.v);
   vocesMisil.length = 0;
-  for (const l of [motorL, fuegoL, vientoL, tormentaL, escarchaL]) if (l) liberar(l.v);
-  motorL = fuegoL = vientoL = tormentaL = escarchaL = null;
+  for (const l of [motorL, fuegoL, vientoL, tormentaL, escarchaL, picadaL]) if (l) liberar(l.v);
+  motorL = fuegoL = vientoL = tormentaL = escarchaL = picadaL = null;
   truenos.length = 0;
   ultimos.clear();
   hieloAviso = 0;

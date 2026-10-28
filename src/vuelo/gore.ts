@@ -23,12 +23,12 @@ type Ctx = CanvasRenderingContext2D;
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
 const MAX_P = 420; // droplets + gibs + water drops
-const MAX_MANCHAS = 280; // ground stains
-const MAX_TINTES = 18; // patches on the water
+const MAX_MANCHAS = 400; // ground stains
+const MAX_TINTES = 28; // patches on the water
 const GRAV = 190; // px/s²
-const VIDA_MANCHA = 45; // s
+const VIDA_MANCHA = 120; // s
 const VIDA_TROZO = 12; // s
-const VIDA_TINTE = 7; // s
+const VIDA_TINTE = 28; // s
 
 // Particle kinds.
 const T_GOTA = 0, T_TROZO = 1, T_AGUA = 2;
@@ -82,6 +82,8 @@ export type Gore = {
   ti: number;
   tx: Float32Array;
   tedad: Float32Array;
+  /** How much blood went into each patch (it spreads wider the more it gets). */
+  tpeso: Float32Array;
 };
 
 export function crearGore(): Gore {
@@ -111,6 +113,7 @@ export function crearGore(): Gore {
     ti: 0,
     tx: new Float32Array(MAX_TINTES),
     tedad: new Float32Array(MAX_TINTES),
+    tpeso: new Float32Array(MAX_TINTES),
   };
 }
 
@@ -260,11 +263,12 @@ function mancha(e: Gore, x: number, y: number, w: number) {
   e.medad[i] = 0;
 }
 
-function tinte(e: Gore, x: number) {
-  // Close to a fresh patch: freshen it instead of piling up another.
+function tinte(e: Gore, x: number, peso = 1) {
+  // Into a patch still on the water: it feeds it (wider, and it lasts longer).
   for (let k = 0; k < e.tn; k++) {
-    if (Math.abs(e.tx[k] - x) < 8 && e.tedad[k] < 1.5) {
-      e.tedad[k] = Math.min(e.tedad[k], 0.3);
+    if (e.tedad[k] < VIDA_TINTE - 2 && Math.abs(e.tx[k] - x) < 10 + e.tpeso[k] * 1.5) {
+      e.tpeso[k] = Math.min(30, e.tpeso[k] + peso);
+      e.tedad[k] = Math.min(e.tedad[k], VIDA_TINTE * 0.4);
       return;
     }
   }
@@ -273,12 +277,13 @@ function tinte(e: Gore, x: number) {
   if (e.tn < MAX_TINTES) e.tn++;
   e.tx[i] = x;
   e.tedad[i] = 0;
+  e.tpeso[i] = peso;
 }
 
 /** A red splash where something bloody hits the sea. */
 function salpicaRojo(e: Gore, x: number, nivel: number, n: number) {
   for (let k = 0; k < n; k++) gota(e, x + rnd(-2, 2), nivel + 1, rnd(-30, 30), rnd(40, 90), T_AGUA);
-  tinte(e, x);
+  tinte(e, x, n >= 3 ? 3 : 0.5);
 }
 
 /**
@@ -325,14 +330,15 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
       continue;
     }
     if (t === T_GOTA) {
-      mancha(e, x, piso, e.forma[i] + (Math.random() < 0.6 ? 1 : 0));
+      // A fast drop smears into a streak along the ground.
+      mancha(e, x, piso, Math.min(9, e.forma[i] + (Math.random() < 0.6 ? 1 : 0) + Math.floor(Math.abs(e.vx[i]) / 35)));
       quitar(e, i);
       continue;
     }
     // A gib: bounces twice, smearing the ground, then lies still.
     e.y[i] = piso;
     // Every landing leaves a smear; the first a real pool.
-    mancha(e, x, piso, e.rebotes[i] === 0 ? 6 : 3);
+    mancha(e, x, piso, e.rebotes[i] === 0 ? 9 : 4);
     if (e.rebotes[i] < 2 && e.vy[i] < -25) {
       e.vy[i] = -e.vy[i] * 0.38;
       e.vx[i] *= 0.55;
@@ -364,11 +370,26 @@ export function dibujarSuelo(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y:
     if (k <= 0) continue;
     if (k !== a) g.globalAlpha = a = k;
     const Y = sy(e.my[i]);
-    const w = e.mw[i];
-    g.fillStyle = ROJO[1];
+    // Pools spread out during their first second and a half, then dry darker.
+    const w0 = e.mw[i];
+    const w = w0 >= 5 ? Math.max(3, Math.round(w0 * Math.min(1, 0.35 + ed * 0.45))) : w0;
+    const seco = ed > 30;
+    g.fillStyle = seco ? ROJO[2] : ROJO[1];
     g.fillRect(X - (w >> 1), Y - 1, w, 1);
     g.fillStyle = ROJO[2];
-    g.fillRect(X - (w >> 1), Y, w + 1, 1);
+    g.fillRect(X - (w >> 1) - 1, Y, w + 2, 1);
+    if (w >= 5) {
+      // A wet shine on fresh pools and a few specks thrown around them.
+      if (!seco) {
+        g.fillStyle = ROJO[0];
+        g.fillRect(X - (w >> 2), Y - 1, Math.max(1, w >> 2), 1);
+      }
+      g.fillStyle = ROJO[1];
+      const h = (i * 7919) % 13;
+      g.fillRect(X - (w >> 1) - 2 - (h % 3), Y - 1, 1, 1);
+      g.fillRect(X + (w >> 1) + 1 + (h % 2), Y - 1 + (h % 2), 1, 1);
+      g.fillRect(X + (h % 5) - 2, Y - 2, 1, 1);
+    }
   }
   const Ym = sy(nivelMar);
   for (let i = 0; i < e.tn; i++) {
@@ -376,14 +397,25 @@ export function dibujarSuelo(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y:
     if (ed >= VIDA_TINTE) continue;
     const X = sx(e.tx[i]);
     if (X < -20 || X > vw + 20) continue;
-    const k = alfa((1 - ed / VIDA_TINTE) * 0.5);
+    const k = alfa(Math.min(1, (VIDA_TINTE - ed) / 8) * 0.6);
     if (k <= 0) continue;
     if (k !== a) g.globalAlpha = a = k;
-    // A flat patch that spreads out on the surface.
-    const w = Math.round(6 + ed * 3);
+    // A patch that spreads on the surface (wider the more blood fed it) and a red
+    // cloud sinking under it, drifting a little with the swell.
+    const p = Math.sqrt(e.tpeso[i]);
+    const w = Math.round(Math.min(70, (5 + Math.min(ed, 8) * 2.5) * (0.7 + p * 0.45)));
+    const dx = Math.round(Math.sin(ed * 0.35 + i) * 3);
     g.fillStyle = TINTE;
-    g.fillRect(X - w, Ym, w * 2, 1);
-    g.fillRect(X - (w >> 1), Ym + 1, w, 1);
+    g.fillRect(X + dx - w, Ym, w * 2, 1);
+    g.fillStyle = ROJO[1];
+    g.fillRect(X + dx - Math.round(w * 0.7), Ym + 1, Math.round(w * 1.4), 1);
+    const hondo = Math.min(6, 1 + Math.floor(ed * 0.6));
+    for (let r = 2; r < 2 + hondo; r++) {
+      const ww = Math.round(w * (0.55 - r * 0.06));
+      if (ww < 1) break;
+      g.fillStyle = r % 2 ? ROJO[2] : ROJO[1];
+      g.fillRect(X + dx + Math.round(Math.sin(ed + r) * 2) - ww, Ym + r, ww * 2, 1);
+    }
   }
   g.globalAlpha = 1;
 }

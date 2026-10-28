@@ -202,6 +202,10 @@ const MEJORA: Record<Mejora, { nombre: string; t: number }> = {
 };
 /** Super nitro: how long it burns, its push, and the recharge time. */
 const NITRO_T = 3;
+/** Held nitro: how long it keeps burning after each frame the throttle is held (s), seconds to full heat, and to cool from full. */
+const NITRO_SOSTEN = 0.4;
+const NITRO_CALOR_T = 4;
+const NITRO_ENFRIA_T = 3.5;
 const NITRO_ACC = 4.2 * FA.GRAVEDAD;
 const NITRO_CD = 9;
 /** A flare burst: how many flares, and the beat between them (s). */
@@ -425,6 +429,11 @@ let carIds = 0;
 const AIR_SCORE: Record<AE.TipoAereo, number> = { helicoptero: 300, dron: 80, globo: 150, ovni: 150 };
 // How hard each plane's missiles hit a flying boss: the bomber has few, so they count more.
 const BOSS_MUL: Record<ModeloAvion, number> = { avioneta: 1.2, caza: 1, bombardero: 1.6, raptor: 1, sukhoi: 1, b2: 1.3, ovni: 1.1, tomcat: 1.1, a10: 1.5, spitfire: 1.1, stuka: 1.5, mustang: 1.1, corsair: 1.2, f16: 1, mig29: 1 };
+/** How each plane sounds in a dive: the Stuka's siren, the Corsair's whistle, props screaming, jets roaring. */
+const PICADA_CLASE: Record<ModeloAvion, AB.ClasePicada> = {
+  avioneta: 'helice', caza: 'jet', bombardero: 'helice', raptor: 'jet', sukhoi: 'jet', b2: 'jet', ovni: null,
+  tomcat: 'jet', a10: 'jet', spitfire: 'helice', stuka: 'sirena', mustang: 'helice', corsair: 'silbo', f16: 'jet', mig29: 'jet',
+};
 // Enemy missiles carry their type (misiles.ts); the player's are plain rockets.
 /** Missiles let go together share one salvo group, so they never blow each other up. */
 function unaSalva(ms: MS.MisilEnemigo[]): MS.MisilEnemigo[] {
@@ -863,6 +872,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     enfriaT: 0,
     frenoAntes: false,
     nitroCd: 0,
+    /** Nitro heat 0…1: it builds while the nitro burns, like the gun's; full, it locks out until it cools. */
+    nitroCalor: 0,
+    nitroQuemado: false,
     lockCand: null as Fijable | null,
     lockKey: null as object | null,
     lockT: 0,
@@ -896,7 +908,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     fireWasDown: false,
     bombWasDown: false,
     /** Pilots who bailed out: popping up, then drifting down under a parachute. */
-    eyectados: [] as { x: number; y: number; vx: number; vy: number; t: number; jefa: boolean }[],
+    /** Bailed-out pilots. `roto`: the canopy was shot to rags and he's falling. */
+    eyectados: [] as { x: number; y: number; vx: number; vy: number; t: number; jefa: boolean; roto?: boolean }[],
     /** The mice's radio chatter: who's talking, the line, and how long it's been up. */
     radio: null as { quien: string; texto: string; t: number } | null,
     /** Seconds until a fighter may drop another special-upgrade balloon. */
@@ -1030,6 +1043,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const th of threats) if (th.guiado && Math.hypot(th.dx, th.dy) < 300) guided++;
     AB.fijacionFuerte(clamp((guided - 1) / 3 + (threats.some((th) => th.tipo === 'cazador') ? 0.5 : 0), 0, 1));
     AB.viento(v, p.carga);
+    // Diving: how steep (nose down) and how fast, per plane.
+    const vMax = FV.PARAMS[id].velMax;
+    const abajo = v > 1 ? -p.vy / v : 0;
+    const kPicada = clamp((abajo - 0.35) / 0.45, 0, 1) * clamp((v - vMax * 0.35) / (vMax * 0.4), 0, 1);
+    AB.picada(PICADA_CLASE[id], kPicada, v / vMax);
     AB.altitud(p.y, v);
     AB.zonaNueva(zonaAltitud(p.y));
     AB.tormenta(s.mapa === 'tormenta' ? 1 - s.despeje : 0);
@@ -1128,6 +1146,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.boostT = 0;
     s.nitroT = 0;
     s.nitroCd = 0;
+    s.nitroCalor = 0;
+    s.nitroQuemado = false;
     s.enfriaT = 0;
     s.hielo = 0;
     s.congelado = false;
@@ -1527,9 +1547,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     for (const u of s.gigantes) if (u.viva) giantHit(u, G.explotar(u, x, y, energy, hiereRatones ? damage : 0), x, y);
-    if (s.gore && hiereRatones) {
+    if (hiereRatones) {
       // Not while still popping out: the plane's own blast mustn't catch its pilot.
-      for (const e of s.eyectados) if (!e.jefa && e.t > 0.5 && Math.hypot(e.x - x, e.y + 4 - y) < ex.radio * 1.2) reventarEyectado(e);
+      for (const e of s.eyectados) if (!e.jefa && e.t > 0.5 && Math.hypot(e.x - x, e.y + 8 - y) < ex.radio * 1.2) golpearEyectado(e);
     }
     if (hiereRatones && s.jefe && JF.tocado(s.jefe, x, y, ex.radio)) {
       const h = JF.golpear(s.jefe, x, y, damage * BOSS_MUL[s.spec.id]);
@@ -1796,7 +1816,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     for (const f of s.fighters) if (seen(f.a.x)) hurtFighter(f, f.jefa ? f.hpMax * 0.35 : 99);
     for (const u of s.gigantes) if (u.viva && seen(u.x)) giantHit(u, G.golpear(u, u.x, u.y + 6, 99), u.x, u.y);
-    if (s.gore) for (const e of s.eyectados) if (!e.jefa && seen(e.x)) reventarEyectado(e);
+    for (const e of s.eyectados) if (!e.jefa && seen(e.x)) golpearEyectado(e);
     for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) sh.m.t = -1;
     s.proy = [];
     if (s.jefe && seen(s.jefe.x)) for (let i = 0; i < 6; i++) {
@@ -1837,6 +1857,24 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Past its time: the list filter drops it.
     e.t = 99;
   }
+  /** The canopy shot to rags: it flaps uselessly and the pilot drops like a stone. */
+  function romperParacaidas(e: (typeof s.eyectados)[number]) {
+    if (e.roto || e.t >= 16) return;
+    e.roto = true;
+    e.vy = Math.min(e.vy, -10);
+    for (let i = 0; i < 5; i++) VFX.pieza(s.fx, e.x + rand(-6, 6), e.y + 12, rand(-40, 40), rand(0, 50), null, i % 2 ? '#ff9ad0' : P.white);
+    if (s.mode === 'play') pop(e.x, e.y + 22, RADIO.grito[Math.floor(Math.random() * RADIO.grito.length)], '#ffd0e8');
+    if (!s.attract) sfx.pop();
+  }
+  /**
+   * Fire that catches a bailed-out pilot: in gore mode he bursts; otherwise he goes
+   * limp and his canopy tears, so he falls.
+   */
+  function golpearEyectado(e: (typeof s.eyectados)[number]) {
+    if (e.jefa || e.t >= 16) return;
+    if (s.gore) reventarEyectado(e);
+    else romperParacaidas(e);
+  }
 
   /** Damages a mouse fighter; at 0 it blows apart (scored only if the player did it). */
   function hurtFighter(f: CZ.Caza, dmg: number, byPlayer = true) {
@@ -1870,7 +1908,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (byPlayer) {
       award(CZ.PUNTOS, x, y);
       avanzaMision('cazas');
-      eyectar(x, y, vx, false);
+      // Not every pilot gets out in time.
+      if (Math.random() < 0.55) eyectar(x, y, vx, false);
+      else {
+        if (s.mode === 'play') pop(x, y + 16, '¡No alcanzó a saltar!', '#ffd0e8');
+        if (s.gore) GR.despedazar(s.sangre, x, y, vx, vy, GR.PILOTO);
+      }
       radio(`Ratón ${1 + (f.id % 4)}`, RADIO.caido, true);
       // Sometimes a downed fighter leaves a golden balloon with a special upgrade (not too often).
       if (s.especialCd <= 0 && Math.random() < 0.3) {
@@ -2367,9 +2410,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const opts: (Mejora | 'nitro')[] = ['doble', 'escudo', 'cohetes', 'chorrillana', 'bombas', 'bengalas', 'furia', 'iman', 'lluvia', 'nitro'];
       const pick = opts[Math.floor(Math.random() * opts.length)];
       if (pick === 'nitro') {
-        s.nitroCd = 0;
         startNitro();
-        s.banner = '⭐ ¡Super nitro gratis!';
+        s.banner = '⭐ ¡Nitro frío y gratis!';
       } else {
         // A new upgrade replaces the old one; a replaced shield stops protecting too.
         if (s.boost === 'escudo' && pick !== 'escudo') s.inv = Math.min(s.inv, 0.5);
@@ -2533,10 +2575,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
 
   /** A pilot hanging under a parachute (a mouse, or Margarita with her red beanie). */
-  function dibujarEyectado(x: number, y: number, t: number, jefa: boolean) {
+  function dibujarEyectado(x: number, y: number, t: number, jefa: boolean, roto = false) {
     const X = Math.round(x), Y = Math.round(y);
     const k = clamp((t - 0.55) / 0.3, 0, 1);
-    if (k > 0) {
+    if (roto) {
+      // Rags of canopy streaming above him on loose lines.
+      const f = Math.floor(t * 14) % 2;
+      for (let i = 0; i < 6; i++) A.R(g, X - 2 + (i % 3) * 2 + (f && i > 2 ? 1 : 0), Y - 5 - i * 2, 1, 1, '#e8e0d0');
+      A.R(g, X - 3 + f, Y - 15, 3, 2, P.white);
+      A.R(g, X + 1 - f, Y - 13, 2, 2, '#ff9ad0');
+    } else if (k > 0) {
       const sw = Math.round(Math.sin(t * 2.2) * 1.5);
       const w = Math.round(3 + 5 * k), h = Math.round(1 + 3 * k);
       const cy = Y - 7 - Math.round(5 * k);
@@ -2812,11 +2860,18 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           giantHit(u, G.golpear(u, b.x, b.y, 0.25 * bd), b.x, b.y, true);
         }
       }
-      if (s.gore && !hit) {
+      if (!hit) {
         for (const e of s.eyectados) {
-          if (e.jefa || Math.abs(b.x - e.x) > 3 || Math.abs(b.y - (e.y + 4)) > 5) continue;
+          if (e.jefa) continue;
+          // The open canopy above him: a hit tears it.
+          if (!e.roto && e.t > 0.55 && Math.abs(b.x - e.x) < 8 && b.y > e.y + 7 && b.y < e.y + 17) {
+            hit = true;
+            romperParacaidas(e);
+            break;
+          }
+          if (Math.abs(b.x - e.x) > 3 || Math.abs(b.y - (e.y + 4)) > 5) continue;
           hit = true;
-          reventarEyectado(e);
+          golpearEyectado(e);
           break;
         }
       }
@@ -3030,7 +3085,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       disparar: t ? 'La metralla dispara sola · toca 🚀 Misil para lanzar uno' : 'Espacio: misil · H: metralla',
       fijar: 'Mantén la nariz 1 s sobre un enemigo: se fija y el misil lo persigue',
       bengala: t ? '¡Misil! Toca ✨ Bengalas o gira fuerte' : '¡Misil! L suelta bengalas, o gira fuerte',
-      nitro: t ? 'Doble toque en Gas: super nitro 🔥' : 'Aprieta E dos veces: super nitro 🔥',
+      nitro: t ? 'Mantén Gas: nitro (suéltalo antes de que se recaliente)' : 'Mantén E: nitro (suéltalo antes de que se recaliente)',
     }[k];
   }
   /** Picks the hint that fits the moment, if the player hasn't learned it yet. */
@@ -3272,6 +3327,28 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         L.luz(s.luces, tx, ty, 6 + 8 * k, k > 0.5 ? '#ff7a3c' : '#c0405a', 0.04 * k);
         // Hot exhaust turning into grey smoke as it cools.
         if (Math.random() < dt * (10 + 20 * (1 - k))) puff(tx, ty, rand(0.8, 1.6), k < 0.4, 0.5 + 0.3 * (1 - k), -p.vx * 0.1 + rand(-8, 8), -p.vy * 0.1 + rand(4, 16));
+      }
+      // Holding the throttle burns the nitro; letting go stops it. It heats up like the gun:
+      // full heat locks it out (the plain throttle still works) until it cools.
+      const quiereNitro = input.gas > 0 && s.mode === 'play' && !s.despegue && !s.congelado && s.transT <= 0 && !s.attract;
+      if (quiereNitro && !s.nitroQuemado) {
+        if (s.nitroT <= 0) encenderNitro();
+        s.nitroT = NITRO_SOSTEN;
+        s.nitroCalor = Math.min(1, s.nitroCalor + dt / NITRO_CALOR_T);
+        if (s.nitroCalor >= 1) {
+          s.nitroQuemado = true;
+          s.nitroT = 0;
+          s.enfriaT = ENFRIA_T;
+          pop(p.x, p.y + 18, '¡Nitro recalentado!', '#ff9a5a');
+          AB.recalentada();
+          AB.nitroFin();
+        }
+      } else {
+        s.nitroCalor = Math.max(0, s.nitroCalor - dt / NITRO_ENFRIA_T);
+        if (s.nitroQuemado && s.nitroCalor < 0.35) {
+          s.nitroQuemado = false;
+          if (!s.attract) AB.nitroListo();
+        }
       }
       // Super nitro: a hard shove along the nose, past the normal top speed.
       if (s.nitroT > 0) {
@@ -4163,8 +4240,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const e of s.eyectados) {
       if (e.t < 0.55 && e.t + dt >= 0.55 && !s.attract) AB.paracaidas(panOf(e.x));
       e.t += dt;
-      if (e.t < 0.55) e.vy -= FA.GRAVEDAD * dt;
-      else {
+      if (e.t < 0.55 || e.roto) {
+        e.vy -= FA.GRAVEDAD * dt;
+        e.vx *= 1 - Math.min(1, dt * 0.5);
+      } else {
         // Canopy open: a slow swaying descent, drifting with the wind.
         e.vx += (wind * 0.5 - e.vx) * Math.min(1, dt * 1.2);
         e.vy += (-26 - e.vy) * Math.min(1, dt * 3);
@@ -4174,7 +4253,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     s.eyectados = s.eyectados.filter((e) => {
       const llega = e.y <= ground(e.x) + 1;
-      if (llega && sobreMar(e.x)) chapoteo(e.x, 0.6);
+      if (llega && sobreMar(e.x)) chapoteo(e.x, e.roto ? 1.4 : 0.6);
+      // Without a canopy the landing is the end of him.
+      if (llega && e.roto && e.t < 16) {
+        if (s.gore) GR.despedazar(s.sangre, e.x, Math.max(e.y, ground(e.x)) + 3, e.vx, -e.vy * 0.4, GR.PILOTO);
+        else puff(e.x, ground(e.x) + 3, 1.2, false, 0.7);
+      }
       return !llega && e.t < 16;
     });
     // Flares, smoke, shards, crates.
@@ -4814,7 +4898,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       g.globalAlpha = 1;
     }
-    for (const e of s.eyectados) dibujarEyectado(sx(e.x), sy(e.y), e.t, e.jefa);
+    for (const e of s.eyectados) dibujarEyectado(sx(e.x), sy(e.y), e.t, e.jefa, e.roto);
     if (s.say) {
       const esc = clamp(Math.round(2 / view.s), 1, 6);
       // Phones: pinned at the top centre under the HUD, so the thumb buttons never cover it,
@@ -5321,10 +5405,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       ammo: s.ammo,
       heat: Math.round(s.heat * 20) / 20,
       hot: s.hot,
-      nitro: s.nitroT > 0 ? 'activo' : s.nitroCd > 0 ? 'carga' : 'listo',
+      nitro: s.nitroT > 0 ? 'activo' : s.nitroQuemado ? 'carga' : 'listo',
       boost: s.boost ? MEJORA[s.boost].nombre : '',
       boostT: Math.ceil(s.boostT),
-      nitroK: s.nitroCd > 0 ? Math.round((1 - s.nitroCd / NITRO_CD) * 20) / 20 : 1,
+      nitroK: Math.round((1 - s.nitroCalor) * 20) / 20,
       rack: s.cap.misil,
       flares: s.flares,
       flareMax: s.cap.bengala,
@@ -5432,40 +5516,37 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     else keys.delete(k);
     syncInput();
   };
-  /** Two taps on accelerate in quick succession fire the super nitro. */
-  let lastAcc = -1e9;
+  /** Pressing the throttle while the nitro is overheated: a dry click so it's clear why nothing happens. */
   function tapAccel() {
-    const now = performance.now();
-    if (now - lastAcc < 260 && s.nitroT > 0) {
-      apagarNitro();
-      lastAcc = -1e9;
-      return;
-    }
-    if (now - lastAcc < 260 && startNitro()) {
-      lastAcc = -1e9;
-      return;
-    }
-    if (now - lastAcc < 260 && s.nitroCd > 0 && s.mode === 'play' && !s.attract) AB.nitroNoListo();
-    lastAcc = now;
+    if (s.nitroQuemado && s.mode === 'play' && !s.attract) AB.nitroNoListo();
   }
-  /** Cuts the super nitro short: the unused part comes back as charge. */
+  /** Cuts the nitro (braking): the engine glows as it cools. */
   function apagarNitro() {
     if (s.nitroT <= 0) return;
-    const resto = s.nitroT / NITRO_T;
     s.nitroT = 0;
-    s.nitroCd = NITRO_CD * Math.max(0.35, 1 - resto * 0.6);
     s.enfriaT = ENFRIA_T;
     pop(s.plane.x, s.plane.y + 18, 'Nitro apagado', '#9ad8ff');
     if (!s.attract) AB.nitroFin();
   }
-  /** Fires the super nitro if it's charged; false if it isn't. */
+  /** A scripted burst (the map trip, a free-nitro prize, the autopilot): NITRO_T seconds, heat aside. */
   function startNitro() {
-    if (s.nitroT > 0 || s.nitroCd > 0 || s.mode !== 'play' || s.dead) return false;
+    if (s.mode !== 'play' || s.dead) return false;
+    if (s.nitroT <= 0) encenderNitro();
     s.nitroT = NITRO_T;
-    s.nitroCd = NITRO_CD;
+    s.nitroCalor = 0;
+    s.nitroQuemado = false;
+    return true;
+  }
+  /** The nitro lights up (the throttle was just pressed): the roar, and a ring behind the plane on a cold start. */
+  let ultimaIgnicion = -1e9;
+  function encenderNitro() {
     usar('nitro');
-    pop(s.plane.x, s.plane.y + 18, '¡SUPER NITRO!', '#7ad8ff');
     if (!s.attract) AB.nitro();
+    const now = performance.now();
+    const frio = now - ultimaIgnicion > 1500;
+    ultimaIgnicion = now;
+    if (!frio) return;
+    pop(s.plane.x, s.plane.y + 18, '¡SUPER NITRO!', '#7ad8ff');
     // Ignition: a sonic ring and a flash behind the plane.
     VFX.explosion(s.fx, s.plane.x - Math.cos(s.plane.rumbo) * 14, s.plane.y - Math.sin(s.plane.rumbo) * 14, 1.2, { quieto: still || s.calma, color: 'humo' });
     return true;

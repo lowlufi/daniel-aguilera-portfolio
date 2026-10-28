@@ -1412,12 +1412,12 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   <span className="hud-sep" />
                   <span
                     className="inline-flex items-center gap-1"
-                    title="Super nitro: aprieta acelerar dos veces seguidas"
-                    aria-label={`Super nitro: ${hud.nitro === 'activo' ? 'encendido' : hud.nitro === 'listo' ? 'listo' : `cargando, ${Math.round(hud.nitroK * 100)} %`}`}
+                    title="Nitro: mantén acelerar; se recalienta como la metralla"
+                    aria-label={`Nitro: ${hud.nitro === 'activo' ? 'encendido' : hud.nitro === 'listo' ? 'listo' : 'recalentado'}, ${Math.round(hud.nitroK * 100)} % frío`}
                   >
                     <Px i="llama" s={ic} className={hud.nitro === 'activo' ? 'hud-parpadeo' : hud.nitro === 'carga' ? 'opacity-50' : ''} />
                     <Segs
-                      n={hud.nitro === 'carga' ? Math.floor(hud.nitroK * 5) : 5}
+                      n={Math.ceil(hud.nitroK * 5)}
                       max={5}
                       ancho={movil ? 3 : 4}
                       color={hud.nitro === 'activo' ? '#7ad8ff' : hud.nitro === 'listo' ? '#ffd84a' : '#f0a45d'}
@@ -1731,7 +1731,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <ul className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
                 <Key k="← ↑ → ↓" label="Pilotear (o WASD)" />
                 <Key k="E · Shift" label="Acelerar" on={hud?.throttle === 1} />
-                <Key k="E E (dos veces)" label="Super nitro" on={hud?.nitro === 'activo'} />
+                <Key k="E (mantener)" label="Nitro (se recalienta)" on={hud?.nitro === 'activo'} />
                 <Key k="Q · Ctrl" label="Frenar (apaga el nitro)" on={hud?.throttle === -1} />
                 <Key k="Espacio" label="Misil (sale por la nariz)" />
                 <Key k="K" label="Bomba" />
@@ -2268,7 +2268,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <TouchButton fila label="Bomba" {...hold('bomb')}>
               <Px i="bomba" s={2.5} />
             </TouchButton>
-            <TouchButton fila label={hud?.nitro === 'listo' ? 'Acelerar (doble toque: nitro)' : 'Acelerar'} corto={hud?.nitro === 'listo' ? 'Gas ×2' : 'Gas'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+            <TouchButton fila label={hud?.nitro === 'carga' ? 'Acelerar (nitro recalentado)' : 'Acelerar y nitro (mantener)'} corto={hud?.nitro === 'carga' ? '¡Calor!' : 'Nitro'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
               {hud?.nitro === 'activo' ? <Px i="llama" s={2.5} /> : (
                 <span className="relative inline-flex">
                   <Px i="acelerar" s={2.5} />
