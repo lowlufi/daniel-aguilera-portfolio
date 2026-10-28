@@ -4386,6 +4386,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           const bonus = 250 * s.wave;
           s.score += bonus;
           if (!s.dead) repair();
+          // Whatever the enemy still has in the air fizzles out: the break between waves is safe.
+          for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) {
+            FU.estallar(s.fuegos, sh.m.x, sh.m.y, 0, 0, 'chispazo', MS.MISILES[sh.m.tipo].fuego.paleta, 0.8);
+            sh.m.t = -1;
+          }
+          s.proy = [];
           if (!s.attract) AB.oleadaSuperada();
           // The voyage: every wave ends by flying on to the next map, whether
           // its boss was beaten or got away.
