@@ -4222,3 +4222,295 @@ export function __usarContexto(ctx: BaseAudioContext | null, dest?: AudioNode) {
 }
 /** Solo para pruebas: nodos vivos creados por este módulo. */
 export const __nodosVivos = () => vivos;
+
+/* ────────────────────────── arsenal ampliado ────────────────────────── */
+/*
+ * Los sonidos de la segunda tanda del hangar: lanzamientos (estatorreactor,
+ * salva de Brimstone, Zuni, pod de Hydra, volador de feria, mortero-cohete),
+ * metrallas (minigun, pom-pom de 37–57 mm, cañón revólver, Hispano, porotos)
+ * y bombas (napalm, rompepistas, humo, mina, planeadora, piñata, dardos,
+ * sísmica). Se hornean igual que el resto, en su propio caché por contexto,
+ * y suenan por los mismos topes y buses.
+ */
+
+type NombreArs =
+  | 'ars-ramjet' | 'ars-ripple' | 'ars-zuni' | 'ars-hydra' | 'ars-fuegos' | 'ars-mortero'
+  | 'ars-minigun' | 'ars-pompom' | 'ars-revolver' | 'ars-hispano' | 'ars-porotos'
+  | 'ars-napalm' | 'ars-pista' | 'ars-humo' | 'ars-mina' | 'ars-planeadora' | 'ars-pinata' | 'ars-dardos' | 'ars-sismica';
+
+/** Soplido de cohete: ruido de banda con envolvente; `tos` lo hace tartamudear. */
+function soplido(sr: number, a: Float32Array, t0: number, dur: number, f: number, q: number, amp: number, tos = 0) {
+  const bp = new Bq(sr, 'bp', f, q);
+  const i0 = Math.floor(t0 * sr);
+  const n = Math.min(a.length - i0, Math.floor(dur * sr));
+  for (let k = 0; k < n; k++) {
+    const t = k / sr;
+    const env = Math.min(1, t / 0.015) * Math.min(1, (dur - t) / 0.12);
+    const tt = 1 - tos + tos * Math.sin(TAU * 19 * t + 2 * Math.sin(TAU * 6 * t));
+    a[i0 + k] += bp.run(ruido()) * env * amp * tt;
+  }
+}
+
+const HORNO_ARS: Record<NombreArs, (sr: number) => Float32Array> = {
+  // Meteor: «clonc» del soporte, encendido y el zumbido parejo del estatorreactor que se aleja.
+  'ars-ramjet': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.4));
+    golpe(sr, a, 0, 260, 90, 0.02, 0.5, 2500);
+    soplido(sr, a, 0.08, 0.35, 1300, 1, 1.4);
+    const lp = new Bq(sr, 'lp', 900, 0.8);
+    let f = 0;
+    for (let i = Math.floor(0.2 * sr); i < a.length; i++) {
+      const t = i / sr - 0.2;
+      f += (110 + 25 * Math.exp(-t / 0.3)) / sr;
+      const env = Math.min(1, t / 0.1) * Math.exp(-t / 0.7);
+      a[i] += (lp.run(ruido()) * 1.2 + Math.sin(TAU * f) * 0.4 + Math.sin(TAU * f * 2) * 0.15) * env;
+    }
+    return normaliza(a, 0.88);
+  },
+  // Brimstone: tres encendidos secos en 0.18 s.
+  'ars-ripple': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.9));
+    for (const t0 of [0, 0.085, 0.17]) {
+      golpe(sr, a, t0, 300, 100, 0.012, 0.6, 3500);
+      soplido(sr, a, t0 + 0.01, 0.45, 1700, 1.3, 1.1);
+    }
+    return normaliza(a, 0.9);
+  },
+  // Zuni: golpe hondo de tubo grueso y un ¡FUUM! largo.
+  'ars-zuni': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1));
+    golpe(sr, a, 0, 160, 45, 0.05, 1, 1800);
+    soplido(sr, a, 0.02, 0.85, 600, 0.8, 2.2, 0.3);
+    chasquidos(sr, a, 0.02, 0.7, (t) => 90 * Math.exp(-t / 0.3), { hp: 1200, amp: 0.7, largo: [0.001, 0.006] });
+    return normaliza(a, 0.92);
+  },
+  // Pod de Hydra: siseo agudo chispeante, corto.
+  'ars-hydra': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.5));
+    golpe(sr, a, 0, 400, 160, 0.008, 0.4, 5000);
+    soplido(sr, a, 0.005, 0.42, 2600, 1.4, 1.6, 0.4);
+    chasquidos(sr, a, 0.01, 0.4, () => 160, { hp: 3000, amp: 0.6, largo: [0.0008, 0.003] });
+    return normaliza(a, 0.85);
+  },
+  // Volador de feria: silbido que sube y chisporroteo.
+  'ars-fuegos': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.9));
+    let f = 0;
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      f += (900 + 1900 * (t / 0.9)) / sr;
+      const env = Math.min(1, t / 0.03) * Math.min(1, (0.9 - t) / 0.2);
+      a[i] = Math.sin(TAU * f) * env * 0.5 + ruido() * env * 0.12;
+    }
+    chasquidos(sr, a, 0.02, 0.85, () => 120, { hp: 2500, amp: 0.8, largo: [0.0008, 0.004] });
+    return normaliza(a, 0.8);
+  },
+  // WGr 21: «tunk» de mortero y un soplido grave y sucio.
+  'ars-mortero': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.9));
+    golpe(sr, a, 0, 120, 40, 0.06, 1, 1200);
+    soplido(sr, a, 0.04, 0.7, 450, 0.9, 1.8, 0.5);
+    return normaliza(a, 0.92);
+  },
+  // Minigun: ráfaga de 6 tiros muy juntos, zumbido agudo.
+  'ars-minigun': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.08));
+    for (let k = 0; k < 6; k++) {
+      const i0 = Math.floor((k * 0.0105 + rand(0, 0.0006)) * sr);
+      for (let j = 0; i0 + j < a.length && j < 0.012 * sr; j++) {
+        const t = j / sr;
+        a[i0 + j] += (ruido() * Math.exp(-t / 0.0009) + Math.sin(TAU * 520 * t) * Math.exp(-t / 0.003) * 0.6) * rand(0.7, 1);
+      }
+    }
+    const bp = new Bq(sr, 'bp', 2600, 1.2);
+    for (let i = 0; i < a.length; i++) a[i] = Math.tanh(bp.run(a[i]) * 2.4 + a[i] * 0.4);
+    return normaliza(a, 0.85);
+  },
+  // Pom-pom (37–57 mm): estampido hondo, con un eco de culata.
+  'ars-pompom': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.5));
+    golpe(sr, a, 0, 140, 38, 0.09, 1, 1400);
+    ping(sr, a, 0.05, 900, 0.03, 0.12);
+    golpe(sr, a, 0.12, 80, 40, 0.06, 0.25, 600);
+    return normaliza(a, 0.95);
+  },
+  // Cañón revólver: tiro seco y apretado, algo metálico.
+  'ars-revolver': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.14));
+    golpe(sr, a, 0, 260, 80, 0.018, 1, 4000);
+    const hp = new Bq(sr, 'hp', 2400, 0.8);
+    for (let i = 0; i < a.length; i++) a[i] += hp.run(ruido()) * Math.exp(-i / sr / 0.004) * 0.8;
+    ping(sr, a, 0.02, 2100, 0.01, 0.12);
+    return normaliza(a, 0.9);
+  },
+  // Hispano 20 mm: golpe redondo de cañón, más grave que una .50.
+  'ars-hispano': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.2));
+    golpe(sr, a, 0, 200, 60, 0.03, 1, 2600);
+    ping(sr, a, 0.03, 1500, 0.012, 0.1);
+    return normaliza(a, 0.9);
+  },
+  // Lanza-porotos: «pfft» de cerbatana con un «tic».
+  'ars-porotos': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.09));
+    soplido(sr, a, 0, 0.07, 1800, 0.9, 1.4);
+    ping(sr, a, 0.004, 700, 0.006, 0.4);
+    return normaliza(a, 0.7);
+  },
+  // Napalm: «wumpf» que chupa aire y un rugido de llamas.
+  'ars-napalm': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 2.2));
+    golpe(sr, a, 0, 90, 35, 0.12, 1, 900);
+    const lp = new Bq(sr, 'lp', 700, 0.7);
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      const env = Math.min(1, t / 0.15) * Math.exp(-t / 0.9);
+      a[i] += lp.run(ruido()) * env * 1.4 * (0.7 + 0.3 * Math.sin(TAU * 3 * t));
+    }
+    chasquidos(sr, a, 0.1, 2, (t) => 70 * Math.exp(-t / 0.8), { hp: 1500, amp: 0.8, largo: [0.001, 0.006] });
+    return normaliza(a, 0.92);
+  },
+  // Rompepistas: paracaídas («fwap»), cohete hacia abajo y el golpe sordo bajo tierra.
+  'ars-pista': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.8));
+    soplido(sr, a, 0, 0.3, 2200, 1.4, 1.4, 0.2);
+    golpe(sr, a, 0.28, 70, 30, 0.12, 1, 500);
+    return normaliza(a, 0.92);
+  },
+  // Humo: «pof» y siseo largo.
+  'ars-humo': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.6));
+    golpe(sr, a, 0, 150, 70, 0.02, 0.6, 1200);
+    soplido(sr, a, 0.02, 1.5, 3200, 0.6, 0.9);
+    return normaliza(a, 0.75);
+  },
+  // Mina: chapuzón corto y un bip de armado.
+  'ars-mina': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.7));
+    soplido(sr, a, 0, 0.18, 900, 0.8, 1.2);
+    for (const t0 of [0.35, 0.5]) ping(sr, a, t0, 1760, 0.03, 0.5);
+    return normaliza(a, 0.75);
+  },
+  // Planeadora: «clac» de alas que se abren y un silbido de planeo.
+  'ars-planeadora': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.9));
+    ping(sr, a, 0, 1300, 0.01, 0.6);
+    ping(sr, a, 0.03, 1900, 0.008, 0.5);
+    soplido(sr, a, 0.05, 0.8, 1500, 3, 0.8);
+    return normaliza(a, 0.7);
+  },
+  // Piñata: «¡pum!» de papel, cornetas de cumpleaños y chispitas.
+  'ars-pinata': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.1));
+    golpe(sr, a, 0, 220, 90, 0.03, 0.8, 3000);
+    let f1 = 0, f2 = 0;
+    for (let i = Math.floor(0.05 * sr); i < Math.floor(0.6 * sr); i++) {
+      const t = i / sr - 0.05;
+      f1 += (523 + 40 * Math.sin(TAU * 7 * t)) / sr;
+      f2 += (659 + 30 * Math.sin(TAU * 6 * t)) / sr;
+      const env = Math.min(1, t / 0.02) * Math.min(1, (0.55 - t) / 0.1);
+      const saw = (x: number) => (x % 1) * 2 - 1;
+      a[i] += (saw(f1) + saw(f2)) * 0.18 * env;
+    }
+    chasquidos(sr, a, 0.05, 1, () => 60, { hp: 3500, amp: 0.7, largo: [0.0008, 0.003] });
+    return normaliza(a, 0.8);
+  },
+  // Dardos: lluvia de silbidos finos que bajan.
+  'ars-dardos': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.2));
+    for (let k = 0; k < 9; k++) {
+      const t0 = rand(0, 0.5);
+      const f0 = rand(2600, 4200);
+      let f = 0;
+      const i0 = Math.floor(t0 * sr);
+      for (let j = 0; i0 + j < a.length && j < 0.6 * sr; j++) {
+        const t = j / sr;
+        f += (f0 - 1400 * t) / sr;
+        const env = Math.min(1, t / 0.05) * Math.min(1, (0.6 - t) / 0.15);
+        a[i0 + j] += Math.sin(TAU * f) * env * 0.12;
+      }
+    }
+    soplido(sr, a, 0, 1.1, 5000, 0.7, 0.3);
+    return normaliza(a, 0.7);
+  },
+  // Sísmica: golpe enterrado y un retumbar largo que hace temblar.
+  'ars-sismica': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 3));
+    golpe(sr, a, 0, 60, 25, 0.25, 1, 400);
+    const lp = new Bq(sr, 'lp', 160, 0.9);
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      const env = Math.min(1, t / 0.3) * Math.exp(-t / 1.1);
+      a[i] += lp.run(ruido()) * env * 3 * (0.6 + 0.4 * Math.sin(TAU * 4.5 * t));
+    }
+    chasquidos(sr, a, 0.3, 2.6, (t) => 25 * Math.exp(-t / 1), { hp: 600, amp: 0.6, largo: [0.004, 0.02] });
+    return normaliza(a, 0.95);
+  },
+};
+
+let ctxArs: BaseAudioContext | null = null;
+const hornosArs = new Map<NombreArs, AudioBuffer>();
+function bufArs(m: Mezcla, n: NombreArs) {
+  if (ctxArs !== m.ctx) {
+    ctxArs = m.ctx;
+    hornosArs.clear();
+  }
+  let b = hornosArs.get(n);
+  if (!b) {
+    const d = HORNO_ARS[n](m.ctx.sampleRate);
+    b = m.ctx.createBuffer(1, d.length, m.ctx.sampleRate);
+    b.getChannelData(0).set(d);
+    hornosArs.set(n, b);
+  }
+  return b;
+}
+
+/** Hornea de a poco los sonidos del arsenal (llamar en menús, como precalentar). */
+export function precalentarArsenal() {
+  const m = salida(true);
+  if (!m) return;
+  const pend = (Object.keys(HORNO_ARS) as NombreArs[]).filter((n) => ctxArs !== m.ctx || !hornosArs.has(n));
+  let i = 0;
+  const paso = () => {
+    if (i >= pend.length || hornoPausa) return;
+    bufArs(m, pend[i++]);
+    window.setTimeout(paso, 30);
+  };
+  paso();
+}
+
+/** Lanzamiento de la segunda tanda (como mucho uno cada 0.12 s). */
+export function lanzamientoArsenal(tipo: 'ramjet' | 'ripple' | 'zuni' | 'hydra' | 'fuegos' | 'mortero', pan: number, tono = 1): void {
+  const vol = { ramjet: 0.3, ripple: 0.3, zuni: 0.32, hydra: 0.24, fuegos: 0.22, mortero: 0.3 }[tipo];
+  evento('lanza', 0.12, (m, t) => {
+    if (vivos + 3 > LIMITE + 4) return;
+    unaVezBuf(m, bufArs(m, `ars-${tipo}`), vol * enAire(), rand(0.96, 1.04) * tono, t, lado(pan), m.explo);
+  });
+}
+
+const tirosArs: Corta[] = [];
+/** Voz corta con tope propio (como `corta`, pero con un buffer del arsenal). */
+function cortaArs(m: Mezcla, n: NombreArs, vol: number, rate: number, t: number, pan: number) {
+  for (let i = tirosArs.length - 1; i >= 0; i--) if (!tirosArs[i].v.viva) tirosArs.splice(i, 1);
+  if (tirosArs.length >= 3) {
+    const x = tirosArs.shift()!;
+    apagar(x.v, x.g, t, 0.004);
+  }
+  if (vivos + 3 > LIMITE + 2) return;
+  tirosArs.push(unaVezBuf(m, bufArs(m, n), vol, rate, t, clamp(num(pan), -1, 1) || 0, m.explo));
+}
+
+/** Un tiro de las metrallas nuevas (se limita por tipo y a 3 voces). */
+export function metrallaArsenal(tipo: 'minigun' | 'pompom' | 'revolver' | 'hispano' | 'porotos', pan: number, tono = 1): void {
+  const [intervalo, vol] = { minigun: [0.06, 0.16], pompom: [0.15, 0.26], revolver: [0.045, 0.18], hispano: [0.05, 0.2], porotos: [0.05, 0.16] }[tipo];
+  evento(`ars-${tipo}`, intervalo, (m, t) => cortaArs(m, `ars-${tipo}`, vol * rand(0.88, 1) * enAire(), rand(0.95, 1.05) * tono, t, pan));
+}
+
+/** El efecto de una bomba nueva al llegar (o al abrirse). */
+export function bombaArsenal(tipo: 'napalm' | 'pista' | 'humo' | 'mina' | 'planeadora' | 'pinata' | 'dardos' | 'sismica', pan: number): void {
+  const vol = { napalm: 0.34, pista: 0.32, humo: 0.24, mina: 0.24, planeadora: 0.2, pinata: 0.26, dardos: 0.24, sismica: 0.4 }[tipo];
+  evento(`ars-b-${tipo}`, 0.2, (m, t) => {
+    if (vivos + 3 > LIMITE + 4) return;
+    unaVezBuf(m, bufArs(m, `ars-${tipo}`), vol * enAire(), rand(0.96, 1.04), t, lado(pan), m.explo);
+  });
+}

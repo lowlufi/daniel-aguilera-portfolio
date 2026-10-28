@@ -20,9 +20,17 @@ export type ModeloBase = 'avioneta' | 'caza' | 'bombardero';
  */
 export type Piloto = 'dui' | 'lulu' | 'almendrita' | 'naxo' | 'nelo';
 /** Every plane in the hangar: the home ones plus the iconic jets and the saucer. */
-export type ModeloAvion = ModeloBase | 'raptor' | 'sukhoi' | 'b2' | 'ovni' | 'tomcat' | 'a10' | 'spitfire' | 'stuka' | 'mustang' | 'corsair' | 'f16' | 'mig29';
+export type ModeloAvion = ModeloBase | 'raptor' | 'sukhoi' | 'b2' | 'ovni' | 'tomcat' | 'a10' | 'spitfire' | 'stuka' | 'mustang' | 'corsair' | 'f16' | 'mig29'
+  | ModeloNuevo;
+/** The second batch of the hangar (aviones-extra.ts): classics, Chilean favourites, modern jets and the cardboard box. */
+export type ModeloNuevo =
+  | 'pillan' | 'zero' | 'hurricane' | 'bf109' | 'p38' | 'mosquito'
+  | 'a37' | 'a4' | 'f5' | 'mig21' | 'harrier' | 'mirage' | 'gripen' | 'rafale' | 'typhoon' | 'f35' | 'carton';
 /** Bomb loads: plain, cluster, white phosphorus, gas, and the saucer's plasma charge. */
-export type BombaTipo = 'comun' | 'racimo' | 'fosforo' | 'gas' | 'plasma' | 'guiada' | 'rebote' | 'crio' | 'emp' | 'termobarica';
+export type BombaTipo = 'comun' | 'racimo' | 'fosforo' | 'gas' | 'plasma' | 'guiada' | 'rebote' | 'crio' | 'emp' | 'termobarica'
+  | BombaNueva;
+/** The second batch of bomb loads (arsenal.ts runs their effects). */
+export type BombaNueva = 'napalm' | 'pista' | 'humo' | 'mina' | 'planeadora' | 'pinata' | 'dardos' | 'sismica';
 
 /**
  * Stick input. x: -1 left … +1 right, y: -1 down … +1 up, in SCREEN

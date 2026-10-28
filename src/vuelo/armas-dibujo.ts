@@ -1,8 +1,9 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
 import { R, drawBomb, drawFlare, drawMissile } from './dibujo';
-import type { BombaTipo } from './fisica-tipos';
-import type { LookMisil, Trazadora } from './hangar';
+import type { BombaNueva, BombaTipo } from './fisica-tipos';
+import { BOMBA_EXTRA, drawMisilExtra, esFormaExtra } from './armas-extra';
+import type { FormaNueva, LookMisil, Trazadora } from './hangar';
 
 /*
  * Weapon visuals for the plane game: bomb loads, cluster bomblets, phosphorus
@@ -39,7 +40,7 @@ function disco(g: Ctx, x: number, y: number, r: number, c: string) {
 /* ── Bombs ───────────────────────────────────────────────────────────────── */
 
 /** Sprites for the non-plain bombs, nose to +x, centred. */
-const BOMB_SPRITE: Record<Exclude<BombaTipo, 'comun' | 'plasma'>, () => HTMLCanvasElement> = {
+const BOMB_SPRITE: Record<Exclude<BombaTipo, 'comun' | 'plasma' | BombaNueva>, () => HTMLCanvasElement> = {
   // Fat cluster canister with yellow bands and a box tail.
   racimo: () => D.outlined('bomba|racimo', '#2e3a1e', 20, 12, 10, 6, (g) => {
     D.oval(g, 1, 0, 6, 4, '#4a5a2a');
@@ -147,7 +148,7 @@ export function drawBombaTipo(g: Ctx, tipo: BombaTipo, x: number, y: number, ang
     plasmaBomb(g, x, y);
     return;
   }
-  const img = BOMB_SPRITE[tipo]();
+  const img = tipo in BOMBA_EXTRA ? BOMBA_EXTRA[tipo as BombaNueva]() : BOMB_SPRITE[tipo as Exclude<BombaTipo, 'comun' | 'plasma' | BombaNueva>]();
   g.save();
   g.translate(Math.round(x), Math.round(y));
   g.rotate(Math.round(angle / 0.15) * 0.15);
@@ -362,6 +363,11 @@ function tinta(l: LookMisil) {
 export function drawMisilKit(g: Ctx, x: number, y: number, angle: number, burning: boolean, t: number, l: LookMisil): void {
   if (l.forma === 'casero') {
     drawMissile(g, x, y, angle, false, burning, t, l);
+    return;
+  }
+  // The second batch's bodies (armas-extra.ts).
+  if (esFormaExtra(l.forma)) {
+    drawMisilExtra(g, x, y, angle, burning, t, l as LookMisil & { forma: FormaNueva });
     return;
   }
   const f = l.forma;
