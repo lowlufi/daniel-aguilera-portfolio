@@ -1435,7 +1435,11 @@ function pintarSoldado(g: Ctx, pose: PoseInf, bazuca: boolean) {
   // Body, belt, tail.
   R(g, -2, -7 + baja, 5, 4, V0);
   R(g, -1, -7 + baja, 3, 3, V);
+  // Light from the top-left: a warm rim on the chest, cool shade down the back.
+  R(g, -2, -7 + baja, 1, 2, '#f0e6ff');
+  R(g, 2, -6 + baja, 1, 2, '#5a46b4');
   R(g, -2, -4 + baja, 5, 1, P.k1);
+  R(g, 0, -4 + baja, 1, 1, P.gold);
   R(g, 3, -5 + baja, 2, 1, P.p1);
   R(g, 5, -6 + baja, 1, 1, P.p1);
   cabecita(g, 0, -7 + baja);
@@ -1538,6 +1542,14 @@ export function dibujar(g: Ctx, u: Unidad, sx: (x: number) => number, sy: (y: nu
     g.translate(sx(u.x), sy(u.y));
     g.rotate(-quant(u.ang));
     g.drawImage(flash || p.flash > 0 ? blanco(img) : img, -14, -22);
+    // Two-stroke exhaust: little puffs popping out behind the back wheel.
+    for (let i = 0; i < 3; i++) {
+      const ph = (t * 2.2 + i / 3 + u.semilla) % 1;
+      if (ph > 0.7) continue;
+      g.globalAlpha = ph < 0.35 ? 0.55 : 0.3;
+      R(g, Math.round(10 + ph * 8), Math.round(-5 - ph * 5), ph < 0.3 ? 1 : 2, ph < 0.3 ? 1 : 2, '#d4cce4');
+    }
+    g.globalAlpha = 1;
     if (p.aviso > 0) aviso(g, 3, -17, t);
     g.restore();
     return;
@@ -1573,12 +1585,40 @@ function dibujarSoldado(g: Ctx, u: Unidad, sx: (x: number) => number, sy: (y: nu
   const img = soldadoSprite(pose, baz);
   const X = sx(u.x), Y = sy(u.y);
   if (u.estado === 'muerto' && u.estadoT > 1.8) g.globalAlpha = Math.round((1 - (u.estadoT - 1.8) / 0.7) * 4) / 4;
+  const a0 = g.globalAlpha;
+  if (u.estado !== 'aire' && a0 > 0) {
+    // Contact shadow: a 1 px cool smudge that pins the mouse to the ground.
+    g.globalAlpha = a0 * 0.35;
+    R(g, Math.round(X) - 3, Math.round(Y), 7, 1, '#1e1438');
+    g.globalAlpha = a0;
+    // Running: a puff of dust kicked up behind the back foot on every other step.
+    if (pose.startsWith('corre')) {
+      const paso_ = (u.rueda / 2.5) % 2;
+      if (paso_ < 1) {
+        g.globalAlpha = a0 * (paso_ < 0.5 ? 0.6 : 0.3);
+        const bx = Math.round(X - u.mira * (4 + paso_ * 3)), byy = Math.round(Y - 1 - paso_ * 2);
+        R(g, bx, byy, paso_ < 0.5 ? 1 : 2, 1, '#d8c8b0');
+        g.globalAlpha = a0;
+      }
+    }
+  }
   g.save();
   g.translate(X, Y - (u.estado === 'aire' ? 4 : 0));
   if (u.estado === 'aire') g.rotate(Math.round(u.spin / 0.4) * 0.4);
   if (u.mira === 1) g.scale(-1, 1);
   g.drawImage(flash || p.flash > 0 ? blanco(img) : img, -12, -15 + (u.estado === 'aire' ? 4 : 0));
   g.restore();
+  // Knocked down: a ring of dust puffs out from the body (follow-through of the hit).
+  if (u.estado === 'muerto' && u.estadoT < 0.4) {
+    const k = u.estadoT / 0.4;
+    const rr = Math.round(2 + k * 6);
+    g.globalAlpha = a0 * (k < 0.5 ? 0.6 : 0.3);
+    for (let i = -1; i <= 1; i += 2) {
+      R(g, Math.round(X + i * rr), Math.round(Y - 1 - k * 2), 2, 1, '#d8c8b0');
+      R(g, Math.round(X + i * (rr - 2)), Math.round(Y - 3 - k * 3), 1, 1, '#ece4d4');
+    }
+    g.globalAlpha = a0;
+  }
   // Weapon pointed at the plane while aiming / firing.
   if (u.viva && (u.estado === 'apunta' || u.estado === 'dispara') && g.globalAlpha > 0) {
     const hy = baz ? 6 : 6;
@@ -1591,10 +1631,34 @@ function dibujarSoldado(g: Ctx, u: Unidad, sx: (x: number) => number, sy: (y: nu
       R(g, -5 + r, -1, 11, 2, P.metal0);
       R(g, -5 + r, -1, 11, 1, P.metal);
       R(g, 6 + r, -1, 1, 2, P.red);
+      // Backblast right after the shot: a hot puff out of the back of the tube, then grey.
+      if (p.retro > 0.6) {
+        const k = Math.min(1, p.retro / 2);
+        R(g, -8 + r - Math.round((1 - k) * 3), -1, 2, 2, k > 0.6 ? P.gold1 : '#c8c0d8');
+        if (k > 0.4) R(g, -10 + r, -2 + (Math.floor(t * 30) % 2), 1, 1, '#ff9a3c');
+      }
     } else {
       R(g, 0 + r, -1, 8, 3, VINK);
       R(g, 1 + r, 0, 6, 1, P.metal0);
-      if (u.estado === 'dispara' && Math.floor(t * 30) % 2 === 0) R(g, 8, -1, 2, 3, P.gold);
+      R(g, 1 + r, 0, 3, 1, P.metal);
+      if (u.estado === 'dispara') {
+        // Muzzle flash in three frames: a star, a smaller burst, a wisp of smoke.
+        const fr = Math.floor(t * 30) % 3;
+        if (fr === 0) {
+          R(g, 8, -2, 1, 5, P.gold);
+          R(g, 8, 0, 4, 1, P.gold);
+          R(g, 9, -1, 2, 3, P.gold1);
+          R(g, 9, 0, 1, 1, P.white);
+        } else if (fr === 1) {
+          R(g, 8, -1, 2, 3, P.gold);
+          R(g, 8, 0, 1, 1, P.white);
+        } else {
+          R(g, 9, -1, 1, 1, '#c8c0d8');
+        }
+        // A brass casing flicked up and back from the breech.
+        const ph = (t * 5 + u.semilla) % 1;
+        R(g, Math.round(2 - ph * 5), Math.round(-2 - Math.sin(ph * Math.PI) * 5 + ph * 3), 1, 1, ph < 0.5 ? P.gold1 : P.gold0);
+      }
     }
     g.restore();
     if (p.aviso > 0 && baz) aviso(g, X + u.mira * 3, Y - 13, t);

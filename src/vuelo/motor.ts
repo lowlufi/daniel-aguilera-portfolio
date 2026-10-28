@@ -25,6 +25,7 @@ import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Piloto, Vehiculo,
 import { CASA, NOMBRE, PILOTOS, pilotoGuardado } from './pilotos';
 import * as HG from './hangar';
 import * as AD from './armas-dibujo';
+import { dibujarPops } from './jugo';
 import { dibujarTransicion, precalentarTransicion, type MapaId } from './transiciones';
 
 /*
@@ -1696,6 +1697,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       sfx.select();
     }
     if (!s.calma && !still) s.hitStop = Math.max(s.hitStop, s.combo >= 3 ? 0.1 : 0.06);
+    VFX.derribo(s.fx, x, y, mult, still || s.calma);
   }
 
   function pop(x: number, y: number, text: string, c: string = P.gold) {
@@ -2726,6 +2728,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   /** Caught a balloon: one more slot of that weapon, filled up. */
   function catchPrize(kind: Premio, x: number, y: number) {
+    VFX.premio(s.fx, x, y + 14, kind === 'especial' || kind === 'vida' || kind === 'nuclear' ? VFX.BRILLO_ARCOIRIS : VFX.BRILLO_ORO, still || s.calma);
     sfx.star();
     sfx.reveal();
     S.suena('recoger', { vol: 1 });
@@ -4082,6 +4085,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
             mision: ms ? ms.texto : '', cumplida: !!ms?.hecha, siguiente,
             dato: datoDe(destino || s.mapa),
           };
+          if (!s.attract) VFX.confeti(s.fx, s.plane.x, s.plane.y + 90, view.vw, still || s.calma);
           nextWave();
           if (s.nuevos.length) s.resumen.nuevos = s.nuevos;
           s.nuevos = [];
@@ -4827,6 +4831,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       } else if (FV.pasoParacaidas(c, dt, wind, ground)) c.landed = 0.001;
       if (s.mode === 'play' && !s.dead && Math.hypot(c.x - p.x, c.y - p.y) < s.spec.hit + 12) {
         c.landed = 99;
+        VFX.premio(s.fx, c.x, c.y, VFX.BRILLO_CIELO, still || s.calma);
         sfx.star();
         S.suena('recoger', { vol: 0.6 });
         if (!repair()) {
@@ -5542,17 +5547,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g.globalAlpha = 1;
     }
 
-    // Floating score text.
-    g.font = 'bold 9px "Fredoka", "Nunito", sans-serif';
-    g.textAlign = 'center';
-    for (const q of s.pops) {
-      const x = clamp(sx(q.x), 40, vw - 40);
-      const y = sy(q.y + q.t * 18);
-      g.fillStyle = '#3a2a6a';
-      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) g.fillText(q.text, x + dx, y + dy);
-      g.fillStyle = q.c;
-      g.fillText(q.text, x, y);
-    }
+    // Floating score text (cached sprites with an eased pop: jugo.ts).
+    dibujarPops(g, s.pops, sx, sy, vw, still || s.calma);
 
     // Missile warnings at the edge of the screen.
     if (s.mode === 'play' && !s.dead && Math.floor(s.t * 8) % 2) {
