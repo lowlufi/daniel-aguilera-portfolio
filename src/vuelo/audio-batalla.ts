@@ -385,7 +385,8 @@ type Nombre =
   | 'hangar-sel' | 'hangar-bloq' | 'desbloqueo'
   | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae'
   | 'sin-municion' | 'recargada' | 'nitro-no' | 'nitro-listo' | 'bengala-vacia' | 'radio' | 'eyeccion' | 'paracaidas'
-  | 'sirena-picada' | 'silbo-picada' | 'rugido-picada' | 'estampido';
+  | 'sirena-picada' | 'silbo-picada' | 'rugido-picada' | 'estampido'
+  | 'bocina-perdida' | 'tono-terreno' | 'master-caution';
 
 const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
@@ -499,6 +500,9 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   chispa: hornoChispa,
   lluvia: hornoLluvia,
   escarcha: hornoEscarcha,
+  'bocina-perdida': hornoBocinaPerdida,
+  'tono-terreno': hornoTerreno,
+  'master-caution': hornoMaster,
   'sirena-picada': hornoSirena,
   'silbo-picada': hornoSilbo,
   'rugido-picada': hornoRugido,
@@ -1300,6 +1304,48 @@ function hornoEstampido(sr: number) {
     a[i] = lp.run(ruido()) * (g1 + g2 * 0.9) * 3 + Math.sin(TAU * 38 * t) * Math.exp(-t / 0.35) * 0.5;
   }
   return normaliza(a, 0.95);
+}
+
+/** Bocina de pérdida de sustentación: un zumbido áspero y continuo de cabina (~0,45 s). */
+function hornoBocinaPerdida(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.45));
+  const lp = new Bq(sr, 'lp', 1800, 0.7);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const env = Math.min(1, t / 0.01) * Math.min(1, (0.45 - t) / 0.02);
+    const sq = Math.sign(Math.sin(TAU * 370 * t)) * 0.6 + Math.sign(Math.sin(TAU * 555 * t)) * 0.3;
+    a[i] = lp.run(sq) * env;
+  }
+  return normaliza(a, 0.8);
+}
+
+/** Aviso de terreno: un «uuup» que sube (400 → 950 Hz) en 0,32 s, como el de las cabinas reales. */
+function hornoTerreno(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.34));
+  let ph = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const f = 400 + 550 * Math.min(1, t / 0.3);
+    ph += f / sr;
+    const env = Math.min(1, t / 0.01) * Math.min(1, (0.34 - t) / 0.03);
+    a[i] = (Math.sin(TAU * ph) * 0.8 + Math.sin(TAU * ph * 2) * 0.2) * env;
+  }
+  return normaliza(a, 0.8);
+}
+
+/** «Master caution»: dos campanazos (do-sol bajando), el aviso general de daño. */
+function hornoMaster(sr: number) {
+  const n = Math.floor(sr * 0.9);
+  const a = new Float32Array(n);
+  for (const [t0, f] of [[0, 1047], [0.28, 784]] as const) {
+    const i0 = Math.floor(t0 * sr);
+    for (let j = 0; i0 + j < n; j++) {
+      const t = j / sr;
+      const e = Math.min(1, t / 0.003) * Math.exp(-t / 0.22);
+      a[i0 + j] += (Math.sin(TAU * f * t) + 0.35 * Math.sin(TAU * f * 2.01 * t) + 0.15 * Math.sin(TAU * f * 3.02 * t)) * e;
+    }
+  }
+  return normaliza(a, 0.8);
 }
 
 /** Campanita FM (para los avisos y jingles nuevos). */
@@ -3766,6 +3812,20 @@ export function alertaMisil(cerca: number): void {
     f.g.gain.linearRampToValueAtTime(0, b + largo);
     f.prox += intervalo;
   }
+}
+
+/* ────────────────────────── avisos de cabina ────────────────────────── */
+
+/**
+ * Avisos de cabina, llamar cada cuadro: `perdida` (el avión pierde sustentación:
+ * bocina repetida), `terreno` 0…1 (picando rápido cerca del suelo: «uuup» cada vez
+ * más seguido) y `critico` (casi sin vida: «master caution» cada 2,5 s).
+ */
+export function avisosCabina(perdida: boolean, terreno: number, critico: boolean): void {
+  if (perdida) evento('aviso-perdida', 0.55, (m, t) => unaVez(m, 'bocina-perdida', 0.16 * cede(), 1, t, 0, LIMITE + 4));
+  const k = clamp(num(terreno), 0, 1);
+  if (k > 0.35) evento('aviso-terreno', 0.75 - 0.4 * k, (m, t) => unaVez(m, 'tono-terreno', (0.12 + 0.08 * k) * cede(), 1, t, 0, LIMITE + 4));
+  if (critico) evento('aviso-master', 2.5, (m, t) => unaVez(m, 'master-caution', 0.17 * cede(), 1, t, 0, LIMITE + 4));
 }
 
 /* ────────────────────────── picada ────────────────────────── */

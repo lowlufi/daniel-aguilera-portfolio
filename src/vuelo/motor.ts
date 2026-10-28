@@ -883,6 +883,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     nitroQuemado: false,
     /** Rapid taps on the throttle before holding it: the stronger super nitro (until it's let go). */
     nitroSuper: false,
+    /** Seconds of auto-brake left after letting go of the nitro. */
+    frenoAutoT: 0,
     lockCand: null as Fijable | null,
     lockKey: null as object | null,
     lockT: 0,
@@ -1057,6 +1059,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const abajo = v > 1 ? -p.vy / v : 0;
     const kPicada = clamp((abajo - 0.35) / 0.45, 0, 1) * clamp((v - vMax * 0.35) / (vMax * 0.4), 0, 1);
     AB.picada(PICADA_CLASE[id], kPicada, v / vMax);
+    // Cockpit warnings: stall horn, ground proximity (diving fast and low), master caution.
+    const alto = p.y - ground(p.x);
+    const tiempoSuelo = p.vy < -20 ? alto / -p.vy : 99;
+    const terreno = s.despegue ? 0 : clamp((2.2 - tiempoSuelo) / 1.6, 0, 1);
+    AB.avisosCabina(s.stallT > 0 && s.inv <= 0 && !s.congelado && !s.despegue, terreno, s.hp > 0 && s.hp <= Math.max(1, s.spec.hp * 0.25));
     AB.altitud(p.y, v);
     AB.zonaNueva(zonaAltitud(p.y));
     AB.tormenta(s.mapa === 'tormenta' ? 1 - s.despeje : 0);
@@ -1158,6 +1165,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.nitroCalor = 0;
     s.nitroQuemado = false;
     s.nitroSuper = false;
+    s.frenoAutoT = 0;
     s.enfriaT = 0;
     s.hielo = 0;
     s.congelado = false;
@@ -3410,12 +3418,26 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           AB.nitroFin();
         }
       } else {
+        // Letting go of the nitro brakes on its own: back down to cruise in a second or so.
+        if (s.nitroT > 0 && !s.attract) s.frenoAutoT = 1.6;
         if (!input.gas || input.gas <= 0) s.nitroSuper = false;
         s.nitroCalor = Math.max(0, s.nitroCalor - dt / NITRO_ENFRIA_T);
         if (s.nitroQuemado && s.nitroCalor < 0.35) {
           s.nitroQuemado = false;
           if (!s.attract) AB.nitroListo();
         }
+      }
+      // Auto-brake after the nitro: bleed the extra speed (airbrakes out, engine glowing as it cools).
+      if (s.frenoAutoT > 0) {
+        s.frenoAutoT = Math.max(0, s.frenoAutoT - dt);
+        const v = Math.hypot(p.vx, p.vy);
+        const crucero = FV.PARAMS[s.spec.id].velCrucero * 1.1;
+        if (v > crucero && !quiereNitro) {
+          const dv = Math.min(v - crucero, NITRO_ACC * 0.9 * dt);
+          p.vx -= (p.vx / v) * dv;
+          p.vy -= (p.vy / v) * dv;
+          if (s.enfriaT <= 0) s.enfriaT = ENFRIA_T * 0.6;
+        } else s.frenoAutoT = 0;
       }
       // Super nitro: a hard shove along the nose, past the normal top speed.
       if (s.nitroT > 0) {
