@@ -1008,10 +1008,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // ~200 px wide), the whole-number scales down to 1:1, then farther steps
     // (3/4 and 1/2; on sharp screens also 1/3 for a very wide view).
     view.levels = [];
-    for (let e = sc + 2; e > sc; e--) if (cw / e >= 200) view.levels.push(e);
-    for (let e = sc; e >= 1; e--) view.levels.push(e);
-    view.levels.push(0.75, 0.5);
+    // Closer: up to three extra steps while the view stays at least ~170 px wide.
+    for (let e = sc + 3; e > sc; e--) if (cw / e >= 170) view.levels.push(e);
+    for (let e = sc; e >= 1; e--) {
+      view.levels.push(e);
+      // A half step between 2× and 1× (and 3× and 2×) for finer control.
+      if (e === 2 || e === 3) view.levels.push(e - 0.5);
+    }
+    // Farther: 3/4, 5/8, 1/2, 2/5; on sharp screens 1/3, and on computers 1/4 for a huge view.
+    view.levels.push(0.75, 0.625, 0.5, 0.4);
     if ((window.devicePixelRatio || 1) >= 2 && !view.sinLejos) view.levels.push(1 / 3);
+    if (!view.touch && !view.sinLejos) view.levels.push(0.25);
     // Keep the scale the player chose (1:1 by default) when the window changes.
     let best = 0;
     for (let i = 0; i < view.levels.length; i++) if (Math.abs(view.levels[i] - view.want) < Math.abs(view.levels[best] - view.want)) best = i;
