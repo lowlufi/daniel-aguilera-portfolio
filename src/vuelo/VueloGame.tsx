@@ -391,8 +391,8 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
             </dl>
           </div>
           <ul className="text-xs font-bold leading-snug">
-            <li>🚀 {sel.kit.misil.nombre} ×{sel.rack}</li>
-            <li>🔫 {sel.kit.metralla ? sel.kit.metralla.nombre : 'Sin metralla'}</li>
+            <li>🚀 {sel.kit.misil.nombre} ×{sel.rack} <span className="font-semibold text-[#a08060]">· {sel.kit.misil.nota}</span></li>
+            <li>🔫 {sel.kit.metralla ? sel.kit.metralla.nombre : 'Sin metralla'}{sel.kit.metralla && <span className="font-semibold text-[#a08060]"> · {sel.kit.metralla.nota}</span>}</li>
             <li>✨ {sel.kit.bengala.nombre} ×{sel.flareRack}</li>
             <li>💣 Bodega: {sel.bombRack} {sel.bombs > 1 ? `(suelta ${sel.bombs} a la vez)` : ''}{sel.sigilo > 0 ? ' · 👻 furtivo' : ''}</li>
           </ul>
