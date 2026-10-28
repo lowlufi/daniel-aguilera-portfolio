@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The square game icon inset to the 72dp visible area of the 108dp adaptive canvas,
+     drawn without filtering so the pixel art stays crisp. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="18dp">
+    <bitmap
+        android:filter="false"
+        android:antialias="false"
+        android:src="@drawable/aviones_icono" />
+</inset>

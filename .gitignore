@@ -8,3 +8,15 @@ coverage/
 !.env.example
 .wrangler/
 .claude/
+
+# Android
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/www/
+*.apk
+*.aab
+*.jks
+*.keystore

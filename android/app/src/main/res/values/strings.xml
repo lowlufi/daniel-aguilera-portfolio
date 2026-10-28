@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Escuadrón Dui</string>
+    <string name="salir_otra_vez">Presiona atrás otra vez para salir</string>
+    <string name="sin_navegador">No hay un navegador para abrir el enlace</string>
+</resources>
