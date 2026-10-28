@@ -387,7 +387,7 @@ type Nombre =
   | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae'
   | 'sin-municion' | 'recargada' | 'nitro-no' | 'nitro-listo' | 'bengala-vacia' | 'radio' | 'eyeccion' | 'paracaidas'
   | 'sirena-picada' | 'silbo-picada' | 'rugido-picada' | 'estampido'
-  | 'bocina-perdida' | 'tono-terreno' | 'master-caution';
+  | 'bocina-perdida' | 'tono-terreno' | 'master-caution' | 'aviso-lanza';
 
 const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
@@ -502,6 +502,7 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   lluvia: hornoLluvia,
   escarcha: hornoEscarcha,
   'bocina-perdida': hornoBocinaPerdida,
+  'aviso-lanza': hornoAvisoLanza,
   'tono-terreno': hornoTerreno,
   'master-caution': hornoMaster,
   'sirena-picada': hornoSirena,
@@ -1313,6 +1314,20 @@ function hornoEstampido(sr: number) {
     a[i] = lp.run(ruido()) * (g1 + g2 * 0.9) * 3 + Math.sin(TAU * 38 * t) * Math.exp(-t / 0.35) * 0.5;
   }
   return normaliza(a, 0.95);
+}
+
+/** Aviso de lanzamiento: tres pitidos rápidos que suben (el RWR detecta el disparo). */
+function hornoAvisoLanza(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.42));
+  for (const [t0, f] of [[0, 1180], [0.13, 1400], [0.26, 1660]] as const) {
+    const i0 = Math.floor(t0 * sr);
+    for (let j = 0; j < sr * 0.1 && i0 + j < a.length; j++) {
+      const t = j / sr;
+      const e = Math.min(1, t / 0.004) * Math.min(1, (0.1 - t) / 0.008);
+      a[i0 + j] += (Math.sin(TAU * f * t) * 0.8 + Math.sign(Math.sin(TAU * f * t)) * 0.12) * e;
+    }
+  }
+  return normaliza(a, 0.8);
 }
 
 /** Bocina de pérdida de sustentación: un zumbido áspero y continuo de cabina (~0,45 s). */
@@ -4034,6 +4049,11 @@ export function avisosCabina(perdida: boolean, terreno: number, critico: boolean
   const k = clamp(num(terreno), 0, 1);
   if (k > 0.35) evento('aviso-terreno', 0.75 - 0.4 * k, (m, t) => unaVez(m, 'tono-terreno', (0.12 + 0.08 * k) * cede(), 1, t, 0, LIMITE + 4));
   if (critico) evento('aviso-master', 2.5, (m, t) => unaVez(m, 'master-caution', 0.17 * cede(), 1, t, 0, LIMITE + 4));
+}
+
+/** Un misil enemigo acaba de salir hacia el avión: aviso inmediato, desde su lado (máx. ~3/s). */
+export function avisoLanzamiento(pan = 0): void {
+  evento('aviso-lanza', 0.33, (m, t) => unaVez(m, 'aviso-lanza', 0.2 * cede(), 1, t, lado(pan) * 0.5, LIMITE + 4));
 }
 
 /* ────────────────────────── picada ────────────────────────── */

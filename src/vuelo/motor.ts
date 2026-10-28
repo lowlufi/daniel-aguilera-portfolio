@@ -1028,6 +1028,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
   const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero', raptor: 'motor-jet', sukhoi: 'motor-jet', b2: 'motor-jet', ovni: 'motor-jet', tomcat: 'motor-jet', a10: 'motor-jet', spitfire: 'motor-avioneta', stuka: 'motor-avioneta', mustang: 'motor-avioneta', corsair: 'motor-avioneta', f16: 'motor-jet', mig29: 'motor-jet' };
   const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85, raptor: 165, sukhoi: 160, b2: 120, ovni: 130, tomcat: 160, a10: 110, spitfire: 115, stuka: 95, mustang: 125, corsair: 120, f16: 160, mig29: 155 };
+  /** Enemy missiles already announced with the launch warning. */
+  const avisados = new Set<number>();
   function engines() {
     const p = s.plane;
     const on = s.mode === 'play' && !s.paused && !s.dead && !s.attract;
@@ -1055,8 +1057,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     AB.persecucion(threats, 0.08);
     // Radar warning: beeps faster the closer the nearest guided missile chasing the plane.
+    // The RWR goes by time to impact (starts ~4 s out, faster as it closes), so there's time to react.
     let cercaMisil = 0;
-    for (const th of threats) if (th.guiado) cercaMisil = Math.max(cercaMisil, clamp(1 - Math.hypot(th.dx, th.dy) / 360, 0, 1));
+    for (const th of threats) {
+      if (!th.guiado) continue;
+      const d = Math.hypot(th.dx, th.dy) || 1;
+      const cierra = -(th.dx * th.vx + th.dy * th.vy) / d;
+      const tgo = cierra > 5 ? d / cierra : 99;
+      cercaMisil = Math.max(cercaMisil, clamp(1 - tgo / 4, 0, 1), clamp(1 - d / 650, 0, 1));
+      // A new missile launched at the plane: an immediate launch warning from its side.
+      if (!avisados.has(th.id)) {
+        avisados.add(th.id);
+        AB.avisoLanzamiento(clamp(th.dx / 300, -1, 1));
+      }
+    }
+    if (avisados.size > 200) avisados.clear();
     AB.alertaMisil(cercaMisil);
     // A harder alarm when several guided missiles, or a long-range one, are on the plane.
     let guided = 0;
@@ -4181,9 +4196,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           continue;
         }
         const dNow = Math.hypot(em.x - p.x, em.y - p.y);
-        // Warn by time to impact (fast missiles cover 170 px in half a second).
+        // Warn by time to impact, early enough to react (≈2.8 s; the flare key blinks and the alarm sounds).
         const closing = dNow > 1 ? -((em.x - p.x) * (em.vx - p.vx) + (em.y - p.y) * (em.vy - p.vy)) / dNow : 0;
-        if (flying && sh.tgt === p && em.guiado && (dNow < 120 || (closing > 0 && dNow / closing < 1.6))) warn = true;
+        if (flying && sh.tgt === p && em.guiado && (dNow < 200 || (closing > 0 && dNow / closing < 2.8))) warn = true;
         // A near miss: the whoosh of it going past.
         if (flying && !sh.pasada && dNow < MS.radioImpacto(em, s.spec.hit) * 3) {
           sh.pasada = true;
