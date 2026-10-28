@@ -176,7 +176,7 @@ const GRIS = { k0: '#a0948e', k1: '#cfc6c0', k2: '#ebe5e0' };
 /* ── Animation state ─────────────────────────────────────────────────────── */
 
 type Boca = 'picara' | 'sonrisa' | 'mueca' | 'ladrido' | 'ladrido2' | 'firme' | 'o';
-type Brazo = 'nada' | 'alcanza' | 'baja' | 'pulgar' | 'saludo1' | 'saludo' | 'flexa1' | 'flexa' | 'visera';
+type Brazo = 'nada' | 'alcanza' | 'baja' | 'pulgar' | 'saludo1' | 'saludo' | 'flexa1' | 'flexa' | 'lucha' | 'visera';
 type Estado = {
   by: number; // body offset (breathing / crouch)
   hy: number; // head offset
@@ -895,7 +895,7 @@ function pintaAlmendrita(g: G, e: Estado) {
 
 /* ── The humans: Naxo and Ñelo ───────────────────────────────────────────── */
 
-/** Brown skin, short black hair, Naxo's CESFAM scrubs, Ñelo's black hoodie, tattoo ink. */
+/** Brown skin, black hair (Naxo's punk crest), Naxo's CESFAM scrubs, Ñelo's black hoodie, tattoo ink. */
 const PIEL: Tono = { k0: '#6a381a', k1: '#93562c', k2: '#b2703e', k3: '#cc8c58', ink: '#2e160a' };
 const PELO = { k0: '#0e0a08', k1: '#221814', k2: '#3a2a22', k3: '#56402f', ink: '#060404' };
 const SCRUB: Tono = { k0: '#1f6a74', k1: '#2f949e', k2: '#56bcc2', k3: '#92dcdc', ink: '#0e3640' };
@@ -927,12 +927,12 @@ function estadoHumano(m: 'naxo' | 'nelo', pose: Pose, f: number): Estado {
   }
   f = Math.min(3, f);
   if (m === 'naxo') {
-    // Anticipation, then the double-biceps pose: tattoos out.
+    // Anticipation, the double-biceps, then the luchador's taunt: one taped fist up to the crowd.
     return (<Estado[]>[
       { ...b, by: 2, hy: 2, boca: 'firme', ceja: 'firme' },
       { ...b, by: 0, hy: 0, brazo: 'flexa1', boca: 'firme', ceja: 'firme', bufanda: 1 },
       { ...b, by: -1, hy: -2, brazo: 'flexa', boca: 'mueca', ceja: 'firme', bufanda: 2, brillo: 1 },
-      { ...b, by: -1, hy: -1, brazo: 'flexa', boca: 'mueca', ceja: 'firme', bufanda: 3, brillo: 2 },
+      { ...b, by: -2, hy: -2, brazo: 'lucha', boca: 'mueca', ceja: 'firme', bufanda: 3, brillo: 2 },
     ])[f];
   }
   // Ñelo touches the visor, then a thumbs up.
@@ -1123,95 +1123,186 @@ function cabezaHumana(g: G, HX: number, HY: number, ancho: number, papada: numbe
   });
 }
 
-/* ── Naxo: CESFAM nurse, short, stocky and strong, mustache and Ozzy glasses ── */
+/* ── Naxo: CESFAM nurse built like a luchador: short, V-shaped, round face, punk crest ── */
+
+/** White athletic tape round a wrist, luchador style. */
+function vendas(g: G, pts: Pt[], r: number) {
+  // A band a few pixels long across the forearm, just under the fist.
+  const [x, y, ux, uy] = enCamino(pts, 0.76);
+  const banda = (q: G, a0: number, a1: number, c: string) => {
+    for (let a = a0; a <= a1; a += 0.5) for (let i = -r; i <= r; i += 0.5) R(q, Math.round(x + ux * a - uy * i), Math.round(y + uy * a + ux * i), 1, 1, c);
+  };
+  capa(g, '#6a6458', (q) => banda(q, -2, 2, '#f2eee4'), (q) => {
+    R(q, 0, 0, S, S, '#f2eee4');
+    banda(q, 0, 0, '#bdb6a6');
+  });
+}
+
+/** Naxo's round face: full cheeks, a round jaw, ears; the broad nose on top. */
+function caraNaxo(g: G, HX: number, HY: number) {
+  const F = PIEL;
+  capa(g, F.ink, (q) => {
+    // Nearly a circle, a touch wider at the full cheeks, with a round jaw.
+    ell(q, HX, HY + 1, 20, 20, F.k1);
+    ell(q, HX, HY + 8, 21, 13, F.k1);
+    for (const s of [-1, 1]) ell(q, HX + s * 21, HY, 3.5, 5.5, F.k1);
+  }, (q) => {
+    R(q, 0, 0, S, S, F.k0);
+    ell(q, HX - 1, HY, 19, 19, F.k1);
+    ell(q, HX - 1, HY + 7, 20, 12, F.k1);
+    // Light on the forehead and on the left cheek's apple.
+    ell(q, HX - 7, HY - 7, 8, 5, F.k2);
+    R(q, HX - 10, HY - 9, 4, 1, F.k3);
+    ell(q, HX - 12, HY + 7, 5, 4, F.k2);
+    R(q, HX - 14, HY + 5, 2, 1, F.k3);
+    for (const s of [-1, 1]) ell(q, HX + s * 21, HY, 1.5, 3.5, F.k0);
+    // Warm, round cheeks.
+    R(q, HX - 16, HY + 9, 5, 2, '#b85a40');
+    R(q, HX + 11, HY + 9, 5, 2, '#b85a40');
+    // The chin's round bottom.
+    for (let i = -7; i <= 7; i++) R(q, HX + i, HY + 19 - Math.round((i * i) / 18), 1, 1, F.k0);
+  });
+  capa(g, '#5a2e14', (q) => ell(q, HX, HY + 6, 4.5, 3.5, F.k1), (q) => {
+    R(q, 0, 0, S, S, F.k1);
+    ell(q, HX - 1, HY + 5, 2, 1.5, F.k2);
+    R(q, HX - 3, HY + 8, 2, 1, F.k0);
+    R(q, HX + 2, HY + 8, 2, 1, F.k0);
+  });
+}
+
+/** The punk crest: buzzed sides, a spiky black mohawk down the middle. */
+function crestaNaxo(g: G, HX: number, HY: number, f: number) {
+  const RAPADO = '#4e3222';
+  // Buzzed sides: the skull's top half in a dark stubble tone.
+  capa(g, null, (q) => {
+    ell(q, HX, HY - 6, 20, 14, RAPADO);
+    q.clearRect(0, HY - 9, S, S);
+    // A fuzzy hairline, and short sideburns.
+    for (let x = -17; x <= 17; x += 2) R(q, HX + x, HY - 9, 1, 1, RAPADO);
+    for (const s of [-1, 1]) R(q, HX + s * 18 - (s < 0 ? 0 : 2), HY - 9, 2, 6, RAPADO);
+  }, (q) => {
+    R(q, 0, 0, S, S, RAPADO);
+    for (let i = 0; i < 40; i++) R(q, HX - 19 + Math.floor(hash(i * 3 + 11) * 38), HY - 20 + Math.floor(hash(i * 3 + 12) * 12), 1, 1, i % 3 ? '#3a2418' : '#6a4630');
+    ell(q, HX - 9, HY - 15, 5, 2, '#6a4630');
+  });
+  // The crest: a strip down the middle, its spikes swaying a touch with the breathing.
+  const w = f % 2 ? 1 : 0;
+  const crest = [
+    HX - 7, HY - 14,
+    HX - 9, HY - 22, HX - 5, HY - 20,
+    HX - 6 + w, HY - 30, HX - 2, HY - 23,
+    HX + w, HY - 35, HX + 2, HY - 24,
+    HX + 6 + w, HY - 31, HX + 5, HY - 21,
+    HX + 10, HY - 24, HX + 7, HY - 14,
+  ];
+  capa(g, PELO.ink, (q) => poly(q, crest, PELO.k1), (q) => {
+    R(q, 0, 0, S, S, PELO.k1);
+    // Shine down the left of each spike, shadow on the right.
+    line(q, HX - 7, HY - 17, HX - 8, HY - 21, PELO.k3);
+    line(q, HX - 3, HY - 18, HX - 5 + w, HY - 28, PELO.k2);
+    line(q, HX - 1, HY - 19, HX + w - 1, HY - 32, PELO.k3);
+    line(q, HX + 3, HY - 18, HX + 5 + w, HY - 28, PELO.k2);
+    poly(q, [HX + 4, HY - 14, HX + 10, HY - 24, HX + 9, HY - 14], PELO.k0);
+  });
+}
 
 function pintaNaxo(g: G, e: Estado) {
   const HX = 48 + e.hx, HY = 42 + e.hy, F = PIEL, T = SCRUB, top = 66 + e.by;
-  const wt = 30, wb = 44;
-  // Thick neck.
-  capa(g, F.ink, (q) => ell(q, 48, top - 4, 13, 9, F.k1), (q) => {
+  // Wide shoulders, narrow waist: a luchador's V.
+  const wh = 35, wc = 21;
+  // Thick neck and big traps sloping into the shoulders.
+  capa(g, F.ink, (q) => {
+    ell(q, 48, top - 4, 14, 9, F.k1);
+    poly(q, [48 - 14, top - 8, 48 + 14, top - 8, 48 + 30, top + 2, 48 - 30, top + 2], F.k1);
+  }, (q) => {
     R(q, 0, 0, S, S, F.k0);
     ell(q, 46, top - 6, 11, 6, F.k1);
+    line(q, 48 - 16, top - 5, 48 - 26, top, F.k2);
   });
-  // Scrub top: wide shoulders, a round belly, V-neck, pocket with pens and an ID card.
+  // Big arms (under the scrubs' short sleeves): hanging off the wide shoulders,
+  // flexing, or one taped fist up to the crowd.
+  const lado = (s: 1 | -1, pts: Pt[], mano: ManoH | null, bi = 0) => {
+    const p = pts.map(([x, y]) => [48 + s * (x - 48), y] as Pt);
+    brazoHumano(g, p, 8, T, 0, mano, { tatuajes: true, biceps: bi, k: 1.25 });
+    if (mano) vendas(g, p, 7);
+  };
+  for (const s of [-1, 1] as const) {
+    if (e.brazo === 'flexa' || (e.brazo === 'lucha' && s < 0)) lado(s, [[24, top + 6], [5, top - 2], [10, top - 23]], 'puno', 5);
+    else if (e.brazo === 'lucha') lado(s, [[24, top + 4], [11, top - 20], [15, top - 46]], 'puno', 2);
+    else if (e.brazo === 'flexa1') lado(s, [[24, top + 6], [5, top + 10], [6, top - 6]], 'puno', 3);
+    else lado(s, [[22, top + 8], [10, top + 24], [10, S + 8]], null);
+  }
+  // Scrub top, tight on a V-shaped torso: round shoulder caps, pecs, a narrow waist.
   capa(g, T.ink, (q) => {
-    ell(q, 48, top + 10, wt + 2, 12, T.k1);
-    poly(q, [48 - wt - 2, top + 10, 48 + wt + 2, top + 10, 48 + wb, S + 2, 48 - wb, S + 2], T.k1);
-    ell(q, 48, S + 2, wb - 4, 14, T.k1);
+    poly(q, [48 - 22, top - 3, 48 + 22, top - 3, 48 + wh, top + 6, 48 + wh - 2, top + 14, 48 + wc, S + 2, 48 - wc, S + 2, 48 - wh + 2, top + 14, 48 - wh, top + 6], T.k1);
+    for (const s of [-1, 1]) ell(q, 48 + s * (wh - 6), top + 7, 8, 8, T.k1);
   }, (q) => {
-    poly(q, [48 + wt - 6, top, S, top, S, S, 48 + wb - 10, S], T.k0);
-    ell(q, 48 - wt + 4, top + 7, 9, 5, T.k2);
-    R(q, 48 - wt, top + 4, 6, 2, T.k3);
-    // The belly's curve and a couple of folds.
-    for (let i = -18; i <= 18; i++) R(q, 48 + i, S - 12 + Math.round((i * i) / 60), 1, 1, T.k0);
-    ell(q, 42, S - 6, 10, 3, T.k2);
-    line(q, 48 + 14, top + 30, 48 + 20, top + 26, T.k0);
+    // The short sleeves' hems, tight round the arms.
+    for (const s of [-1, 1]) for (let i = -6; i <= 6; i++) R(q, 48 + s * (wh - 6) + s * Math.round(Math.sqrt(36 - i * i) * 1.2), top + 7 + i, 1, 1, T.k2);
+    // Shade on the right flank and down the lats' taper.
+    poly(q, [48 + 8, top - 4, S, top - 4, S, S, 48 + wc - 6, S], T.k0);
+    ell(q, 48 - wh + 4, top + 5, 6, 4, T.k2);
+    R(q, 48 - wh + 1, top + 3, 5, 1, T.k3);
+    // The pecs under the fabric, and a hint of the abs.
+    for (const s of [-1, 1]) {
+      for (let i = 2; i <= 18; i++) R(q, 48 + s * i, top + 18 + Math.round(((i - 10) * (i - 10)) / 30), 1, 1, T.k0);
+      ell(q, 48 + s * 9 - 2, top + 11, 6, 3, s < 0 ? T.k2 : T.k1);
+    }
+    R(q, 48, top + 10, 1, 10, T.k0);
+    for (const y of [24, 28]) {
+      R(q, 48 - 6, top + y, 4, 1, T.k0);
+      R(q, 48 + 3, top + y, 4, 1, T.k0);
+    }
+    line(q, 48 - wc - 4, top + 16, 48 - wc + 1, S, T.k0);
     // V-neck showing the chest.
-    poly(q, [48 - 10, top - 4, 48 + 10, top - 4, 48, top + 12], F.k1);
-    poly(q, [48 + 2, top - 4, 48 + 10, top - 4, 48, top + 12], F.k0);
-    for (const [x, y] of [[-2, 4], [1, 6], [-1, 8], [2, 2]]) R(q, 48 + x, top + y, 1, 1, PELO.k1);
-    line(q, 48 - 11, top - 4, 48, top + 13, T.k0);
-    line(q, 48 + 11, top - 4, 48, top + 13, T.k0);
+    poly(q, [48 - 10, top - 4, 48 + 10, top - 4, 48, top + 11], F.k1);
+    poly(q, [48 + 2, top - 4, 48 + 10, top - 4, 48, top + 11], F.k0);
+    for (const [x, y] of [[-2, 3], [1, 5], [-1, 7], [2, 1]]) R(q, 48 + x, top + y, 1, 1, PELO.k1);
+    line(q, 48 - 11, top - 4, 48, top + 12, T.k0);
+    line(q, 48 + 11, top - 4, 48, top + 12, T.k0);
     // Chest pocket with a red and a blue pen.
-    R(q, 48 + 10, top + 18, 13, 1, T.k0);
-    R(q, 48 + 10, top + 29, 13, 1, T.k0);
-    R(q, 48 + 13, top + 13, 2, 7, '#d83a3a');
-    R(q, 48 + 13, top + 13, 2, 1, '#ff8a8a');
-    R(q, 48 + 17, top + 12, 2, 8, '#3a6ad8');
-    R(q, 48 + 17, top + 12, 2, 1, '#8ab0ff');
-    R(q, 48 + 18, top + 14, 1, 4, '#dce4ec');
-    // The CESFAM ID card on a clip: white, a blue band, a tiny photo.
-    R(q, 48 - 26, top + 14, 11, 14, '#f4f8f8');
-    R(q, 48 - 26, top + 14, 11, 3, '#2a6ad0');
-    R(q, 48 - 24, top + 19, 4, 5, F.k1);
-    R(q, 48 - 24, top + 19, 4, 1, PELO.k1);
-    R(q, 48 - 19, top + 20, 3, 1, '#9aa8b8');
-    R(q, 48 - 19, top + 22, 3, 1, '#9aa8b8');
-    R(q, 48 - 25, top + 26, 9, 1, '#2aa860');
-    R(q, 48 - 21, top + 12, 1, 3, P.metal);
+    R(q, 48 + 11, top + 17, 11, 1, T.k0);
+    R(q, 48 + 11, top + 27, 11, 1, T.k0);
+    R(q, 48 + 13, top + 12, 2, 7, '#d83a3a');
+    R(q, 48 + 13, top + 12, 2, 1, '#ff8a8a');
+    R(q, 48 + 17, top + 11, 2, 8, '#3a6ad8');
+    R(q, 48 + 17, top + 11, 2, 1, '#8ab0ff');
+    R(q, 48 + 18, top + 13, 1, 4, '#dce4ec');
+    // The CESFAM ID card: white, a blue band, and his photo… in a teal luchador mask with a nurse's cross.
+    R(q, 48 - 25, top + 14, 11, 14, '#f4f8f8');
+    R(q, 48 - 25, top + 14, 11, 3, '#2a6ad0');
+    R(q, 48 - 24, top + 18, 5, 6, '#2aa0a8');
+    R(q, 48 - 23, top + 21, 1, 1, P.white);
+    R(q, 48 - 21, top + 21, 1, 1, P.white);
+    R(q, 48 - 22, top + 18, 1, 3, '#e03a3a');
+    R(q, 48 - 23, top + 19, 3, 1, '#e03a3a');
+    R(q, 48 - 18, top + 20, 3, 1, '#9aa8b8');
+    R(q, 48 - 18, top + 22, 3, 1, '#9aa8b8');
+    R(q, 48 - 24, top + 26, 9, 1, '#2aa860');
+    R(q, 48 - 20, top + 12, 1, 3, P.metal);
   });
   // The stethoscope over the shoulders, swaying a little.
   const sw = e.bufanda % 2 ? 1 : 0;
-  const izq = curva([48 - 13, top - 2], [48 - 19, top + 14], [48 - 9 + sw, top + 24], 10);
-  const der = curva([48 + 13, top - 2], [48 + 17, top + 10], [48 + 9 + sw, top + 16], 8);
+  const izq = curva([48 - 13, top - 2], [48 - 20, top + 14], [48 - 9 + sw, top + 24], 10);
+  const der = curva([48 + 13, top - 2], [48 + 18, top + 9], [48 + 9 + sw, top + 15], 8);
   capa(g, '#14141c', (q) => {
     tubo(q, izq, 1.5, '#3a3a4a');
     tubo(q, der, 1.5, '#3a3a4a');
     ell(q, 48 - 9 + sw, top + 27, 3.5, 3.5, '#c8d0dc');
-    ell(q, 48 + 9 + sw, top + 18, 1.5, 1.5, '#c8d0dc');
+    ell(q, 48 + 9 + sw, top + 17, 1.5, 1.5, '#c8d0dc');
   }, (q) => {
     tubo(q, izq, 0.5, '#5a5a6e', -1, 0);
     tubo(q, der, 0.5, '#5a5a6e', -1, 0);
     R(q, 48 - 11 + sw, top + 25, 2, 1, P.white);
     ell(q, 48 - 8 + sw, top + 28, 2, 2, '#8a96a8');
   });
-  // Arms: hanging at the sides, or up flexing.
-  const lado = (s: 1 | -1, pts: Pt[], mano: ManoH | null, bi = 0) =>
-    brazoHumano(g, pts.map(([x, y]) => [48 + s * (x - 48), y] as Pt), 7, T, 0.22, mano, { tatuajes: true, biceps: bi, k: 1.2 });
-  for (const s of [-1, 1] as const) {
-    if (e.brazo === 'flexa') lado(s, [[20, top + 6], [7, top - 2], [11, top - 22]], 'puno', 4);
-    else if (e.brazo === 'flexa1') lado(s, [[20, top + 6], [8, top + 10], [8, top - 6]], 'puno', 2);
-    else lado(s, [[19, top + 8], [13, top + 24], [13, S + 8]], null);
+  // Head: the round face with stubble on the jaw, then the punk crest.
+  caraNaxo(g, HX, HY);
+  for (let i = 0; i < 30; i++) {
+    const a = Math.PI * (0.12 + 0.76 * hash(i * 5 + 3)), d = 0.78 + 0.22 * hash(i * 5 + 4);
+    R(g, HX + Math.cos(a) * 18 * d, HY + 9 + Math.sin(a) * 11 * d, 1, 1, '#6a3e22');
   }
-  // Head.
-  cabezaHumana(g, HX, HY, 19, 0);
-  // Stubble on the jaw.
-  for (let i = 0; i < 26; i++) {
-    const a = Math.PI * (0.15 + 0.7 * hash(i * 5 + 3)), d = 0.75 + 0.25 * hash(i * 5 + 4);
-    R(g, HX + Math.cos(a) * 16 * d, HY + 8 + Math.sin(a) * 11 * d, 1, 1, '#6a3e22');
-  }
-  // Short black hair, flat on top, with sideburns.
-  capa(g, PELO.ink, (q) => {
-    ell(q, HX, HY - 8, 20, 13, PELO.k1);
-    mechones(q, HX, HY - 8, 20, 13, -Math.PI * 0.9, -Math.PI * 0.1, 7, 1, PELO.k1);
-    q.clearRect(0, HY - 11, S, S);
-    for (const s of [-1, 1]) R(q, HX + s * 17 - (s < 0 ? 0 : 3), HY - 11, 3, 10, PELO.k1);
-  }, (q) => {
-    R(q, 0, 0, S, S, PELO.k1);
-    ell(q, HX - 6, HY - 18, 8, 3, PELO.k2);
-    R(q, HX - 9, HY - 20, 3, 1, PELO.k3);
-    for (let x = -14; x <= 14; x += 4) line(q, HX + x, HY - 20, HX + x + 2, HY - 12, PELO.k0);
-  });
+  crestaNaxo(g, HX, HY, e.bufanda);
   // Thick eyebrows over the glasses.
   const cy = HY - 8;
   if (e.ceja === 'firme') {

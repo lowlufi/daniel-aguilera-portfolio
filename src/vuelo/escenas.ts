@@ -192,7 +192,7 @@ const CUERPO: Record<'dui' | 'lulu' | 'almendrita', { c: string; s: string; raya
 const PIEL = '#9a5c30', PIEL0 = '#6e3e1e';
 /**
  * The humans on foot, feet at (0, 0) facing +x; returns the chin's height.
- * Naxo: short and stocky in his teal CESFAM scrubs, tattooed arms, white
+ * Naxo: short, built like a luchador (V torso), teal CESFAM scrubs, tattooed arms, white
  * clogs. Ñelo: a little taller, black hoodie, grey track pants with a stripe,
  * white sneakers.
  */
@@ -204,22 +204,32 @@ function humano(g: G, m: 'naxo' | 'nelo', t: number): number {
     R(g, 1, -1, 3, 1, '#f4f4f4');
     R(g, -4, -5, 3, 4, T0);
     R(g, 1, -5, 3, 4, T0);
-    D.oval(g, 0, -9, 6, 5, T0);
-    D.oval(g, 0, -9, 5, 4, T);
-    R(g, -1, -13, 3, 2, PIEL);
-    R(g, 0, -12, 1, 1, PIEL0);
+    // A luchador's V: wide shoulders and traps tapering to a narrow waist.
+    R(g, -7, -14, 14, 1, T0);
+    R(g, -7, -13, 14, 3, T0);
+    R(g, -6, -10, 12, 2, T0);
+    R(g, -5, -8, 10, 3, T0);
+    R(g, -6, -13, 12, 2, T);
+    R(g, -5, -11, 10, 3, T);
+    R(g, -4, -8, 8, 2, T);
+    R(g, 0, -11, 1, 3, T0);
+    R(g, -1, -14, 3, 2, PIEL);
+    R(g, 0, -13, 1, 1, PIEL0);
     // Pens in the pocket and the stethoscope round the neck.
-    R(g, 2, -11, 1, 2, '#e03a3a');
-    R(g, 3, -11, 1, 2, '#3a6ae0');
+    R(g, 2, -12, 1, 2, '#e03a3a');
+    R(g, 3, -12, 1, 2, '#3a6ae0');
     R(g, -3, -13, 1, 4, '#4a4a5a');
     R(g, -3, -9, 2, 1, '#c8d0dc');
-    // Big tattooed arms out of short sleeves.
+    // Big tattooed arms out of short sleeves, white tape round the wrists.
     for (const sx of [-1, 1]) {
-      const ax = sx < 0 ? -8 : 6;
-      R(g, ax, -13, 3, 2, T);
-      R(g, ax, -11, 3, 5 - (sx > 0 ? paso : 0), PIEL);
+      const ax = sx < 0 ? -10 : 7;
+      const l = 5 - (sx > 0 ? paso : 0);
+      R(g, ax, -14, 4, 3, T);
+      R(g, ax, -11, 4, l, PIEL);
+      R(g, ax + (sx < 0 ? 0 : 3), -11, 1, l, PIEL0);
       R(g, ax + 1, -10, 1, 2, TA);
-      R(g, ax, -7, 1, 1, TA);
+      R(g, ax + 2, -8, 1, 1, TA);
+      R(g, ax, -11 + l, 4, 1, '#f2eee4');
     }
     return -14;
   }
