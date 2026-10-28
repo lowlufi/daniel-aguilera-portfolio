@@ -6678,6 +6678,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.paused = p;
       if (p) AB.detener();
       if (p) S.callar();
+      if (p) S.silenciarMotores();
       // Gore mode: bake the mice's cries once the audio is awake (a few at a time).
       if (!p && s.gore) window.setTimeout(() => AB.precalentarLamentos(), 900);
       if (p) {

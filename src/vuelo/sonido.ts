@@ -178,6 +178,20 @@ export function motor(n: Motor, vol: number, rate: number, pan = 0) {
   l.pan?.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), t, 0.1);
 }
 
+/**
+ * Pausa: los motores se funden a 0 sin esperar al próximo cuadro (con la
+ * pestaña oculta no hay cuadros y seguirían sonando de fondo).
+ */
+export function silenciarMotores() {
+  const out = sampleOut();
+  if (!out) return;
+  const t = out.ctx.currentTime;
+  for (const l of loops.values()) {
+    l.gain.gain.cancelScheduledValues(t);
+    l.gain.gain.setTargetAtTime(0, t, 0.03);
+  }
+}
+
 export function pararMotores() {
   for (const l of loops.values()) {
     try {

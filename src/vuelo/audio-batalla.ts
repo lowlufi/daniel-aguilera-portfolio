@@ -4471,6 +4471,11 @@ export function precalentarLamentos(): void {
   if (!pend.length) return;
   horneandoLamentos = true;
   const paso = () => {
+    // Mientras se juega, espera (cada lamento tarda lo suyo y en un teléfono se notaría el tirón).
+    if (hornoPausa && salida(true) === m) {
+      window.setTimeout(paso, 500);
+      return;
+    }
     const n = pend.shift();
     if (n && salida(true) === m) bufLamento(m, n);
     if (pend.length && salida(true) === m) window.setTimeout(paso, 120);
@@ -4754,7 +4759,13 @@ export function precalentarArsenal() {
   const pend = (Object.keys(HORNO_ARS) as NombreArs[]).filter((n) => ctxArs !== m.ctx || !hornosArs.has(n));
   let i = 0;
   const paso = () => {
-    if (i >= pend.length || hornoPausa) return;
+    // Contexto cambiado (o se salió del juego): no seguir horneando para nada.
+    if (i >= pend.length || salida(true) !== m) return;
+    // Mientras se juega espera (antes se cortaba aquí para siempre y el resto se horneaba en pleno vuelo).
+    if (hornoPausa) {
+      window.setTimeout(paso, 500);
+      return;
+    }
     bufArs(m, pend[i++]);
     window.setTimeout(paso, 30);
   };
