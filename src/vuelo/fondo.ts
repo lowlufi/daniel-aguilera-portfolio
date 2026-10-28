@@ -78,11 +78,24 @@ const apagarRGB = (r: number, gr: number, b: number, o: Apagado, t: RGB): RGB =>
   return [(r + (t[0] - r) * o.velo) * m, (gr + (t[1] - gr) * o.velo) * m, (b + (t[2] - b) * o.velo) * m];
 };
 const TINTE_APAGADO = '#5a5a7a';
+/**
+ * The pixels of a canvas just read or written, so the next step on that same
+ * canvas doesn't read it back from the GPU again (a readback is slow, ~ms on
+ * a phone, inside a sky task or a map change): `lucesDeSuelo` leaves what it
+ * read for `apagarLienzo`, and `apagarLienzo` (with `guardar`) what it wrote
+ * for `encender`. Taken (and dropped) by whoever uses it next.
+ */
+let recienApagado: { cv: HTMLCanvasElement; img: ImageData } | null = null;
+function tomarPixeles(cv: HTMLCanvasElement): ImageData | null {
+  const r = recienApagado?.cv === cv ? recienApagado.img : null;
+  recienApagado = null;
+  return r;
+}
 /** Tones down every painted pixel of a canvas, in place (see `Apagado`). */
-export function apagarLienzo(cv: HTMLCanvasElement, o: Apagado): HTMLCanvasElement {
+export function apagarLienzo(cv: HTMLCanvasElement, o: Apagado, guardar = false): HTMLCanvasElement {
   if (!cv.width || !cv.height) return cv;
   const g = cv.getContext('2d')!;
-  const im = g.getImageData(0, 0, cv.width, cv.height);
+  const im = tomarPixeles(cv) ?? g.getImageData(0, 0, cv.width, cv.height);
   const d = im.data;
   const t = hex(o.tinte ?? TINTE_APAGADO);
   for (let i = 0; i < d.length; i += 4) {
@@ -94,6 +107,7 @@ export function apagarLienzo(cv: HTMLCanvasElement, o: Apagado): HTMLCanvasEleme
     d[i + 2] = clamp(c[2]);
   }
   g.putImageData(im, 0, 0);
+  recienApagado = guardar ? { cv, img: im } : null;
   return cv;
 }
 /** The same toning for a flat CSS colour (#hex or rgb()), so fills match their layer. */
@@ -997,11 +1011,13 @@ const CRUZ: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const VIDRIO_APAGADO = ['#3a3460', '#4a3a5a'];
 
 function encender(c: Capa, a: Ambiente): Capa {
+  const guardado = tomarPixeles(c.cv);
   if (a === 'dia') return c;
   const W = c.cv.width;
   const H = c.cv.height;
   if (!W || !H) return c;
-  const d = c.cv.getContext('2d')!.getImageData(0, 0, W, H).data;
+  // (Only opaque pixels are looked at: the ones just written read back identical.)
+  const d = guardado ? guardado.data : c.cv.getContext('2d')!.getImageData(0, 0, W, H).data;
   const w2 = (W + 1) >> 1;
   const h2 = (H + 1) >> 1;
   const b = new Buf(w2, h2);
@@ -1104,6 +1120,8 @@ export function lucesDeSuelo(cv: Cv): LucesSuelo {
   const W = cv.width;
   const H = cv.height;
   const src = cv.getContext('2d')!.getImageData(0, 0, W, H);
+  // (Only read here: left for an `apagarLienzo` of this same strip right after.)
+  recienApagado = { cv, img: src };
   const v = new Uint32Array(src.data.buffer);
   const gl1 = P('#8ccaf8');
   const gl2 = P('#e4f6ff');
@@ -1881,6 +1899,13 @@ class Obra<T> {
   todo(): T {
     while (!this.hecho) this.paso();
     return this.hecho;
+  }
+  /** Bota lo pintado (sus lienzos quedan para el recolector); se vuelve a pintar si se pide. */
+  soltar(): void {
+    if (!this.n) return;
+    this.c = {};
+    this.n = 0;
+    this.hecho = null;
   }
 }
 
@@ -2947,7 +2972,7 @@ const APAGADO_SA: Record<Ambiente, [Apagado, Apagado, Apagado]> = {
   tarde: [{ desat: 0.35, velo: 0.18, oscuro: 0.08, tinte: '#6a4a6e', luces: true }, { desat: 0.3, velo: 0.12, oscuro: 0.08, tinte: '#6a4a6e', luces: true }, { desat: 0.25, velo: 0.06, oscuro: 0.08, tinte: '#6a4a6e', luces: true }],
   noche: [{ desat: 0.25, velo: 0.1, oscuro: 0.04, tinte: '#2a2048', luces: true }, { desat: 0.2, velo: 0.06, oscuro: 0.04, tinte: '#2a2048', luces: true }, { desat: 0.15, velo: 0, oscuro: 0.04, luces: true }],
 };
-const apagarCapa = (c: Capa, o: Apagado): Capa => ({ ...c, cv: apagarLienzo(c.cv, o), fondo: apagarColor(c.fondo, o) });
+const apagarCapa = (c: Capa, o: Apagado): Capa => ({ ...c, cv: apagarLienzo(c.cv, o, true), fondo: apagarColor(c.fondo, o) });
 /** Paints a layer while catching the cranes' aviation-light spots. */
 const conBalizas = (pinta: () => Capa): Capa => {
   balizasCaptura = [];
@@ -4205,16 +4230,71 @@ const ORDEN: Obra<unknown>[] = [BAJO.dia, SANANTONIO.dia, BAJO.tarde, SANANTONIO
 ORDEN.push(TORMENTA as Obra<unknown>);
 
 /**
- * Pinta por adelantado lo que falte, de a poco (unos ms por llamada; cada
- * tarea sola tarda menos de ~10 ms). `dibujarFondo` ya lo hace solo; sirve
- * para llamarlo en momentos tranquilos (menú, pausa).
+ * Lo que el juego va a necesitar: las horas (la actual primero, luego la que
+ * viene), las horas en que puede subir al cielo alto, los mapas (el actual y
+ * al que se viaja) y si hay tormenta. null = todo, como antes (menús).
+ */
+export type PedidoFondo = { ambientes: readonly Ambiente[]; altos: readonly Ambiente[]; paisajes: readonly Paisaje[]; tormenta: boolean };
+/** Las obras pedidas, en el orden en que conviene pintarlas (null: todas). */
+let pedido: Obra<unknown>[] | null = null;
+let clavePedido = '';
+
+/**
+ * Memoria: cada hora completa (cielo bajo y alto, mapa, vida) son ~20 MB de
+ * lienzos; tener las tres horas de los cuatro mapas pintadas a la vez eran
+ * ~70 MB. Aquí se queda solo lo pedido y lo demás se suelta (si después se
+ * necesita, se vuelve a pintar).
+ */
+export function pedirFondo(p: PedidoFondo | null): void {
+  const clave = p ? `${p.ambientes.join()}|${p.altos.join()}|${p.paisajes.join()}|${p.tormenta}` : '*';
+  if (clave === clavePedido) return;
+  clavePedido = clave;
+  if (!p) {
+    pedido = null;
+    return;
+  }
+  const lista = new Set<Obra<unknown>>();
+  p.ambientes.forEach((a, i) => {
+    lista.add(BAJO[a] as Obra<unknown>);
+    for (const q of p.paisajes) lista.add((q === 'oceano' ? MAR[a] : q === 'valparaiso' ? VALPO[a] : SANANTONIO[a]) as Obra<unknown>);
+    lista.add(VIDA[a] as Obra<unknown>);
+    if (p.altos.includes(a)) lista.add(ALTO[a] as Obra<unknown>);
+    if (i === 0) {
+      if (p.tormenta) lista.add(TORMENTA as Obra<unknown>);
+      lista.add(ESPACIO as Obra<unknown>);
+      lista.add(NOCHE as Obra<unknown>);
+    }
+  });
+  for (const a of p.altos) lista.add(ALTO[a] as Obra<unknown>);
+  pedido = [...lista];
+  for (const ob of ORDEN) if (!lista.has(ob)) ob.soltar();
+}
+
+/** ¿Está pintado todo lo que usa el fondo de la hora `a` en el paisaje `p` (con o sin tormenta)? */
+export function fondoListo(a: Ambiente, p: Paisaje, tormenta: boolean): boolean {
+  const mapa = p === 'oceano' ? MAR[a] : p === 'valparaiso' ? VALPO[a] : SANANTONIO[a];
+  return !!(BAJO[a].hecho && mapa.hecho && VIDA[a].hecho && ALTO[a].hecho && ESPACIO.hecho && NOCHE.hecho && (!tormenta || TORMENTA.hecho));
+}
+
+/** ¿Falta pintar algo de lo pedido? */
+export function fondoPendiente(): boolean {
+  for (const ob of pedido ?? ORDEN) if (!ob.hecho) return true;
+  return false;
+}
+
+/**
+ * Pinta por adelantado lo pedido que falte, de a poco: tareas enteras hasta
+ * pasar `presupuestoMs` (cada tarea sola tarda menos de ~16 ms en un PC; con
+ * presupuesto 0 hace exactamente una). motor.ts lo llama en momentos
+ * tranquilos (menú, pausa, la cortina entre mapas) y, volando, solo cuando
+ * el cuadro tiene holgura.
  */
 export function precalentarFondo(presupuestoMs = 6) {
   const t0 = performance.now();
-  for (const ob of ORDEN)
+  for (const ob of pedido ?? ORDEN)
     while (!ob.hecho) {
       ob.paso();
-      if (performance.now() - t0 > presupuestoMs) return false;
+      if (performance.now() - t0 >= presupuestoMs) return false;
     }
   return true;
 }
@@ -4796,16 +4876,7 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
     }
     g.globalAlpha = 1;
   }
-
-  // Precalienta de a poco lo que falte (una tarea por cuadro).
-  if (!ALTO[a].hecho) ALTO[a].paso();
-  else if (!ESPACIO.hecho) ESPACIO.paso();
-  else
-    for (let i = 0; i < ORDEN.length; i++)
-      if (!ORDEN[i].hecho) {
-        ORDEN[i].paso();
-        break;
-      }
+  // (Lo que falte pintar se precalienta desde motor.ts, cuando el cuadro tiene holgura: precalentarFondo.)
 }
 
 /** The storm ceiling: two layers of heavy cloud at the top, lit by far lightning now and then. */

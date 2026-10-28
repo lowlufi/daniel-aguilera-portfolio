@@ -1,4 +1,5 @@
 import { tone } from '../game/dulce';
+import { altoVista, anchoVista } from './lienzo';
 
 /*
  * Estelas de misil en estilo «dulce»: pixel art pastel sin anti-aliasing.
@@ -437,7 +438,7 @@ export function dibujarEstela(
   const rb = Math.min(MAX_R - 2, Math.max(R_MIN, e.estilo.ancho * 0.38));
   const amp = e.estilo.ondula ?? 0;
   const alfa0 = g.globalAlpha;
-  const W = g.canvas.width + MARGEN, H = g.canvas.height + MARGEN;
+  const W = anchoVista(g) + MARGEN, H = altoVista(g) + MARGEN;
   g.imageSmoothingEnabled = false;
 
   const arco = e.estilo.arcoiris && pal.subs.length > 0;

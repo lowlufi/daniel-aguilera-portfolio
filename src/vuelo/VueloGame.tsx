@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { initAudio, jingleIntro, jingleStart, pauseAudio, setMusicMood, setMusicVolume, setMuted as setAudioMuted, menu } from '../game/audio';
 import { cargarSonidos } from './sonido';
 import * as AD from './armas-dibujo';
@@ -142,8 +142,11 @@ function runsOf(i: PxIcon) {
   }
   return out;
 }
-/** A pixel icon, `s` screen px per art pixel. `tinta` paints every pixel one colour (empty sockets). */
-function Px({ i, s = 2, tinta, className, style }: { i: PxIcon; s?: number; tinta?: string; className?: string; style?: React.CSSProperties }) {
+/**
+ * A pixel icon, `s` screen px per art pixel. `tinta` paints every pixel one colour (empty sockets).
+ * Memoized, like the other HUD pieces below: a HUD refresh only re-renders what changed.
+ */
+const Px = memo(function Px({ i, s = 2, tinta, className, style }: { i: PxIcon; s?: number; tinta?: string; className?: string; style?: React.CSSProperties }) {
   const rows = PX[i];
   const w = rows[0].length;
   const h = rows.length;
@@ -154,10 +157,10 @@ function Px({ i, s = 2, tinta, className, style }: { i: PxIcon; s?: number; tint
       ))}
     </svg>
   );
-}
+});
 
 /** One socket per slot: loaded ones lit, spent ones a dark silhouette. */
-function Sockets({ i, n, max, s }: { i: PxIcon; n: number; max: number; s?: number }) {
+const Sockets = memo(function Sockets({ i, n, max, s }: { i: PxIcon; n: number; max: number; s?: number }) {
   return (
     <span aria-hidden className="inline-flex items-center gap-px">
       {Array.from({ length: max }, (_, k) => (
@@ -165,10 +168,10 @@ function Sockets({ i, n, max, s }: { i: PxIcon; n: number; max: number; s?: numb
       ))}
     </span>
   );
-}
+});
 
 /** A segmented instrument bar: `n` lit of `max`, in `color`; `alerta` blinks the lit ones. */
-function Segs({ n, max, color, alerta, ancho = 6 }: { n: number; max: number; color: string | ((k: number) => string); alerta?: boolean; ancho?: number }) {
+const Segs = memo(function Segs({ n, max, color, alerta, ancho = 6 }: { n: number; max: number; color: string | ((k: number) => string); alerta?: boolean; ancho?: number }) {
   return (
     <span aria-hidden className="hud-segs">
       {Array.from({ length: max }, (_, k) => (
@@ -176,10 +179,10 @@ function Segs({ n, max, color, alerta, ancho = 6 }: { n: number; max: number; co
       ))}
     </span>
   );
-}
+});
 
 /** The score as a mechanical counter: each digit in its own drum window, idle leading zeros dimmed. */
-function Contador({ v, cifras = 5 }: { v: number; cifras?: number }) {
+const Contador = memo(function Contador({ v, cifras = 5 }: { v: number; cifras?: number }) {
   const t = String(Math.max(0, Math.floor(v)));
   const pad = Math.max(0, cifras - t.length);
   return (
@@ -192,7 +195,7 @@ function Contador({ v, cifras = 5 }: { v: number; cifras?: number }) {
       ))}
     </span>
   );
-}
+});
 
 /** Seconds as «m:ss» (2:05, 0:45) for the wave card. */
 const minSeg = (t: number) => {
@@ -239,11 +242,16 @@ function Retrato({ m, pose, className }: { m: Piloto; pose: Pose; className?: st
     const quieto = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     let raf = 0;
     const t0 = performance.now();
+    let visto = -1;
     const pinta = (now: number) => {
+      raf = requestAnimationFrame(pinta);
       const n = FRAMES[pose];
       let f = Math.floor(((now - t0) / 1000) * FPS[pose]);
       // «listo» plays once and holds its last frames; the others loop.
       f = pose === 'listo' ? Math.min(n - 1, f) : quieto ? 0 : f % n;
+      // Only when the frame of the animation changes (it runs at a few fps, the screen at 60+).
+      if (f === visto) return;
+      visto = f;
       const img = retrato(m, pose, f);
       if (c.width !== img.width) {
         c.width = img.width;
@@ -251,7 +259,6 @@ function Retrato({ m, pose, className }: { m: Piloto; pose: Pose; className?: st
       }
       g.clearRect(0, 0, c.width, c.height);
       g.drawImage(img, 0, 0);
-      raf = requestAnimationFrame(pinta);
     };
     raf = requestAnimationFrame(pinta);
     return () => cancelAnimationFrame(raf);
