@@ -1612,6 +1612,21 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
           </span>
         </div>
       )}
+      {/* Cockpit alerts, all in one place: up to three, most urgent first, under the HUD bar on the left. */}
+      {phase === 'play' && !paused && !hud?.resumen && !!hud?.alertas.length && (
+        <div aria-live="polite" className="pointer-events-none absolute left-0 z-20 flex flex-col items-start gap-1 pl-[max(0.5rem,env(safe-area-inset-left))]" style={{ top: barraH + (hud.boss ? 46 : 4) + (hud.radio ? (movil ? 58 : 66) : 0) }}>
+          {hud.alertas.slice(0, movil ? 2 : 3).map((a) => (
+            <span
+              key={a.k}
+              className={`hud-panel gap-1 px-2 py-0.5 font-black uppercase tracking-wide ${movil ? 'text-[10px]' : 'text-xs'} ${
+                a.nivel === 'rojo' ? 'hud-panel-roja hud-alerta-suave' : a.nivel === 'verde' ? 'hud-panel-ok hud-parpadeo' : 'text-[#ffd84a]'
+              }`}
+            >
+              {a.t}
+            </span>
+          ))}
+        </div>
+      )}
       {/* Phones: low, beside the blinking flares key it's about (the plane is usually mid-screen). */}
       {phase === 'play' && hud?.warn && !paused && (
         <div
@@ -2418,7 +2433,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <TouchButton fila big label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} corto="Bengalas" alerta={!!hud?.warn} guia={tutoVisible && tuto === 2} {...hold('flare')}>
               <Px i="bengala" s={3} />
             </TouchButton>
-            <TouchButton fila big label="Misil" guia={tutoVisible && tuto === 1} {...hold('fire')}>
+            <TouchButton fila big label={hud?.disparaYa ? 'Misil: blanco fijado, ¡dispara!' : 'Misil'} guia={(tutoVisible && tuto === 1) || !!hud?.disparaYa} {...hold('fire')}>
               <Px i="misil" s={3} />
             </TouchButton>
             <TouchButton fila label={hud?.hot ? 'Metralla: recalentada' : 'Metralla'} corto={hud?.hot ? '¡Calor!' : 'Balas'} active={!!hud?.hot} {...hold('gun')}>

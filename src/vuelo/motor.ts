@@ -111,6 +111,10 @@ export type Hud = {
   /** Name of the layer of sky the plane is in («Mar de nubes», «Espacio exterior»…). */
   zone: string;
   warn: boolean;
+  /** Every cockpit alert at once, most urgent first (the HUD shows a few). */
+  alertas: { k: string; t: string; nivel: 'rojo' | 'ambar' | 'verde' }[];
+  /** A target locked and a missile ready: fire now. */
+  disparaYa: boolean;
   /** The wing is stalled. */
   stall: boolean;
   /** Nuclear bombs in the hold. */
@@ -835,6 +839,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sinFiltro: false,
     /** Ice on the plane 0…1 near the top of the sky; at 1 the controls freeze until it thaws. */
     hielo: 0,
+    /** Ground-proximity 0…1 (diving fast and low), for the alerts. */
+    terrenoK: 0,
     /** Aerobatics: the barrel roll in progress (s), its cooldown, and the loop counter (rad). */
     tonelT: 0,
     tonelCd: 0,
@@ -1028,6 +1034,26 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   }
   const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero', raptor: 'motor-jet', sukhoi: 'motor-jet', b2: 'motor-jet', ovni: 'motor-jet', tomcat: 'motor-jet', a10: 'motor-jet', spitfire: 'motor-avioneta', stuka: 'motor-avioneta', mustang: 'motor-avioneta', corsair: 'motor-avioneta', f16: 'motor-jet', mig29: 'motor-jet' };
   const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85, raptor: 165, sukhoi: 160, b2: 120, ovni: 130, tomcat: 160, a10: 110, spitfire: 115, stuka: 95, mustang: 125, corsair: 120, f16: 160, mig29: 155 };
+  /** A target locked, a missile in the rack and reloaded: the moment to fire. */
+  function disparaYa() {
+    return s.mode === 'play' && !s.dead && !s.despegue && s.lockT >= LOCK_TIME && !!s.lockCand?.vivo() && s.ammo >= 1 && s.fireT <= 0.05 && !!s.spec.kit.misil;
+  }
+  /** Every cockpit alert at once, in one list, most urgent first. */
+  function alertasCabina(): Hud['alertas'] {
+    if (s.mode !== 'play' || s.dead || s.attract) return [];
+    const a: Hud['alertas'] = [];
+    if (s.warn) a.push({ k: 'misil', t: 'Misil: bengalas', nivel: 'rojo' });
+    if (s.terrenoK > 0.35) a.push({ k: 'terreno', t: 'Terreno: sube', nivel: 'rojo' });
+    if (s.hp > 0 && s.hp <= Math.max(1, s.spec.hp * 0.25)) a.push({ k: 'dano', t: 'Daño crítico', nivel: 'rojo' });
+    if (disparaYa()) a.push({ k: 'fijado', t: 'Fijado: ¡dispara!', nivel: 'verde' });
+    if (s.stallT > 0 && s.inv <= 0 && !s.congelado && !s.despegue) a.push({ k: 'perdida', t: 'Pérdida: acelera', nivel: 'ambar' });
+    if (s.hielo > 0.5) a.push({ k: 'hielo', t: s.congelado ? 'Congelado: baja' : 'Hielo: baja', nivel: 'ambar' });
+    if (s.nitroQuemado) a.push({ k: 'nitro', t: 'Nitro recalentado', nivel: 'ambar' });
+    if (s.hot) a.push({ k: 'metralla', t: 'Metralla caliente', nivel: 'ambar' });
+    if (!s.despegue && s.ammo < 1) a.push({ k: 'misiles', t: 'Sin misiles', nivel: 'ambar' });
+    if (!s.despegue && s.flares <= 0) a.push({ k: 'bengalas', t: 'Sin bengalas', nivel: 'ambar' });
+    return a;
+  }
   /** Enemy missiles already announced with the launch warning. */
   const avisados = new Set<number>();
   function engines() {
@@ -1087,6 +1113,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const alto = p.y - ground(p.x);
     const tiempoSuelo = p.vy < -20 ? alto / -p.vy : 99;
     const terreno = s.despegue ? 0 : clamp((2.2 - tiempoSuelo) / 1.6, 0, 1);
+    s.terrenoK = terreno;
     AB.avisosCabina(s.stallT > 0 && s.inv <= 0 && !s.congelado && !s.despegue, terreno, s.hp > 0 && s.hp <= Math.max(1, s.spec.hp * 0.25));
     AB.altitud(p.y, v);
     AB.zonaNueva(zonaAltitud(p.y));
@@ -5586,6 +5613,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       sky: s.themePick,
       zone: s.mapa === 'tormenta' ? 'Tormenta' : nombreZona(zonaAltitud(s.plane.y), s.mapa),
       warn: s.warn,
+      alertas: alertasCabina(),
+      disparaYa: disparaYa(),
       stall: s.mode === 'play' && !s.dead && s.stallT > 0 && s.inv <= 0 && !s.congelado,
       hielo: Math.round(s.hielo * 20) / 20,
       nukes: s.nukes,
