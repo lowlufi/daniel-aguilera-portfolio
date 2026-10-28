@@ -1276,7 +1276,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const v = Math.hypot(p.vx, p.vy);
     S.motor(MOTOR[id], on ? (0.45 + 0.3 * p.gas) * AB.atenuacionMotor() : 0, 0.8 + (v / CRUISE[id]) * 0.25 + p.gas * 0.15, panOf(p.x));
     let d = Infinity;
-    for (const c of s.cars) d = Math.min(d, Math.abs(c.x - (s.camX + view.vw / 2)));
+    for (const c of s.cars) if (c.kind === 'tanque') d = Math.min(d, Math.abs(c.x - (s.camX + view.vw / 2)));
     S.motor('motor-tanque', on ? 0.35 * clamp(1 - d / (view.vw * 0.8), 0, 1) : 0, 0.9);
 
     // Battle sound: missiles chasing the plane, wind, a hurt engine, fire, tension.
@@ -1338,6 +1338,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (mode === 5 && s.ufoMode.get(a.id) !== 5) AB.rayoOvni();
       s.ufoMode.set(a.id, mode);
     }
+    // Everything around that makes its own noise: vehicles, flying mice, ground units, bosses.
+    const fuentes: AB.FuenteSonora[] = [];
+    for (const c of s.cars) fuentes.push({ id: c.id, tipo: c.kind, dx: c.mid.x - p.x, dy: c.mid.y - p.y, estado: c.mem.puente > 0 ? 'puente' : undefined });
+    for (const a of s.aereos) if (a.hp > 0 && a.tipo !== 'ovni') fuentes.push({ id: a.id, tipo: a.tipo, dx: a.x - p.x, dy: a.y - p.y });
+    for (const u of s.gigantes) if (u.viva) fuentes.push({ id: u.id, tipo: u.tipo === 'infanteria' ? 'raton' : u.tipo, dx: u.x - p.x, dy: u.y - p.y, estado: u.estado, huye: u.huye > 0 });
+    if (s.jefe && s.jefe.tipo !== 'zepelin' && s.jefe.muriendo < 0) fuentes.push({ id: 0, tipo: s.jefe.tipo, dx: s.jefe.x - p.x, dy: s.jefe.y - p.y });
+    AB.entorno(fuentes);
+    if (s.jefe) AB.jefeFase(s.jefe.tipo, s.jefe.fase);
+    // The cockpit: runway roll, gear, air brakes, skimming the sea.
+    const rasante = p.y - OC.NIVEL_MAR;
+    const agua = sobreMar(p.x) && rasante < 34 && rasante > -2 && v > 60 ? 1 - rasante / 34 : 0;
+    AB.cabina(s.despegue, v, s.despegue ? 0 : clamp(-p.gas, 0, 1), agua, alto < 4);
+    AB.ambienteMapa(s.mapa, p.y - ground(p.x));
     const hurt = s.lost.length / Math.max(1, s.spec.parts.length);
     AB.motorDanado(s.lost.includes('motor') ? Math.max(0.6, hurt) : hurt * 0.5, p.gas);
     AB.fuego(s.lost.includes('motor') ? 0.4 + hurt * 0.6 : hurt * 0.3);
@@ -1762,6 +1775,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (s.sinPremio) return;
     s.combo = s.comboT > 0 ? s.combo + 1 : 1;
     s.comboT = 2.5;
+    if (!s.attract && s.mode === 'play') AB.combo(s.combo);
     const mult = Math.min(5, s.combo);
     if (s.combo >= 3 && s.mision?.id === 'combo3') completaMision();
     s.score += points * mult;
@@ -2735,6 +2749,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         fx('misil', sfx.enemyLaunch, { vol: 0.4, rate: 0.85 }, d.x);
       } else if (d.clase === 'proyectil') s.proy.push(AE.nuevoProyectil(d));
       else s.shells.push({ x: d.x, y: d.y, vx: d.vx, vy: d.vy, t: 0, fuse: d.fuse });
+      if (d.clase !== 'misil' && !s.attract) AB.disparoRaton(d.clase, d.clase === 'proyectil' ? d.tipo : '', panOf(d.x), Math.hypot(d.x - p.x, d.y - p.y));
     }
   }
   function giantEvents(list: G.Evento[] | undefined) {
@@ -2923,6 +2938,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sfx.star();
     sfx.reveal();
     S.suena('recoger', { vol: 1 });
+    if (!s.attract) AB.premio(kind);
     if (kind === 'vida') {
       s.lives = Math.min(MAX_VIDAS, s.lives + 1);
       pop(x, y + 16, '✈️ ¡Avión extra!', P.gold);
@@ -3082,7 +3098,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (s.heat >= 1) {
       s.hot = true;
       pop(p.x, p.y + 16, '¡Metralla caliente!', P.r3);
-      if (!s.attract) AB.recalentada();
+      if (!s.attract) AB.recalentada(gk.sonido ?? '');
     }
     const tz = gk.traza;
     const a = p.rumbo + rand(-tz.dispersion, tz.dispersion);
@@ -3255,6 +3271,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (engano) pop(q.x, q.y + 14, '¡Bengalas! Misil engañado', '#ffb070');
     radio('Ratón en apuros', RADIO.bengalas, true);
     if (!s.attract) fx('bengalas', sfx.flare, { vol: 0.35, rate: 0.9 }, q.x);
+    if (!s.attract) AB.bengalaEnemiga(panOf(q.x), Math.hypot(q.x - s.plane.x, q.y - s.plane.y));
   }
 
   /** A bomb reaching its target, by load. */
@@ -3295,13 +3312,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       L.luz(s.luces, x, y, 70, '#ff9a3c', 0.6);
       later(() => blast(x, y + 8, 14, 'jugador', 3), 280);
+      if (!s.attract) AB.bombaImpacto('termobarica', pan);
     } else if (b.tipo === 'crio') {
       // Barely a pop: it's the cold that does the work.
       blast(x, y, 1.5, 'jugador', 0.1);
       for (const c of s.cars) if (Math.hypot(c.mid.x - x, c.mid.y - y) < 95 && !isBoss(c.kind)) c.mem.hielo = 5;
       for (const c of s.cars) if (isBoss(c.kind) && Math.hypot(c.mid.x - x, c.mid.y - y) < 120) c.mem.hielo = 1.5;
       s.zonas.push({ tipo: 'hielo', x, y: ground(x), r: 80, t: 0, vida: 5, tick: 0 });
-      if (!s.attract) AB.holograma(pan);
+      if (!s.attract) AB.bombaImpacto('crio', pan);
     } else if (b.tipo === 'emp') {
       blast(x, y, 3, 'jugador', 0.6);
       const R2 = 200;
@@ -3324,7 +3342,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (n) pop(x, y + 30, n > 1 ? `⚡ ¡${n} misiles apagados!` : '⚡ ¡Misil apagado!', '#7af0ff');
       s.zonas.push({ tipo: 'emp', x, y, r: R2, t: 0, vida: 1, tick: 0 });
       L.luz(s.luces, x, y, 80, '#7af0ff', 0.4);
-      if (!s.attract) AB.rayoOvni();
+      if (!s.attract) AB.bombaImpacto('emp', pan);
     } else blast(x, y, FA.ENERGIA.bombaJugador, 'jugador', 4);
   }
 
@@ -3518,6 +3536,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (!s.attract) {
       if (input.fire && !s.fireWasDown && (s.ammo < 1 || s.fireT > 0.05)) AB.sinMunicion(panOf(p.x));
       if (input.bomb && !s.bombWasDown && (s.bombAmmo < 1 || s.bombT > 0.05)) AB.sinMunicion(panOf(p.x));
+      if (input.fire && !s.fireWasDown && s.ammo < 1) AB.sinMunicionTipo('misil', panOf(p.x));
+      if (input.bomb && !s.bombWasDown && s.bombAmmo < 1) AB.sinMunicionTipo('bomba', panOf(p.x));
       if (input.flare && !s.flareWasDown && s.flares <= 0) AB.bengalaVacia();
     }
     s.fireWasDown = input.fire;
@@ -3595,6 +3615,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       s.bombT = s.spec.bombCd * (s.boost === 'bombas' ? 0.5 : 1);
       fx('bomba', sfx.bomb, { vol: 0.5 });
+      if (!s.attract) AB.sueltaBomba(s.bomba);
     }
     if (input.flare && !s.flareWasDown && s.flares > 0 && s.flareCd <= 0) {
       usar('bengala');
@@ -3643,6 +3664,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     L.luz(s.luces, f.x, f.y, 10, '#fff2c0', 0.1);
     fx('bengalas', sfx.flare, { vol: 0.32, rate: 1.05 + sv.i * 0.025, dur: 0.16 }, p.x);
+    if (!s.attract) AB.bengalaTipo(kb.tipo ?? 'magnesio', lado * 0.5, sv.i);
     sv.i++;
     if (sv.i >= SALVA_N) {
       if (sv.enganados) {
@@ -3768,6 +3790,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.junk.push({ x: from.x, y: from.y, vx: vx + rand(-6, 6), vy: vy + rand(-6, 6), t: 0, kind, spin: 0, fuse: kind === 'macetero' && sol ? sol.tiempo : 99 });
       FA.retroceso(c, Math.atan2(vy, vx), 3);
       sfx.jump();
+      if (!s.attract) AB.lanzaMargarita(panOf(from.x));
       return;
     }
     // Each vehicle picks from the missile catalogue for this wave; the
@@ -3784,6 +3807,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       for (const m of unaSalva(salva)) s.shots.push({ m, enemy: true, tgt: p, trail: 0 });
       FA.retroceso(c, Math.PI / 2, c.kind === 'jeep' ? 4 : 7);
       fx('misil', sfx.enemyLaunch, { vol: 0.45, rate: tipo === 'dardo' ? 1.2 : tipo === 'pesado' ? 0.65 : 0.8 }, ox);
+      if (!s.attract) AB.lanzaVehiculo(c.kind, panOf(ox), Math.hypot(ox - p.x, oy - p.y));
     } else {
       // Flak: a time-fused shell that bursts where the plane will be.
       const sol = FA.solucionTiro({ x: ox, y: oy }, FA.VEL_OBUS, p, true, FA.ARRASTRE_OBUS);
@@ -3792,6 +3816,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       FA.retroceso(c, Math.atan2(sol.vy, sol.vx), 5);
       puff(ox, oy, 3, false, 0.5);
       fx('antiaereo', sfx.dig, { vol: 0.55, rate: rand(0.9, 1.1) }, ox);
+      if (!s.attract) AB.canonVehiculo(c.kind, panOf(ox), Math.hypot(ox - p.x, oy - p.y));
     }
   }
 
@@ -4490,6 +4515,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (s.gore && a.tipo !== 'dron' && airLife < 0.5 && a.hp > 0 && Math.random() < dt * 10) GR.rastro(s.sangre, a.x, a.y - 2, a.vx, a.vy);
       if (s.mode === 'play' && !s.dead) {
         for (const d of r.disparos ?? []) s.proy.push(AE.nuevoProyectil(d));
+        const d0 = r.disparos?.[0];
+        if (d0 && !s.attract) AB.disparoAereo(a.tipo, d0.tipo, panOf(a.x), Math.hypot(a.x - p.x, a.y - p.y));
         // UFO laser and tractor beam.
         if (r.laser) hurtPlane(1, r.laser.x, r.laser.y);
         if (r.tractor) {
@@ -4518,10 +4545,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const r = CZ.paso(f, p, flyingNow(), dt, ground, CEIL, s.wave, s.fighters, misJ);
       for (const d of r.disparos) s.proy.push(AE.nuevoProyectil({ ...d, tipo: 'balin', trazador: true }));
       if (r.disparos.length) {
-        if (!s.attract) AB.metrallaEnemiga(panOf(f.a.x), Math.hypot(f.a.x - p.x, f.a.y - p.y), r.disparos.length);
+        if (!s.attract) AB.metrallaCaza(!!FV.PARAMS[f.modelo]?.helice, panOf(f.a.x), Math.hypot(f.a.x - p.x, f.a.y - p.y));
         L.luz(s.luces, f.a.x + Math.cos(f.a.rumbo) * 10, f.a.y + Math.sin(f.a.rumbo) * 10, 8, '#ff9ad0', 0.05);
       }
-      if (!s.attract && flyingNow()) AB.pasadaCaza(f.a.x - p.x, f.a.y - p.y, Math.hypot(f.a.vx - p.vx, f.a.vy - p.vy), f.id);
+      if (!s.attract && flyingNow()) AB.pasadaCaza(f.a.x - p.x, f.a.y - p.y, Math.hypot(f.a.vx - p.vx, f.a.vy - p.vy), f.id, !!FV.PARAMS[f.modelo]?.helice);
       if (r.misil) {
         radio(`Ratón ${1 + (f.id % 4)}`, RADIO.fox);
         for (const mm of MS.lanzar('buscador', f.a.x, f.a.y, p, s.wave, Math.random)) s.shots.push({ m: mm, enemy: true, tgt: p, trail: 0, dueno: f });
@@ -4943,6 +4970,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         b.vx *= 0.85;
         if (sobreMar(b.x)) chapoteo(b.x, 0.8);
         else puff(b.x, b.y, 2, false, 0.6);
+        if (!s.attract) AB.reboteBomba(panOf(b.x));
         continue;
       }
       if (s.jefe && JF.tocado(s.jefe, b.x, b.y, 2)) hit = true;
@@ -5113,12 +5141,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         c.vy -= FA.GRAVEDAD * dt;
         c.x += c.vx * dt;
         c.y += c.vy * dt;
-      } else if (FV.pasoParacaidas(c, dt, wind, ground)) c.landed = 0.001;
+      } else if (FV.pasoParacaidas(c, dt, wind, ground)) {
+        c.landed = 0.001;
+        if (!s.attract) AB.cajaAterriza(panOf(c.x), Math.hypot(c.x - p.x, c.y - p.y));
+      }
       if (s.mode === 'play' && !s.dead && Math.hypot(c.x - p.x, c.y - p.y) < s.spec.hit + 12) {
         c.landed = 99;
         VFX.premio(s.fx, c.x, c.y, VFX.BRILLO_CIELO, still || s.calma);
         sfx.star();
         S.suena('recoger', { vol: 0.6 });
+        if (!s.attract) AB.premio('caja');
         if (!repair()) {
           s.score += 200;
           pop(c.x, c.y + 10, '+200');
@@ -6381,6 +6413,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const nv = NITRO_NIVEL[nivel];
       pop(s.plane.x, s.plane.y + 18, nv.texto, nv.luz);
       AB.nitro();
+      AB.nitroNivel(nivel);
       VFX.explosion(s.fx, s.plane.x - Math.cos(s.plane.rumbo) * 14, s.plane.y - Math.sin(s.plane.rumbo) * 14, 1 + 0.5 * nivel, { quieto: still || s.calma, color: 'humo' });
       if (nivel === 3 && !s.calma && !still) s.shake = Math.max(s.shake, 3);
     }
