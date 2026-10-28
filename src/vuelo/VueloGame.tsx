@@ -870,14 +870,27 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   }, [calma]);
 
   // «Modo GORE» (blood, mice blown to pieces): opt-in, off by default, remembered on this device.
+  // The +18 (gore) version needs an adult's confirmation first, kept on this device only.
+  const mayorEdad = () => {
+    try {
+      return !!localStorage.getItem('vuelo-gore-18');
+    } catch {
+      return false;
+    }
+  };
   const [gore, setGore] = useState(() => {
     try {
-      return localStorage.getItem('vuelo-gore') === '1';
+      return localStorage.getItem('vuelo-gore') === '1' && !!localStorage.getItem('vuelo-gore-18');
     } catch {
       return false;
     }
   });
+  const [avisoGore, setAvisoGore] = useState(false);
   const toggleGore = (on: boolean) => {
+    if (on && !mayorEdad()) {
+      setAvisoGore(true);
+      return;
+    }
     setGore(on);
     game.current?.setGore(on);
     try {
@@ -1975,8 +1988,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </label>
               <label className="hud-ajuste">
                 <span>
-                  Modo GORE (sangre)
-                  <small className="block text-[11px] font-bold text-[#c8c0e0]">Sangre y ratones en pedazos. No apto para peques.</small>
+                  Versión +18 (GORE)
+                  <small className="block text-[11px] font-bold text-[#c8c0e0]">Sangre y mutilaciones. Solo mayores de 18; pide confirmar la edad.</small>
                 </span>
                 <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
               </label>
@@ -2247,8 +2260,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 </label>
                 <label className="hud-ajuste">
                   <span>
-                    Modo GORE (sangre)
-                    <small className="block text-[11px] font-bold text-[#c8c0e0]">Sangre y ratones en pedazos. No apto para peques.</small>
+                    Versión +18 (GORE)
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">Sangre y mutilaciones. Solo mayores de 18; pide confirmar la edad.</small>
                   </span>
                   <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
                 </label>
@@ -2336,6 +2349,26 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <button type="button" onClick={() => setVerticalOk(true)} className={`${BTN} mt-5 h-10`}>Jugar igual</button>
           </div>
         </div>
+      )}
+      {avisoGore && (
+        <AvisoMayorEdad
+          onCancelar={() => setAvisoGore(false)}
+          onAceptar={() => {
+            try {
+              localStorage.setItem('vuelo-gore-18', new Date().toISOString());
+            } catch {
+              /* private mode: it will ask again next time */
+            }
+            setAvisoGore(false);
+            setGore(true);
+            game.current?.setGore(true);
+            try {
+              localStorage.setItem('vuelo-gore', '1');
+            } catch {
+              /* private mode */
+            }
+          }}
+        />
       )}
       {phase === 'play' && touchUi && !paused && (
         <>
@@ -2458,6 +2491,57 @@ function vibrar(ms: number | number[]) {
  * pointer capture `:active` isn't reliable on every phone), and `guia` rings it while the
  * first-flight tutorial points at it.
  */
+/**
+ * Age gate and notices for the +18 (gore) version: two boxes to tick (age, and having
+ * read the notice) before «Activar» unlocks. Nothing leaves the device.
+ */
+function AvisoMayorEdad({ onAceptar, onCancelar }: { onAceptar: () => void; onCancelar: () => void }) {
+  const [edad, setEdad] = useState(false);
+  const [leido, setLeido] = useState(false);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancelar();
+    };
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [onCancelar]);
+  return (
+    <div className="fixed inset-0 z-[90] grid place-items-center bg-[#0c0818]/85 p-3" role="dialog" aria-modal="true" aria-labelledby="aviso18-titulo">
+      <div className="hud-panel flex max-h-[92vh] w-full max-w-lg flex-col items-stretch gap-3 overflow-y-auto whitespace-normal p-4 text-left text-[13px] font-bold leading-snug">
+        <div className="flex items-center gap-2">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded bg-[#d01a34] text-sm font-black text-white">+18</span>
+          <h2 id="aviso18-titulo" className="text-base font-black text-[#ffd84a]">Versión +18 · Contenido violento</h2>
+        </div>
+        <p>Antes de activarla, lee esto:</p>
+        <ul className="list-disc space-y-1.5 pl-5 text-[#e8e0f8]">
+          <li><b>Contenido:</b> violencia gráfica en pixel art, con sangre, mutilación y desmembramiento de personajes animados (ratones). Material NSFW, no apto para el trabajo ni para lugares públicos.</li>
+          <li><b>Solo para mayores de 18 años</b> o la mayoría de edad que exija la ley de tu país, si es mayor. No es apto para menores ni para personas sensibles a la violencia.</li>
+          <li><b>Es ficción:</b> personajes y situaciones inventados con fines de humor y entretenimiento. No promueve, glorifica ni incita la violencia contra personas ni animales reales.</li>
+          <li><b>Salud:</b> tiene destellos y efectos intensos. Si eres sensible a ellos (por ejemplo, epilepsia fotosensible), activa «Menos movimiento» o no la uses.</li>
+          <li><b>Privacidad:</b> tu confirmación se guarda solo en este dispositivo; no se envía ni se registra ningún dato personal.</li>
+          <li><b>Tu responsabilidad:</b> al aceptar declaras que cumples la edad mínima y que la usas bajo tu propia responsabilidad. Si compartes el dispositivo con menores, desactívala al terminar (Ajustes). El autor no se hace responsable del uso por menores ni de un uso indebido.</li>
+        </ul>
+        <label className="flex cursor-pointer items-start gap-2 rounded bg-black/20 p-2">
+          <input type="checkbox" checked={edad} onChange={(e) => setEdad(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-[#ffd84a]" />
+          <span>Confirmo que tengo <b>18 años o más</b> (o la mayoría de edad de mi país).</span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 rounded bg-black/20 p-2">
+          <input type="checkbox" checked={leido} onChange={(e) => setLeido(e.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-[#ffd84a]" />
+          <span>Leí el aviso y acepto ver contenido violento y explícito.</span>
+        </label>
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
+          <button type="button" onClick={onCancelar} className={`${TECLA} px-4`}>
+            No, volver
+          </button>
+          <button type="button" disabled={!(edad && leido)} onClick={onAceptar} className={`${TECLA} hud-key-amarilla px-4 disabled:cursor-not-allowed disabled:opacity-40`}>
+            Activar versión +18
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TouchButton({ label, corto, big, fila, active, alerta, guia, children, ...rest }: { label: string; corto?: string; big?: boolean; fila?: boolean; active?: boolean; alerta?: boolean; guia?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const [down, setDown] = useState(false);
   return (
