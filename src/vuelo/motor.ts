@@ -608,6 +608,10 @@ export function readSave(): SavedGame | null {
     if (!pilot) return null;
     g.pilot = pilot;
     if (g.v !== 1 || (g.avion !== undefined && !HG.HANGAR.some((p) => p.id === g.avion)) || !(g.wave >= 1) || !(g.lives >= 1) || !(g.meta >= 1)) return null;
+    // A damaged save (lists that aren't lists, a map that no longer exists) would
+    // throw when the game is rebuilt from it, and «Continuar» would never work again.
+    if (!Array.isArray(g.lost) || !Array.isArray(g.craters) || (g.bridges !== undefined && !Array.isArray(g.bridges))) return null;
+    if (g.mapa !== undefined && !(['valle', 'oceano', 'valparaiso', 'tormenta'] as Mapa[]).includes(g.mapa)) g.mapa = undefined;
     return g;
   } catch {
     return null;

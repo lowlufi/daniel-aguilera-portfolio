@@ -103,7 +103,8 @@ export default function App() {
   // Per-route title, description, canonical, and noindex on unknown URLs.
   useEffect(() => {
     const meta = ROUTE_META[pathname];
-    const url = `https://danieleduardo.cl${meta ? pathname : '/'}`;
+    // /aviones is the same game as the home page: one canonical URL for both.
+    const url = `https://danieleduardo.cl${meta && pathname !== '/aviones' ? pathname : '/'}`;
     document.title = meta?.title ?? 'Página no encontrada — Daniel Eduardo';
     setMeta('meta[name="description"]', 'content', meta?.description ?? ROUTE_META['/clasico'].description);
     setMeta('link[rel="canonical"]', 'href', url);

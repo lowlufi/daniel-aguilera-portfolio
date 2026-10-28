@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { createHash } from 'crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { defineConfig, type Plugin } from 'vite';
 import type { OutputBundle, OutputChunk } from 'rollup';
@@ -100,8 +100,9 @@ function rutasCriticas(): Plugin {
       const vuelo = ruta('/src/vuelo/VueloGame.tsx')?.fileName;
       const clasico = ruta('/src/sitio/ClassicSite.tsx')?.fileName;
       headers = new Map([
-        ['/', precarga(isla, [fuente('nunito-latin')])],
+        ['/', precarga(vuelo, [fuente('nunito-latin')])],
         ['/aviones', precarga(vuelo, [fuente('nunito-latin')])],
+        ['/isla', precarga(isla, [fuente('nunito-latin')])],
         ...['/clasico', '/proyectos', '/sobre-mi'].map((r) => [r, precarga(clasico, [fuente('inter-latin')])] as [string, string[]]),
       ]);
       precache = vuelo
@@ -129,6 +130,11 @@ function rutasCriticas(): Plugin {
           }
           writeFileSync(hPath, lineas.join('\n'));
         }
+        // Without a 404.html Cloudflare Pages treats the site as an SPA and answers
+        // every unknown URL with index.html and a 200. With it, unknown URLs get a real
+        // 404 status, and the app (same HTML) shows its «not found» page.
+        const indexPath = path.join(outDir, 'index.html');
+        if (existsSync(indexPath)) copyFileSync(indexPath, path.join(outDir, '404.html'));
         const swPath = path.join(outDir, 'aviones-sw.js');
         if (existsSync(swPath) && precache.length) {
           const version = createHash('sha256').update(precache.join('\n')).digest('hex').slice(0, 10);
