@@ -1230,6 +1230,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     game.current?.setRadar(null);
   }, [movil]);
   // A missile locking on: a double buzz, the same moment the flares key starts blinking.
+  // The nuke key leaves with the last nuke: if it was held, its «up» never comes and the next nuke wouldn't fire.
+  const hayNukes = !!hud?.nukes;
+  useEffect(() => {
+    if (!hayNukes) game.current?.touch({ nuke: false });
+  }, [hayNukes]);
   const avisoMisil = phase === 'play' && !!hud?.warn && touchUi;
   useEffect(() => {
     if (avisoMisil) vibrar([30, 40, 30]);
@@ -1977,13 +1982,14 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
       {/* Title menu over the self-playing game. */}
       {phase === 'titulo' && (
-        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#120c24]/50 via-transparent to-[#120c24]/50 p-4">
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-gradient-to-b from-[#120c24]/50 via-transparent to-[#120c24]/50 p-4 [@media(max-height:500px)]:gap-3">
           <h1 className="logo-dui text-5xl font-black leading-none sm:text-7xl [@media(max-height:500px)]:text-4xl">
             ESCUADRÓN DUI
           </h1>
-          <nav aria-label="Menú principal" className="flex w-full max-w-xs flex-col gap-2.5">
+          {/* Phones in landscape: two columns, or the logo and the last buttons fall off the screen. */}
+          <nav aria-label="Menú principal" className="flex w-full max-w-xs flex-col gap-2.5 [@media(max-height:500px)]:grid [@media(max-height:500px)]:max-w-lg [@media(max-height:500px)]:grid-cols-2 [@media(max-height:500px)]:gap-2">
             {saved && (
-              <button type="button" autoFocus onClick={() => play(true)} className={`${GO} w-full`}>
+              <button type="button" autoFocus onClick={() => play(true)} className={`${GO} w-full [@media(max-height:500px)]:col-span-2`}>
                 ▶ Continuar · oleada {saved.wave}
               </button>
             )}
@@ -2014,7 +2020,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </button>
             )}
             {ayudaIos && (
-              <p className="rounded-xl bg-[#1a1438]/85 px-3 py-2 text-left text-xs font-bold text-white ring-2 ring-[#7af0a0]/60">
+              <p className="rounded-xl bg-[#1a1438]/85 px-3 py-2 text-left text-xs font-bold text-white ring-2 ring-[#7af0a0]/60 [@media(max-height:500px)]:col-span-2">
                 En iPhone/iPad: toca <b>Compartir</b> (el cuadrado con la flecha) y luego <b>«Agregar a inicio»</b>. Se abrirá a pantalla completa como una app.
               </p>
             )}
@@ -2030,7 +2036,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       {/* Settings from the title menu: sound, reduced motion and the touch control scheme. */}
       {phase === 'ajustes' && (
         <div role="dialog" aria-modal="true" aria-label="Ajustes" className="absolute inset-0 z-30 grid place-items-center overflow-y-auto bg-[#120c24]/75 p-4">
-          <div className="hud-panel w-full max-w-md flex-col items-stretch gap-3 p-4 text-left">
+          <div className="hud-panel w-full max-w-md flex-col items-stretch gap-3 whitespace-normal p-4 text-left">
             <h2 className="logo-dui text-3xl font-black">Ajustes</h2>
             <div className="hud-ajustes">
               <label className="hud-ajuste">
@@ -2098,7 +2104,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                       role="radio"
                       aria-checked={control === c.id}
                       onClick={() => elegirControl(c.id)}
-                      className={`${TECLA} !h-auto flex-col items-start px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
+                      className={`${TECLA} !h-auto flex-col items-start whitespace-normal px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
                     >
                       <span className="text-xs font-black">{c.nombre}</span>
                       <span className="text-[11px] font-bold opacity-75">{c.texto}</span>
@@ -2274,8 +2280,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         </div>
       )}
 
+      {/* Starts under the HUD bar (it stays on top, with the resume key): on short screens the plate would slide under the chips. */}
       {phase === 'play' && paused && (
-        <div role="dialog" aria-modal="true" aria-labelledby="pausa-titulo" className="hud-pausa-fondo absolute inset-0 z-30 grid place-items-center overflow-auto p-4 [@media(max-height:500px)]:p-2">
+        <div role="dialog" aria-modal="true" aria-labelledby="pausa-titulo" className="hud-pausa-fondo absolute inset-0 z-30 grid place-items-center overflow-auto p-4 [@media(max-height:500px)]:p-2" style={{ paddingTop: barraH + 8 }}>
           <div className="hud-pausa w-full max-w-md [@media(max-height:500px)]:max-w-2xl">
             <div className="grid gap-4 [@media(max-height:500px)]:grid-cols-[1.1fr_1fr] [@media(max-height:500px)]:gap-3">
               <div>
@@ -2371,7 +2378,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                           role="radio"
                           aria-checked={control === c.id}
                           onClick={() => elegirControl(c.id)}
-                          className={`${TECLA} !h-auto flex-col items-start px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
+                          className={`${TECLA} !h-auto flex-col items-start whitespace-normal px-2.5 py-1.5 text-left ${control === c.id ? 'hud-key-amarilla' : ''}`}
                         >
                           <span className="text-xs font-black">{c.nombre}</span>
                           <span className="text-[11px] font-bold opacity-75">{c.texto}</span>
@@ -2567,11 +2574,14 @@ function AvisoMayorEdad({ onAceptar, onCancelar }: { onAceptar: () => void; onCa
   const [edad, setEdad] = useState(false);
   const [leido, setLeido] = useState(false);
   useEffect(() => {
+    // The notice owns the keyboard: Esc (or P) must not also resume the game or leave Ajustes behind it.
     const esc = (e: KeyboardEvent) => {
+      if (e.code === 'Tab' || e.code === 'Enter' || e.code === 'Space') return;
+      e.stopImmediatePropagation();
       if (e.key === 'Escape') onCancelar();
     };
-    window.addEventListener('keydown', esc);
-    return () => window.removeEventListener('keydown', esc);
+    window.addEventListener('keydown', esc, true);
+    return () => window.removeEventListener('keydown', esc, true);
   }, [onCancelar]);
   return (
     <div className="fixed inset-0 z-[90] grid place-items-center bg-[#0c0818]/85 p-3" role="dialog" aria-modal="true" aria-labelledby="aviso18-titulo">
