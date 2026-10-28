@@ -26,6 +26,7 @@ import { apagarLienzo, dibujarFondo, dibujarLucesSuelo, lucesDeSuelo, nombreZona
 import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Piloto, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
 import { CASA, NOMBRE, PILOTOS, pilotoGuardado } from './pilotos';
 import * as HG from './hangar';
+import * as VD from './vida';
 import * as AD from './armas-dibujo';
 import { dibujarPops } from './jugo';
 import * as ARS from './arsenal';
@@ -701,8 +702,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   let marStrip: { canvas: HTMLCanvasElement; top: number } | null = null;
   let valpoStrip: { canvas: HTMLCanvasElement; top: number } | null = null;
 
+  /** The worst craters of each map's last visit: they're still smoking when we come back (vida.ts). */
+  const cicatrices: Partial<Record<Mapa, [number, number, number][]>> = {};
+  /** The life on the ground is cast for this map and wave (recast when either changes). */
+  let vidaDe = -1;
+  /** The plane on screen, for its shadow and glory on the sea of clouds (fondo.ts). */
+  const avionFondo = { x: 0, y: 0 };
+  const opVida: VD.OpcionesVida = { mapa: 'valle', cam: 0, vw: 0, vh: 0, yTop: 0, sy: (a: number) => a, suelo: (x: number) => ground(x), t: 0, quieto: false, noche: 0, avionX: 0, avionY: 0, peligros: [] };
+
   /** Switches the terrain, the painted strip and the backdrop to a map. */
   function cambiarMapa(m: Mapa) {
+    if (s.craters.length && s.mapa !== m) cicatrices[s.mapa] = VD.peoresCrateres(s.craters);
     mapaActual = m;
     s.mapa = m;
     resetHeights();
@@ -735,6 +745,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       lucesSuelo = lucesValle;
     }
     sg = strip.canvas.getContext('2d')!;
+    // Where the last visit's bombs fell, the ground is still scorched.
+    const cic = cicatrices[m];
+    if (cic && (m === 'valle' || m === 'valparaiso')) VD.chamuscar(sg, strip.top, cic, ground);
+    vidaDe = -1;
     filaBajo = filaDeFondo(strip.canvas, m !== 'valle');
     s.craters = [];
     s.bridges = [];
@@ -1350,6 +1364,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /* ── Starting and ending ── */
 
   function resetWorld() {
+    s.craters = [];
+    for (const k of Object.keys(cicatrices) as Mapa[]) delete cicatrices[k];
     cambiarMapa('valle');
     s.toMapa = '';
     valpoStrip = null;
@@ -5250,7 +5266,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const nocheTormenta = s.mapa === 'tormenta';
     const autoTheme: Theme = nocheTormenta ? 'noche'
       : s.mapa === 'oceano' ? (atardecer ? 'tarde' : 'dia')
-      : s.mapa === 'valparaiso' && s.wave % 4 === 3 ? 'tarde'
+      // Valparaíso at dusk; on the third lap it's Año Nuevo, at midnight.
+      : s.mapa === 'valparaiso' && s.wave % 4 === 3 ? (s.wave >= 9 ? 'noche' : 'tarde')
       : THEMES[Math.max(0, s.wave - 1) % 3];
     const theme = s.themePick === 'auto' ? autoTheme : s.themePick;
     // The hour's light eases in (a theme change, or the storm clearing) instead of snapping.
@@ -5274,7 +5291,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // The cozy backdrop: sky, clouds, mountains, the village and the woods.
     // The far layers move at half speed when the camera climbs.
     const horizon = Math.round(vh - A.DIRT - 18 + s.camY * 0.5 + shy);
-    const optsFondo = { vw, vh, camX: cam, camY: s.camY, horizonte: horizon, t: s.t, ambiente: theme, quieto: still, paisaje: s.mapa === 'tormenta' ? ('oceano' as const) : s.mapa, costa: s.mapa === 'tormenta' ? 0.5 : s.costa, viaje: s.viaje, tormenta: s.mapa === 'tormenta', despeje: s.despeje };
+    const optsFondo = { vw, vh, camX: cam, camY: s.camY, horizonte: horizon, t: s.t, ambiente: theme, quieto: still, paisaje: s.mapa === 'tormenta' ? ('oceano' as const) : s.mapa, costa: s.mapa === 'tormenta' ? 0.5 : s.costa, viaje: s.viaje, tormenta: s.mapa === 'tormenta', despeje: s.despeje, avion: s.dead || s.mode === 'demo' ? undefined : avionFondo };
+    avionFondo.x = sx(s.plane.x);
+    avionFondo.y = sy(s.plane.y);
     // The hour changed: freeze the old sky once and fade it out over the new one.
     if (temaPrevio && temaPrevio !== theme && !still) {
       fundido.width = canvas.width;
@@ -5290,6 +5309,28 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g.globalAlpha = k * k * (3 - 2 * k);
       g.drawImage(fundido, 0, 0);
       g.globalAlpha = 1;
+    }
+    // The life on the ground (vida.ts): cast for this map and wave; Año Nuevo's fireworks go behind the hills.
+    const tierra = s.mapa === 'valle' || s.mapa === 'valparaiso';
+    if (tierra) {
+      const clave = (s.mapa === 'valle' ? 0 : 100000) + s.wave;
+      if (clave !== vidaDe) {
+        vidaDe = clave;
+        VD.prepararVida(s.mapa, s.wave, cicatrices[s.mapa]);
+      }
+      opVida.mapa = s.mapa;
+      opVida.cam = cam;
+      opVida.vw = vw;
+      opVida.vh = vh;
+      opVida.yTop = sy(strip.top);
+      opVida.sy = sy;
+      opVida.t = s.t;
+      opVida.quieto = still;
+      opVida.noche = nocheK;
+      opVida.avionX = s.plane.x;
+      opVida.avionY = s.plane.y;
+      opVida.peligros = s.cars;
+      VD.dibujarFuegos(g, opVida);
     }
     // Backdrop filter: a little less colour and a soft dusk veil, so planes,
     // missiles, enemies and effects stand out against any scenery. San Antonio
@@ -5337,6 +5378,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Dusk and night: the strip's windows light up (some at dusk, the rest after dark) and the street lamps come on.
     if (lucesSuelo && nocheK > 0.02 && strip !== marStrip) dibujarLucesSuelo(g, lucesSuelo, cam, sy(strip.top), vw, nocheK, still ? 0 : s.t, (x: number) => sy(ground(x)));
     if (s.mapa === 'valparaiso') VP.dibujarDetallesValpo(g, cam, (alt: number) => sy(alt), vw, s.t, still);
+    if (tierra) VD.dibujarVida(g, opVida);
     // The storm: the sea is lost under a heaving floor of dark cloud.
     if (s.mapa === 'tormenta' && s.despeje < 1) {
       g.globalAlpha = 1 - s.despeje;
