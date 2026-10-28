@@ -998,6 +998,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   // Esc / P pause; a hidden tab pauses too.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A held Esc repeats: only the first press toggles. Cmd/Ctrl+P (print) isn't a pause.
+      if (e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
       // Esc goes back from the credits and the hangar (Enter uses the focused button everywhere).
       if (e.code === 'Escape' && (phase === 'creditos' || phase === 'ajustes' || (phase === 'menu' && !confirmado))) setPhase('titulo');
@@ -1330,10 +1332,10 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     const used = new Set<string>();
     let fold = 0;
     const onKey = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
-      if (k === ' ' || k === 'j') used.add('misil');
-      else if (k === 'k') used.add('bomba');
-      else if (k === 'l') used.add('bengala');
+      const k = e.code;
+      if (k === 'Space' || k === 'KeyJ') used.add('misil');
+      else if (k === 'KeyK' || k === 'KeyB') used.add('bomba');
+      else if (k === 'KeyL' || k === 'Enter' || k === 'NumpadEnter') used.add('bengala');
       if (used.size === 3 && !fold) fold = window.setTimeout(() => setKeysFolded(true), 4000);
     };
     window.addEventListener('keydown', onKey);
@@ -1891,23 +1893,23 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 </button>
               </div>
               <ul className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1">
-                <Key k="← ↑ → ↓" label="Pilotear (o WASD)" />
+                <Key k="← ↑ → ↓ · WASD" label="Pilotear: la nariz va hacia donde apuntas (toque corto: ajuste fino)" />
                 <Key k="E · Shift" label="Acelerar" on={hud?.throttle === 1} />
                 <Key k="E (mantener)" label="Nitro (se recalienta)" on={hud?.nitro === 'activo'} />
                 <Key k="E rápido ×3 · ×5 · ×7" label="Super · Hiper · Mega nitro (mientras sigas tocando o lo mantengas)" />
-                <Key k="Q · Ctrl" label="Frenar (apaga el nitro)" on={hud?.throttle === -1} />
+                <Key k="Q" label="Frenar (apaga el nitro)" on={hud?.throttle === -1} />
                 {ratonOn ? (
                   <>
                     <Key k="Mouse" label="El avión sigue al cursor" />
                     <Key k="Clic izq." label="Metralla" />
                     <Key k="Clic der." label="Bengalas" />
-                    <Key k="Espacio" label="Misil" />
+                    <Key k="Espacio · J" label="Misil" />
                     <Key k="B · K · rueda clic" label="Bomba" />
                   </>
                 ) : (
                   <>
-                    <Key k="Espacio" label="Misil (sale por la nariz)" />
-                    <Key k="K" label="Bomba" />
+                    <Key k="Espacio · J" label="Misil (sale por la nariz)" />
+                    <Key k="K · B" label="Bomba" />
                   </>
                 )}
                 <Key k="L · Enter" label="Bengalas" />
@@ -1915,7 +1917,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <Key k="N" label="Bomba nuclear (de los ovnis)" />
                 <Key k="R" label="Tonel: esquiva misiles" />
                 <Key k="Z · rueda" label="Zoom" />
-                <Key k="Esc" label="Pausa" />
+                <Key k="Esc · P" label="Pausa" />
               </ul>
             </div>
           ) : (

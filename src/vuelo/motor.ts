@@ -904,6 +904,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
   }
   const input: Controls = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false };
+  /** Physical keys held (e.code), so ← and A held together don't let go of each other. */
   const keys = new Set<string>();
 
   const s = {
@@ -3784,10 +3785,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function textoPista(k: PistaId): string {
     const t = view.touch;
     return {
-      girar: t ? 'Mantén el lado «Sube» o «Baja» de la pantalla para girar' : 'Flechas o WASD para pilotear',
-      disparar: t ? 'La metralla dispara sola · toca 🚀 Misil para lanzar uno' : 'Espacio: misil · H: metralla',
+      girar: t ? 'Mantén el lado «Sube» o «Baja» de la pantalla para girar' : modoRaton ? 'El avión sigue al cursor (o flechas / WASD)' : 'Flechas o WASD: la nariz va hacia donde apuntas · toque corto: ajuste fino',
+      disparar: t ? 'La metralla dispara sola · toca 🚀 Misil para lanzar uno' : modoRaton ? 'Espacio: misil · clic izquierdo: metralla' : 'Espacio: misil · H o F: metralla',
       fijar: 'Mantén la nariz 1 s sobre un enemigo: se fija y el misil lo persigue',
-      bengala: t ? '¡Misil! Toca ✨ Bengalas o gira fuerte' : '¡Misil! L suelta bengalas, o gira fuerte',
+      bengala: t ? '¡Misil! Toca ✨ Bengalas o gira fuerte' : modoRaton ? '¡Misil! Clic derecho suelta bengalas, o gira fuerte' : '¡Misil! L o Enter sueltan bengalas, o gira fuerte',
       nitro: t ? 'Mantén Gas: nitro · sigue tocando rápido: super, hiper y mega (según el avión); si paras, frena' : 'Mantén E: nitro · sigue tocando E rápido: super, hiper y mega (según el avión); si paras, frena',
     }[k];
   }
@@ -3933,7 +3934,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       FV.pasoAvion(p, 'avioneta', { x: dir, y: clamp((ty - p.y) / 40, -1, 1), gas: 0 }, dt, ground, top);
     } else if (!s.dead) {
       if (s.attract) attractBot();
-      const mando: Mando = { x: input.x, y: input.y, gas: input.gas, giro: Math.sign(turn) };
+      const rampa = rampaTeclado(p, dt);
+      const mando: Mando = { x: rampa ? rampa.x : input.x, y: rampa ? rampa.y : input.y, gas: input.gas, giro: Math.sign(turn) };
       // Too high: the cold builds ice; full of it, the controls freeze and the
       // plane drops nose-down until it thaws lower down.
       if (s.mode === 'play' && !s.attract) {
@@ -6400,7 +6402,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       resumen: s.mode === 'play' && s.phase === 'break' && s.breakT > 1 ? s.resumen : null,
       viaje: s.transT > 0,
       pista: s.mode !== 'play' || s.dead ? '' : s.despegue === 'subiendo' ? `${s.spec.pilot} sube al avión…` : s.despegue === 'pista'
-        ? (view.touch ? 'Mantén Gas y, con velocidad, mantén el lado «Sube» para despegar' : 'Mantén E para acelerar y, con velocidad, ↑ para despegar')
+        ? (view.touch ? 'Mantén Gas y, con velocidad, mantén el lado «Sube» para despegar' : 'Mantén E (o Shift) para acelerar y, con velocidad, ↑ o W para despegar')
         : s.pista ? textoPista(s.pista) : '',
       radio: s.mode === 'play' && s.radio && s.radio.t < 3.8 ? { quien: s.radio.quien, texto: s.radio.texto } : null,
       mision: s.mode === 'play' && s.mision ? { texto: s.mision.texto, prog: s.mision.prog, meta: s.mision.meta, hecha: s.mision.hecha, fallida: s.mision.fallida } : null,
@@ -6417,8 +6419,18 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   const CODES: Record<string, string> = {
     ArrowLeft: 'l', KeyA: 'l', ArrowRight: 'r', KeyD: 'r', ArrowUp: 'u', KeyW: 'u', ArrowDown: 'd', KeyS: 'd',
     Space: 'fire', KeyJ: 'fire', KeyK: 'bomb', KeyB: 'bomb', KeyL: 'flare', Enter: 'flare', NumpadEnter: 'flare', KeyH: 'gun', KeyF: 'gun', KeyN: 'nuke', KeyR: 'tonel',
-    KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
+    // No Ctrl for the brake: Ctrl+W (brake while climbing) closes the tab and can't be stopped.
+    KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', KeyZ: 'zoom',
   };
+  /** True if any held key does this. */
+  function tecla(k: string) {
+    for (const c of keys) if (CODES[c] === k) return true;
+    return false;
+  }
+  /** The arrows/WASD on their own (−1…1 each), and how far into the hold the turn is (0…1). */
+  let teclaX = 0;
+  let teclaY = 0;
+  let teclaK = 0;
   const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false };
   /** The automatic machine gun's own trigger (phones), apart from the gun button. */
   let gunSola = false;
@@ -6450,34 +6462,67 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     return false;
   }
   function syncInput() {
-    const kx = (keys.has('r') ? 1 : 0) - (keys.has('l') ? 1 : 0);
-    const ky = (keys.has('u') ? 1 : 0) - (keys.has('d') ? 1 : 0);
-    input.x = kx || touch.x;
-    input.y = ky || touch.y;
-    input.gas = (keys.has('acc') ? 1 : 0) - (keys.has('brake') ? 1 : 0) || touch.gas;
-    input.fire = keys.has('fire') || touch.fire;
-    input.bomb = keys.has('bomb') || touch.bomb;
-    input.flare = keys.has('flare') || touch.flare;
-    input.gun = keys.has('gun') || touch.gun || gunSola;
-    input.nuke = keys.has('nuke') || touch.nuke;
-    input.tonel = keys.has('tonel') || touch.tonel;
+    teclaX = (tecla('r') ? 1 : 0) - (tecla('l') ? 1 : 0);
+    teclaY = (tecla('u') ? 1 : 0) - (tecla('d') ? 1 : 0);
+    if (!teclaX && !teclaY) teclaK = 0;
+    input.x = teclaX || touch.x;
+    input.y = teclaY || touch.y;
+    input.gas = (tecla('acc') ? 1 : 0) - (tecla('brake') ? 1 : 0) || touch.gas;
+    input.fire = tecla('fire') || touch.fire;
+    input.bomb = tecla('bomb') || touch.bomb;
+    input.flare = tecla('flare') || touch.flare;
+    input.gun = tecla('gun') || touch.gun || gunSola;
+    input.nuke = tecla('nuke') || touch.nuke;
+    input.tonel = tecla('tonel') || touch.tonel;
   }
+  /**
+   * Keyboard: the turn ramps in. A tap nudges the nose a little toward the key (fine aim);
+   * held, within ~0.16 s it pulls as hard as before (the quick loops stay quick).
+   * Returns the direction to fly, or null to use the input as it is.
+   */
+  function rampaTeclado(p: Avion, dt: number): { x: number; y: number } | null {
+    if ((!teclaX && !teclaY) || turn || s.despegue || s.attract) return null;
+    teclaK = Math.min(1, teclaK + dt / 0.16);
+    if (teclaK >= 1) return null;
+    const v = Math.hypot(p.vx, p.vy);
+    const camino = v > 5 ? Math.atan2(p.vy, p.vx) : p.rumbo;
+    let err = Math.atan2(teclaY, teclaX) - camino;
+    err = Math.atan2(Math.sin(err), Math.cos(err));
+    // Straight behind: start over the top, as the flight model would.
+    if (Math.abs(err) > 2.9) err = Math.cos(camino) >= 0 ? Math.PI : -Math.PI;
+    const tope = 0.25 + 1.1 * teclaK;
+    if (Math.abs(err) <= tope) return null;
+    const a = camino + Math.sign(err) * tope;
+    return { x: Math.cos(a), y: Math.sin(a) };
+  }
+  /** Cmd/Ctrl/Alt chords belong to the browser (Cmd+R, Ctrl+T…): the game lets them through. */
+  const atajo = (e: KeyboardEvent) => e.metaKey || e.ctrlKey || e.altKey;
   const onKey = (e: KeyboardEvent) => {
+    // Letting go always counts, wherever the focus is: no key stays stuck.
+    if (e.type === 'keyup') {
+      // macOS sends no «up» for keys released while Cmd is held: Cmd going up lets go of everything.
+      if (e.key === 'Meta') keys.clear();
+      if (!keys.delete(e.code) && e.key !== 'Meta') return;
+      syncInput();
+      if (CODES[e.code] && s.mode === 'play' && !s.attract) e.preventDefault();
+      return;
+    }
     const k = CODES[e.code];
     // Menus (the title's self-playing game) and the pause keep their keys for the buttons.
-    if (!k || s.mode !== 'play' || ((s.attract || s.paused) && e.type === 'keydown')) return;
+    if (!k || s.mode !== 'play' || s.attract || s.paused || atajo(e)) return;
     // With the wave card's shop (and its hangar) open, Enter presses the focused button.
     if ((e.code === 'Enter' || e.code === 'NumpadEnter') && s.tienda) return;
     const el = e.target as HTMLElement | null;
-    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
     e.preventDefault();
+    // Held keys repeat: one-shot actions only on the first press (a key held through
+    // the pause still counts again through its repeats).
     if (k === 'zoom') {
-      if (e.type === 'keydown' && !e.repeat) zoom();
+      if (!e.repeat) zoom();
       return;
     }
-    if (e.type === 'keydown' && !e.repeat && k === 'acc') tapAccel();
-    if (e.type === 'keydown') keys.add(k);
-    else keys.delete(k);
+    if (k === 'acc' && !e.repeat) tapAccel();
+    keys.add(e.code);
     syncInput();
   };
   /**
@@ -6539,7 +6584,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     return true;
   }
   const onHide = () => {
-    if (document.visibilityState === 'hidden') save();
+    if (document.visibilityState !== 'hidden') return;
+    save();
+    // Keys released while the tab was hidden never send their «up».
+    onBlur();
   };
   document.addEventListener('visibilitychange', onHide);
   window.addEventListener('pagehide', save);
