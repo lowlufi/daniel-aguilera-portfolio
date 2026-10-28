@@ -714,24 +714,28 @@ function recolorear(d: Uint8ClampedArray, pal: Paleta, mk: Mascara, blanco: bool
   }
 }
 
-/** Margarita in the cockpit: red beanie, grey curls, a scowl. (0, 0) is the head's middle. */
+/** Margarita in the cockpit: red beanie, black hair, a fat hooked nose, a scowl. She's short, so she sits low. (0, 0) is the head's middle. */
 function cabezaMargarita(g: Ctx, arriba: boolean) {
   if (arriba) {
-    // Seen from above: grey curls round a beanie with a white bobble.
+    // Seen from above: black hair round a beanie with a white bobble, the nose poking out.
     A.R(g, -3, -3, 5, 7, '#2a1a24');
-    A.R(g, -3, -2, 5, 5, '#d8d0ca');
+    A.R(g, -3, -2, 5, 5, A.MARGA_PELO[1]);
     A.R(g, -2, -2, 3, 4, '#c02a3a');
     A.R(g, -1, -1, 1, 2, '#ffffff');
-    A.R(g, 2, -1, 1, 2, '#f0c8a8');
+    A.R(g, 2, -1, 2, 2, '#f0c8a8');
+    A.R(g, 3, 0, 1, 1, '#c07a58');
     return;
   }
-  A.R(g, -3, -4, 6, 2, '#e03a3a');
-  A.R(g, -1, -5, 2, 1, '#ff6a5a');
-  A.R(g, -3, -2, 1, 3, '#d8d0ca');
-  A.R(g, -2, -2, 4, 3, '#f0c8a8');
-  A.R(g, 1, -1, 1, 1, '#2a2030');
-  A.R(g, 0, 0, 2, 1, '#8a3a3a');
-  A.R(g, -1, 1, 3, 1, '#d8d0ca');
+  A.R(g, -3, -3, 6, 2, '#e03a3a');
+  A.R(g, -1, -4, 2, 1, '#ff6a5a');
+  A.R(g, -3, -1, 1, 3, A.MARGA_PELO[1]);
+  A.R(g, -2, -1, 4, 3, '#f0c8a8');
+  A.R(g, 1, 0, 1, 1, '#2a2030');
+  // The witch's nose: out and down to a fat round tip.
+  A.R(g, 2, 0, 1, 1, '#f0c8a8');
+  A.R(g, 2, 1, 2, 2, '#f0c8a8');
+  A.R(g, 3, 2, 1, 1, '#c07a58');
+  A.R(g, 0, 2, 2, 1, '#8a3a3a');
 }
 
 /** A mouse pilot with a red helmet. (0, 0) is the head's middle. */

@@ -1405,8 +1405,15 @@ function paintSam(g: Ctx, f: number) {
   wheel(g, 11, -4, 3, f);
 }
 
+/** Margarita's black hair (shadow, base, shine) and the wart on her witch's nose. Shared by all her sprites. */
+export const MARGA_PELO = ['#141018', '#2a2232', '#4a4058'] as const;
+export const MARGA_VERRUGA = '#9a5a4a';
+/** Her cart's ink, to outline the nose where it sticks out over the basket. */
+const VINK_MARGA = '#6a2a4a';
+
 /**
- * Neighbour Margarita, the boss: a grumpy old lady in a red wool hat, glasses
+ * Neighbour Margarita, the boss: a short, grumpy old lady with black hair, a
+ * hooked witch's nose and a red wool hat, glasses
  * and a grey cardigan, riding a motorised shopping trolley full of groceries.
  * Faces left like the mice. Her broom is drawn separately so it can shake.
  */
@@ -1426,48 +1433,63 @@ function paintMargarita(g: Ctx, f: number) {
   R(g, -15, -38, 3, 2, P.g4);
   R(g, -5, -46, 3, 14, P.g4);
   R(g, -6, -50, 5, 5, P.g1);
-  D.oval(g, 6, -34, 7, 3, P.k1);
-  R(g, 2, -36, 8, 1, P.k3);
+  D.oval(g, 0, -34, 6, 3, P.k1);
+  R(g, -3, -36, 7, 1, P.k3);
   // Engine box and the handle.
   R(g, 14, -12, 9, 7, M0);
   R(g, 15, -11, 7, 3, M);
   R(g, 16, -30, 2, 16, M0);
-  // Margarita, behind the trolley: cardigan, skirt, legs, shoes.
-  R(g, 16, -32, 12, 20, '#8a7a9a');
-  R(g, 17, -31, 10, 18, '#a898b8');
-  R(g, 21, -31, 1, 18, '#8a7a9a');
-  R(g, 16, -13, 12, 6, '#6a4a7a');
-  R(g, 18, -7, 2, 4, P.skin);
-  R(g, 24, -7, 2, 4, P.skin);
+  // Margarita, behind the trolley: short and round, her head barely clears the
+  // basket. Cardigan, skirt, stubby legs, shoes.
+  R(g, 15, -28, 14, 16, '#8a7a9a');
+  R(g, 16, -27, 12, 14, '#a898b8');
+  R(g, 22, -27, 1, 14, '#8a7a9a');
+  R(g, 15, -13, 14, 7, '#6a4a7a');
+  R(g, 18, -6, 2, 3, P.skin);
+  R(g, 24, -6, 2, 3, P.skin);
   R(g, 17, -4, 4, 2, P.r0);
   R(g, 23, -4, 4, 2, P.r0);
-  // Arm reaching to the handle.
-  R(g, 15, -27, 4, 3, '#a898b8');
-  R(g, 14, -26, 2, 2, P.skin);
-  // Head: grey hair and bun, wrinkly face, big nose, glasses, a frown.
-  D.disc(g, 24, -40, 6, '#d8d4e4');
-  D.disc(g, 27, -44, 3, '#d8d4e4');
-  D.disc(g, 21, -39, 5, P.skin);
-  R(g, 15, -39, 3, 3, P.skin0);
-  R(g, 16, -42, 7, 1, P.metal0);
-  R(g, 16, -42, 3, 3, P.gl2);
-  R(g, 20, -42, 3, 3, P.gl2);
-  R(g, 17, -41, 1, 1, P.eye);
-  R(g, 21, -41, 1, 1, P.eye);
+  // Arm stretched out over the basket, holding up the broom.
+  R(g, 9, -24, 9, 3, '#a898b8');
+  R(g, 6, -24, 3, 3, P.skin);
+  // Head: black hair and bun, a big hooked witch's nose with a wart, glasses, a frown.
+  D.disc(g, 24, -35, 6, MARGA_PELO[1]);
+  D.disc(g, 28, -39, 3, MARGA_PELO[1]);
+  R(g, 27, -41, 2, 1, MARGA_PELO[2]);
+  R(g, 25, -39, 3, 1, MARGA_PELO[2]);
+  R(g, 28, -31, 2, 2, MARGA_PELO[0]);
+  D.disc(g, 21, -34, 5, P.skin);
+  R(g, 16, -37, 7, 1, P.metal0);
+  R(g, 16, -37, 3, 3, P.gl2);
+  R(g, 20, -37, 3, 3, P.gl2);
+  R(g, 17, -36, 1, 1, P.eye);
+  R(g, 21, -36, 1, 1, P.eye);
   // Angry eyebrows sloping down to the nose.
-  R(g, 16, -44, 2, 1, '#5a4a5a');
-  R(g, 18, -43, 1, 1, '#5a4a5a');
-  R(g, 21, -44, 2, 1, '#5a4a5a');
-  R(g, 17, -36, 4, 1, P.r0);
-  R(g, 16, -35, 1, 1, P.r0);
-  R(g, 24, -37, 2, 1, P.blush);
+  R(g, 16, -39, 2, 1, MARGA_PELO[0]);
+  R(g, 18, -38, 1, 1, MARGA_PELO[0]);
+  R(g, 21, -39, 2, 1, MARGA_PELO[0]);
+  // The nose: out from between the eyes, then a fat round tip hooking down.
+  R(g, 12, -36, 4, 1, VINK_MARGA);
+  R(g, 13, -35, 4, 2, P.skin);
+  D.oval(g, 10, -31, 4, 3, VINK_MARGA);
+  D.oval(g, 10, -31, 3, 2, P.skin);
+  R(g, 12, -34, 2, 1, P.skin);
+  R(g, 9, -32, 1, 1, '#fff0dc');
+  R(g, 8, -29, 5, 1, P.skin0);
+  R(g, 8, -28, 2, 1, P.skin0);
+  R(g, 8, -27, 1, 1, VINK_MARGA);
+  R(g, 12, -32, 1, 1, MARGA_VERRUGA);
+  // Grumpy mouth tucked under the nose.
+  R(g, 16, -30, 4, 1, P.r0);
+  R(g, 20, -29, 1, 1, P.r0);
+  R(g, 23, -32, 2, 1, P.blush);
   // The red wool hat with a pompom.
-  D.oval(g, 22, -45, 8, 4, P.r0);
-  D.oval(g, 22, -46, 7, 3, P.r1);
-  R(g, 15, -43, 15, 2, P.r0);
-  for (let x = 16; x < 30; x += 2) R(g, x, -43, 1, 2, P.r2);
-  D.disc(g, 22, -51, 3, P.r2);
-  R(g, 21, -52, 1, 1, P.r3);
+  D.oval(g, 22, -40, 8, 4, P.r0);
+  D.oval(g, 22, -41, 7, 3, P.r1);
+  R(g, 15, -38, 15, 2, P.r0);
+  for (let x = 16; x < 30; x += 2) R(g, x, -38, 1, 2, P.r2);
+  D.disc(g, 22, -46, 3, P.r2);
+  R(g, 21, -47, 1, 1, P.r3);
   // Four casters.
   for (const x of [-18, -6, 6, 16]) wheel(g, x, -4, 3, f);
 }
@@ -1583,26 +1605,33 @@ function parkedJet(g: Ctx, x: number, y: number) {
 
 /** Margarita, small, up on the carrier's bridge behind the railing. (x, y) is the rail top. */
 function bridgeMargarita(g: Ctx, x: number, y: number) {
-  R(g, x - 4, y - 3, 9, 4, '#a898b8');
-  R(g, x, y - 3, 1, 4, '#8a7a9a');
-  D.disc(g, x + 2, y - 6, 3, '#d8d4e4');
-  R(g, x + 4, y - 10, 2, 2, '#d8d4e4');
-  D.disc(g, x, y - 6, 3, P.skin);
-  R(g, x - 4, y - 6, 2, 2, P.skin0);
+  // Short: only her head and shoulders peek over the rail.
+  R(g, x - 4, y - 2, 9, 3, '#a898b8');
+  R(g, x, y - 2, 1, 3, '#8a7a9a');
+  D.disc(g, x + 2, y - 5, 3, MARGA_PELO[1]);
+  R(g, x + 4, y - 9, 2, 2, MARGA_PELO[1]);
+  R(g, x + 3, y - 6, 2, 1, MARGA_PELO[2]);
+  D.disc(g, x, y - 5, 3, P.skin);
   // Glasses, eyes and the frown.
-  R(g, x - 3, y - 8, 5, 1, P.metal0);
-  R(g, x - 3, y - 7, 2, 2, P.gl2);
-  R(g, x, y - 7, 2, 2, P.gl2);
-  R(g, x - 3, y - 7, 1, 1, P.eye);
-  R(g, x, y - 7, 1, 1, P.eye);
-  R(g, x - 3, y - 4, 3, 1, P.r0);
-  R(g, x + 2, y - 5, 1, 1, P.blush);
+  R(g, x - 3, y - 7, 5, 1, P.metal0);
+  R(g, x - 3, y - 6, 2, 2, P.gl2);
+  R(g, x, y - 6, 2, 2, P.gl2);
+  R(g, x - 3, y - 6, 1, 1, P.eye);
+  R(g, x, y - 6, 1, 1, P.eye);
+  // The witch's nose: a fat hooked blob sticking out to the left.
+  R(g, x - 5, y - 5, 2, 1, P.skin);
+  R(g, x - 7, y - 4, 4, 2, P.skin);
+  R(g, x - 7, y - 3, 3, 1, P.skin0);
+  R(g, x - 7, y - 2, 1, 1, P.skin0);
+  R(g, x - 6, y - 4, 1, 1, MARGA_VERRUGA);
+  R(g, x - 2, y - 2, 3, 1, P.r0);
+  R(g, x + 2, y - 4, 1, 1, P.blush);
   // The red wool hat.
-  D.oval(g, x, y - 10, 4, 2, P.r0);
-  D.oval(g, x, y - 11, 3, 1, P.r1);
-  R(g, x - 4, y - 9, 9, 1, P.r0);
-  for (let i = -3; i < 5; i += 2) R(g, x + i, y - 9, 1, 1, P.r2);
-  R(g, x - 1, y - 13, 2, 1, P.r2);
+  D.oval(g, x, y - 9, 4, 2, P.r0);
+  D.oval(g, x, y - 10, 3, 1, P.r1);
+  R(g, x - 4, y - 8, 9, 1, P.r0);
+  for (let i = -3; i < 5; i += 2) R(g, x + i, y - 8, 1, 1, P.r2);
+  R(g, x - 1, y - 12, 2, 1, P.r2);
 }
 
 /** Carrier AA turrets (x, y-up) relative to the waterline centre; y is the dome centre. */
@@ -1867,7 +1896,7 @@ export function drawVehicle(g: Ctx, k: VehiculoTipo, x: number, y: number, tilt:
   if (k === 'margarita') {
     // She shakes her broom at the sky.
     g.save();
-    g.translate(13, -30);
+    g.translate(7, -23);
     g.rotate(-0.5 + Math.sin(t * 9) * 0.35);
     R(g, -1, -24, 3, 26, '#6a2a4a');
     R(g, 0, -23, 1, 24, P.k1);
@@ -1877,10 +1906,10 @@ export function drawVehicle(g: Ctx, k: VehiculoTipo, x: number, y: number, tilt:
     g.restore();
   }
   if (k === 'portaaviones') {
-    // Margarita shakes a little broom from the bridge.
+    // Margarita shakes a little broom from the bridge (behind her, clear of her nose).
     g.save();
-    g.translate(34, -31);
-    g.rotate(-0.5 + Math.sin(t * 9) * 0.35);
+    g.translate(43, -31);
+    g.rotate(0.5 + Math.sin(t * 9) * 0.35);
     R(g, -1, -11, 2, 12, '#6a2a4a');
     R(g, 0, -10, 1, 11, P.k1);
     R(g, -3, -15, 6, 5, '#6a2a4a');

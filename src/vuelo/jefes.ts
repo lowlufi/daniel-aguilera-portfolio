@@ -2157,7 +2157,9 @@ const HAZ = 0.11; // searchlight half-angle, rad
 const GRAV_BOMBA = 170;
 const Z = { z0: '#5a4e78', z1: '#8478a4', z2: '#aea4cc', z3: '#d0c8e4', z4: '#eeeaf8', fondo: '#4a3a5a', carbon: '#5a2a3a' };
 const CARDIGAN = '#a898b8';
-const PELO = '#d8d4e4';
+/** Margarita's black hair (shadow, base, shine) and nose wart: same as A.MARGA_PELO / A.MARGA_VERRUGA. */
+const PELO = ['#141018', '#2a2232', '#4a4058'] as const;
+const VERRUGA = '#9a5a4a';
 
 /** Hull half-height at local u: ogive nose, cylinder, long tapered tail. */
 function altoZ(u: number): number {
@@ -2726,46 +2728,58 @@ function pintarZepelin(g: Ctx, j: Jefe, t: number) {
   if (!nu.viva) D.oval(g, 48, 53, 16, 6, '#6a3a3a');
 }
 
-/** Margarita: red beanie, grey hair, glasses, lilac cardigan; shaking her fist. (x, y) = chest. */
+/** Margarita: red beanie, black hair, glasses, a hooked witch's nose, lilac cardigan; shaking her fist. (x, y) = chest. */
 function margarita(g: Ctx, x: number, y: number, fuera: boolean, t: number, furia: boolean) {
   y += fuera ? Math.round(Math.sin(t * 6)) - 2 : 0;
   // Cardigan.
   R(g, x - 5, y - 3, 10, 3, CARDIGAN);
   R(g, x - 1, y - 3, 1, 3, '#8a7a9a');
-  // Hair bun behind, face.
-  D.disc(g, x - 3, y - 8, 4, PELO);
-  D.disc(g, x - 5, y - 11, 2, PELO);
-  D.disc(g, x + 1, y - 8, 3, P.skin);
-  R(g, x + 4, y - 8, 2, 2, P.skin0);
+  // She's short: her head only just clears the window sill.
+  const h = y + 2;
+  // Black hair and bun behind, face.
+  D.disc(g, x - 3, h - 8, 4, PELO[1]);
+  D.disc(g, x - 5, h - 11, 2, PELO[1]);
+  R(g, x - 6, h - 12, 2, 1, PELO[2]);
+  R(g, x - 4, h - 10, 2, 1, PELO[2]);
+  D.disc(g, x + 1, h - 8, 3, P.skin);
   // Glasses and angry brows.
-  R(g, x - 1, y - 10, 6, 1, P.metal0);
-  R(g, x, y - 9, 2, 2, P.gl2);
-  R(g, x + 3, y - 9, 2, 2, P.gl2);
-  R(g, x + 1, y - 9, 1, 1, P.eye);
-  R(g, x + 4, y - 9, 1, 1, P.eye);
-  R(g, x - 1, y - 12, 2, 1, '#5a4a5a');
-  R(g, x + 1, y - 11, 1, 1, '#5a4a5a');
-  R(g, x + 4, y - 12, 2, 1, '#5a4a5a');
+  R(g, x - 1, h - 10, 6, 1, P.metal0);
+  R(g, x, h - 9, 2, 2, P.gl2);
+  R(g, x + 3, h - 9, 2, 2, P.gl2);
+  R(g, x + 1, h - 9, 1, 1, P.eye);
+  R(g, x + 4, h - 9, 1, 1, P.eye);
+  R(g, x - 1, h - 12, 2, 1, PELO[0]);
+  R(g, x + 1, h - 11, 1, 1, PELO[0]);
+  R(g, x + 4, h - 12, 2, 1, PELO[0]);
+  // The witch's nose: out from the glasses to a fat tip that hooks down, with a wart.
+  R(g, x + 5, h - 9, 3, 1, Z.fondo);
+  D.disc(g, x + 7, h - 6, 2, Z.fondo);
+  R(g, x + 4, h - 8, 3, 1, P.skin);
+  D.disc(g, x + 7, h - 6, 1, P.skin);
+  R(g, x + 6, h - 5, 3, 1, P.skin0);
+  R(g, x + 7, h - 4, 1, 1, P.skin0);
+  R(g, x + 7, h - 7, 1, 1, '#fff0dc');
+  R(g, x + 6, h - 8, 1, 1, VERRUGA);
   // Mouth: shouting while she's out of the window.
-  if (fuera && parpadeo(t, 5)) R(g, x + 2, y - 6, 2, 2, P.r0);
-  else R(g, x + 1, y - 5, 3, 1, P.r0);
+  if (fuera && parpadeo(t, 5)) R(g, x + 2, h - 5, 2, 2, P.r0);
+  else R(g, x + 1, h - 5, 3, 1, P.r0);
   // The red wool beanie with its pompom.
-  D.oval(g, x, y - 13, 5, 3, P.r0);
-  D.oval(g, x, y - 14, 4, 2, P.r1);
-  R(g, x - 5, y - 12, 11, 2, P.r0);
-  for (let i = -4; i < 6; i += 2) R(g, x + i, y - 12, 1, 1, P.r2);
-  D.disc(g, x - 1, y - 17, 2, P.r2);
-  R(g, x - 2, y - 18, 1, 1, P.r3);
-  // The fist.
+  D.oval(g, x, h - 13, 5, 3, P.r0);
+  D.oval(g, x, h - 14, 4, 2, P.r1);
+  R(g, x - 5, h - 12, 11, 2, P.r0);
+  for (let i = -4; i < 6; i += 2) R(g, x + i, h - 12, 1, 1, P.r2);
+  D.disc(g, x - 1, h - 17, 2, P.r2);
+  R(g, x - 2, h - 18, 1, 1, P.r3);
+  // The fist, out past the tip of her nose.
   const f = Math.round(Math.sin(t * (furia ? 16 : 11)) * (fuera ? 3 : 1.5));
   if (fuera) {
-    R(g, x + 4, y - 4, 4, 2, CARDIGAN);
-    R(g, x + 7, y - 9 + f, 2, 6, CARDIGAN);
-    R(g, x + 6, y - 13 + f, 4, 4, P.skin);
-    R(g, x + 6, y - 13 + f, 4, 1, P.skin0);
+    R(g, x + 4, y - 1, 7, 2, CARDIGAN);
+    R(g, x + 10, y - 9 + f, 2, 9 - f, CARDIGAN);
+    R(g, x + 9, y - 13 + f, 4, 4, P.skin);
+    R(g, x + 9, y - 13 + f, 4, 1, P.skin0);
   } else {
-    R(g, x + 4, y - 4, 2, 3, CARDIGAN);
-    R(g, x + 5, y - 7 + f, 3, 3, P.skin);
+    R(g, x + 4, y - 1, 5, 2, CARDIGAN);
+    R(g, x + 9, y - 3 + f, 3, 3, P.skin);
   }
 }
 

@@ -283,24 +283,37 @@ export function piloto(g: G, m: Piloto, x: number, y: number, t: number, dir: 1 
   g.restore();
 }
 
-/** Margarita small (parachute, barbecue): head with the red beanie, a flowery dress. */
+/** Margarita small (parachute, barbecue): short and round, black hair, the red beanie, a big witch's nose, a flowery dress. */
 function margaritaChica(g: G, x: number, y: number, t: number) {
   const X = Math.round(x), Y = Math.round(y);
-  R(g, X - 4, Y - 8, 9, 8, '#c04a8a');
-  R(g, X - 3, Y - 7, 7, 6, '#ff8ac0');
-  R(g, X - 1, Y - 5, 1, 1, P.white);
-  R(g, X + 2, Y - 3, 1, 1, P.white);
-  D.disc(g, X, Y - 12, 4, P.skin);
-  R(g, X - 5, Y - 13, 2, 4, '#d8d0e8');
-  R(g, X + 4, Y - 13, 2, 4, '#d8d0e8');
-  R(g, X - 4, Y - 17, 9, 3, '#e0304a');
-  R(g, X - 5, Y - 15, 11, 2, '#a01a3a');
-  R(g, X, Y - 19, 2, 2, P.white);
-  R(g, X - 2, Y - 13, 2, 1, '#24206a');
-  R(g, X + 1, Y - 13, 2, 1, '#24206a');
-  R(g, X - 1, Y - 10 + (Math.sin(t * 9) > 0 ? 0 : 1), 3, 1, P.r0);
-  R(g, X - 5, Y - 6 + Math.round(Math.sin(t * 7)), 2, 2, P.skin);
-  R(g, X + 4, Y - 6 - Math.round(Math.sin(t * 7)), 2, 2, P.skin);
+  const [H0, H1, H2] = A.MARGA_PELO;
+  R(g, X - 4, Y - 6, 9, 6, '#c04a8a');
+  R(g, X - 3, Y - 5, 7, 4, '#ff8ac0');
+  R(g, X - 1, Y - 4, 1, 1, P.white);
+  R(g, X + 2, Y - 2, 1, 1, P.white);
+  D.disc(g, X, Y - 10, 4, P.skin);
+  R(g, X - 5, Y - 12, 2, 5, H1);
+  R(g, X + 4, Y - 12, 2, 5, H1);
+  R(g, X - 5, Y - 12, 1, 2, H2);
+  R(g, X + 5, Y - 8, 1, 1, H0);
+  R(g, X - 4, Y - 15, 9, 3, '#e0304a');
+  R(g, X - 5, Y - 13, 11, 2, '#a01a3a');
+  R(g, X, Y - 17, 2, 2, P.white);
+  R(g, X - 2, Y - 11, 2, 1, '#24206a');
+  R(g, X + 1, Y - 11, 2, 1, '#24206a');
+  R(g, X - 2, Y - 7 + (Math.sin(t * 9) > 0 ? 0 : 1), 5, 1, P.r0);
+  // The witch's nose, turned a bit to one side so it pokes out past her cheek:
+  // a fat round tip hooking down, with a wart.
+  R(g, X - 3, Y - 11, 2, 1, P.skin0);
+  R(g, X - 4, Y - 10, 3, 1, P.skin);
+  R(g, X - 7, Y - 11, 3, 3, P.skin);
+  R(g, X - 8, Y - 10, 1, 2, P.skin);
+  R(g, X - 6, Y - 11, 1, 1, '#fff0dc');
+  R(g, X - 8, Y - 8, 4, 1, P.skin0);
+  R(g, X - 8, Y - 7, 2, 1, P.skin0);
+  R(g, X - 4, Y - 9, 1, 1, A.MARGA_VERRUGA);
+  R(g, X - 5, Y - 5 + Math.round(Math.sin(t * 7)), 2, 2, P.skin);
+  R(g, X + 4, Y - 5 - Math.round(Math.sin(t * 7)), 2, 2, P.skin);
 }
 /** The mice's mothership / the Emperor's UFO. */
 function ovni(g: G, x: number, y: number, s: number, t: number, rayo: boolean) {
@@ -917,7 +930,11 @@ export function retratoExtra(quien: Extract<Hablante, 'margarita' | 'raton' | 'e
     D.oval(g, 16, 30, 11, 4, '#ff8ac0');
     R(g, 10, 28, 2, 2, P.white);
     R(g, 21, 29, 2, 2, P.white);
-    for (const [x, y] of [[6, 16], [26, 16], [7, 21], [25, 21], [8, 12], [24, 12]] as const) D.disc(g, x, y, 3, '#d8d0e8');
+    // Black hair puffing out under the beanie.
+    for (const [x, y] of [[6, 16], [26, 16], [7, 21], [25, 21], [8, 12], [24, 12]] as const) D.disc(g, x, y, 3, A.MARGA_PELO[1]);
+    for (const [x, y] of [[5, 15], [25, 15], [6, 20], [24, 20]] as const) R(g, x, y, 2, 1, A.MARGA_PELO[2]);
+    R(g, 6, 23, 2, 1, A.MARGA_PELO[0]);
+    R(g, 24, 23, 2, 1, A.MARGA_PELO[0]);
     D.disc(g, 16, 18, 9, '#c07a58');
     D.disc(g, 16, 18, 8, P.skin);
     // The red beanie and its pompom.
@@ -942,12 +959,22 @@ export function retratoExtra(quien: Extract<Hablante, 'margarita' | 'raton' | 'e
     R(g, 18, 15, 1, 1, '#8a8aa8');
     R(g, 8, 21, 2, 1, P.blush);
     R(g, 22, 21, 2, 1, P.blush);
+    // Grumpy mouth, pushed to one side by the nose.
     if (boca) {
-      R(g, 13, 22, 6, 3, P.r0);
-      R(g, 14, 24, 4, 1, P.r2);
-    } else R(g, 13, 23, 6, 1, P.r0);
-    R(g, 12, 24, 1, 1, P.r0);
-    R(g, 19, 24, 1, 1, P.r0);
+      R(g, 16, 23, 6, 3, P.r0);
+      R(g, 17, 25, 4, 1, P.r2);
+    } else R(g, 16, 24, 6, 1, P.r0);
+    R(g, 22, 25, 1, 1, P.r0);
+    // The witch's nose: a big, chubby hooked blob with a wart.
+    R(g, 14, 18, 1, 2, P.skin0);
+    R(g, 15, 18, 2, 2, P.skin);
+    D.disc(g, 15, 21, 3, P.skin0);
+    D.disc(g, 15, 21, 2, P.skin);
+    R(g, 13, 23, 4, 1, '#e8a888');
+    R(g, 13, 24, 3, 1, P.skin0);
+    R(g, 13, 25, 1, 1, P.skin0);
+    R(g, 14, 20, 1, 1, '#fff0dc');
+    R(g, 17, 20, 1, 1, A.MARGA_VERRUGA);
   } else {
     const emp = quien === 'emperador';
     const piel = emp ? '#c8b4f0' : '#e0d8ec', sombra = emp ? '#8a70c8' : '#b8aed0';

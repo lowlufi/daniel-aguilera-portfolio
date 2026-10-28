@@ -2608,11 +2608,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       for (let i = -w; i < w; i += 4) A.R(g, X + sw + i, cy - h + 1, 2, h, jefa ? '#e03a3a' : '#ff9ad0');
     }
     if (jefa) {
-      A.R(g, X - 2, Y - 4, 4, 5, '#7a5ad0');
-      A.R(g, X - 2, Y - 7, 4, 3, '#f0c8a8');
-      A.R(g, X - 2, Y - 9, 4, 2, '#e03a3a');
-      A.R(g, X - 3, Y - 7, 1, 2, '#d8d0ca');
-      A.R(g, X + 2, Y - 7, 1, 2, '#d8d0ca');
+      // Short and round: black hair, red beanie, a fat hooked nose poking out.
+      A.R(g, X - 2, Y - 3, 5, 4, '#7a5ad0');
+      A.R(g, X - 2, Y - 6, 4, 3, '#f0c8a8');
+      A.R(g, X - 2, Y - 8, 4, 2, '#e03a3a');
+      A.R(g, X - 3, Y - 7, 1, 3, A.MARGA_PELO[1]);
+      A.R(g, X + 1, Y - 5, 1, 1, '#1a1428');
+      A.R(g, X + 2, Y - 5, 1, 1, '#f0c8a8');
+      A.R(g, X + 2, Y - 4, 2, 1, '#f0c8a8');
+      A.R(g, X + 3, Y - 3, 1, 1, '#c07a58');
     } else {
       // A grey mouse in a red flight helmet, legs kicking.
       A.R(g, X - 1, Y - 3, 3, 4, '#9a90b8');
