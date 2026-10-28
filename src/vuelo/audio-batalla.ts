@@ -381,6 +381,7 @@ type Nombre =
   | 'gaviota' | 'ola' | 'chapuzon' | 'bocina' | 'caza'
   | 'nuclear' | 'trueno-cerca' | 'trueno-lejos' | 'chispa' | 'lluvia' | 'escarcha' | 'hielo-alerta' | 'congelado' | 'deshielo'
   | 'mision' | 'uf' | 'vida' | 'nuke-recoge' | 'bumeran' | 'pista' | 'oleada'
+  | 'rifle' | 'browning' | 'gau8' | 'lz-aam' | 'lz-amraam' | 'lz-cohete' | 'lz-tinytim' | 'lz-maverick'
   | 'vulcan' | 'canon30' | 'laser' | 'orbe' | 'crucero' | 'fosforo' | 'gas' | 'plasma-bomba' | 'chaff' | 'holograma' | 'trampa'
   | 'hangar-sel' | 'hangar-bloq' | 'desbloqueo'
   | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae'
@@ -519,6 +520,14 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   oleada: hornoOleada,
   vulcan: hornoVulcan,
   canon30: hornoCanon30,
+  rifle: hornoRifle,
+  browning: hornoBrowning,
+  gau8: hornoGau8,
+  'lz-aam': hornoLanzaAam,
+  'lz-amraam': hornoLanzaAmraam,
+  'lz-cohete': hornoLanzaCohete,
+  'lz-tinytim': hornoLanzaTinyTim,
+  'lz-maverick': hornoLanzaMaverick,
   laser: hornoLaser,
   orbe: hornoOrbe,
   crucero: hornoCrucero,
@@ -1670,6 +1679,174 @@ function hornoCrucero(sr: number) {
   }
   chasquidos(sr, a, t0, 1.4, (t) => 50 * Math.exp(-(t - t0) / 0.5), { hp: 2200, amp: 0.3, largo: [0.001, 0.004] });
   return normaliza(a, 0.92);
+}
+
+/**
+ * Ametralladora de calibre de fusil (.303, MG 17): chasquido seco y agudo, casi
+ * sin cuerpo; a 40–60 ms entre tiros suena a traqueteo de máquina de coser.
+ */
+function hornoRifle(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.055));
+  const hp = new Bq(sr, 'hp', 2200, 0.7);
+  const bp = new Bq(sr, 'bp', 3400, 1.6);
+  const lp = new Bq(sr, 'lp', 9000, 0.7);
+  let f = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const click = hp.run(ruido()) * Math.exp(-t / 0.0009);
+    const boca = bp.run(ruido()) * Math.exp(-t / 0.006) * 2.4;
+    f += (170 + 260 * Math.exp(-t / 0.004)) / sr;
+    const cuerpo = Math.sin(TAU * f) * Math.exp(-t / 0.008) * Math.min(1, t / 0.0005);
+    a[i] = lp.run(Math.tanh((click * 1.4 + boca + cuerpo * 0.6) * 1.5));
+  }
+  // El cerrojo que vuelve: un tic metálico.
+  ping(sr, a, 0.022, 2900, 0.004, 0.08);
+  return normaliza(a, 0.85);
+}
+
+/**
+ * Browning .50: golpe más hondo y redondo que la .30, boca a ~1.6 kHz y el
+ * «clac» del cierre; cada tiro dura más y se nota el peso.
+ */
+function hornoBrowning(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.13));
+  const hp = new Bq(sr, 'hp', 1200, 0.7);
+  const bp = new Bq(sr, 'bp', 1600, 1.2);
+  const lp = new Bq(sr, 'lp', 6000, 0.7);
+  let f = 0;
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const click = hp.run(ruido()) * Math.exp(-t / 0.0016);
+    const boca = bp.run(ruido()) * Math.exp(-t / 0.016) * 2.4;
+    f += (78 + 170 * Math.exp(-t / 0.009)) / sr;
+    const cuerpo = Math.sin(TAU * f) * Math.exp(-t / 0.03) * Math.min(1, t / 0.0008);
+    a[i] = lp.run(Math.tanh((click + boca + cuerpo * 1.4) * 1.7));
+  }
+  ping(sr, a, 0.03, 1900, 0.008, 0.07);
+  return normaliza(a, 0.9);
+}
+
+/**
+ * GAU-8 Avenger: tres disparos de 30 mm cada 15 ms (≈65 por segundo, como el
+ * real), cada uno un golpe grave saturado; llamado cada ~45 ms empalma el
+ * «BRRRT» de motosierra. Debajo, un rugido grave que no se corta entre llamadas.
+ */
+function hornoGau8(sr: number) {
+  const a = new Float32Array(Math.floor(sr * 0.16));
+  const pulsos = new Float32Array(a.length);
+  for (let k = 0; k < 3; k++) {
+    const i0 = Math.floor((k * 0.0153 + rand(0, 0.0006)) * sr);
+    const amp = rand(0.85, 1);
+    let f = 0;
+    for (let j = 0; i0 + j < a.length && j < 0.06 * sr; j++) {
+      const t = j / sr;
+      f += (58 + 120 * Math.exp(-t / 0.006)) / sr;
+      pulsos[i0 + j] += (ruido() * Math.exp(-t / 0.002) * 0.9 + Math.sin(TAU * f) * Math.exp(-t / 0.02) * 1.1) * Math.min(1, t / 0.0006) * amp;
+    }
+  }
+  const bp = new Bq(sr, 'bp', 900, 1);
+  const lp = new Bq(sr, 'lp', 3800, 0.7);
+  const rum = new Bq(sr, 'lp', 260, 0.7);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const x = pulsos[i];
+    const cola = rum.run(ruido()) * 0.9 * Math.min(1, t / 0.01) * Math.exp(-t / 0.08);
+    a[i] = lp.run(Math.tanh((bp.run(x) * 2 + x * 0.9 + cola) * 1.9));
+  }
+  return normaliza(a, 0.92);
+}
+
+/**
+ * Misil aire-aire de corto alcance (Sidewinder, R-73/R-74) saliendo del riel:
+ * clic del riel y un siseo agudo que sube como un latigazo y se aleja.
+ */
+function hornoLanzaAam(sr: number) {
+  const d = 0.55;
+  const a = new Float32Array(Math.floor(sr * d));
+  ping(sr, a, 0, 2400, 0.006, 0.25);
+  const bp = new Bq(sr, 'bp', 1500, 2.2);
+  const hp = new Bq(sr, 'hp', 3000, 0.7);
+  for (let i = Math.floor(0.012 * sr); i < a.length; i++) {
+    const t = i / sr - 0.012, u = t / d;
+    if ((i & 31) === 0) bp.f(1500 + 3800 * Math.min(1, t / 0.12) - 1400 * u);
+    const env = Math.min(1, t / 0.015) * Math.exp(-t / 0.16);
+    a[i] += (bp.run(ruido()) * 1.8 + hp.run(ruido()) * 0.5 * Math.exp(-t / 0.05)) * env;
+  }
+  chasquidos(sr, a, 0.02, 0.3, () => 70, { hp: 2500, amp: 0.25, largo: [0.0008, 0.003] });
+  return normaliza(a, 0.85);
+}
+
+/**
+ * AMRAAM / Phoenix desde la bodega o el pilón: «clonc» del eyector y, 0.1 s
+ * después, el motor que enciende con un rugido hondo que se aleja.
+ */
+function hornoLanzaAmraam(sr: number) {
+  const d = 1;
+  const a = new Float32Array(Math.floor(sr * d));
+  golpe(sr, a, 0, 140, 50, 0.05, 0.8, 900);
+  ping(sr, a, 0.004, 880, 0.04, 0.08);
+  const t0 = 0.1;
+  const rug = new Bq(sr, 'lp', 500, 0.8);
+  const sis = new Bq(sr, 'bp', 2600, 1.4);
+  for (let i = Math.floor(t0 * sr); i < a.length; i++) {
+    const u = i / sr - t0;
+    const env = Math.min(1, u / 0.03) * Math.exp(-u / 0.32);
+    a[i] += Math.tanh((rug.run(ruido()) * 2 + sis.run(ruido()) * 0.8 * Math.exp(-u / 0.15)) * env * 1.3) * 0.85;
+  }
+  return normaliza(a, 0.9);
+}
+
+/**
+ * Cohete de la Segunda Guerra (RP-3, HVAR): estampido del encendido y un
+ * chisporroteo áspero de pólvora que se aleja tosiendo.
+ */
+function hornoLanzaCohete(sr: number) {
+  const d = 0.75;
+  const a = new Float32Array(Math.floor(sr * d));
+  golpe(sr, a, 0, 220, 70, 0.025, 0.9, 3000);
+  const bp = new Bq(sr, 'bp', 900, 1.1);
+  const lp = new Bq(sr, 'lp', 2400, 0.7);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    // Combustión despareja: el soplido tartamudea.
+    const tos = 0.6 + 0.4 * Math.sin(TAU * 17 * t + 2 * Math.sin(TAU * 5 * t));
+    const env = Math.min(1, t / 0.02) * Math.exp(-t / 0.22);
+    a[i] += lp.run(bp.run(ruido()) * 2.2 * tos) * env;
+  }
+  chasquidos(sr, a, 0.01, 0.6, (t) => 140 * Math.exp(-t / 0.25), { hp: 1500, amp: 0.9, largo: [0.001, 0.005] });
+  return normaliza(a, 0.88);
+}
+
+/** Tiny Tim: suelta el cohetazo («clonc»), un instante de silencio y un BUM de encendido con rugido largo. */
+function hornoLanzaTinyTim(sr: number) {
+  const d = 1.3;
+  const a = new Float32Array(Math.floor(sr * d));
+  golpe(sr, a, 0, 120, 45, 0.05, 0.6, 700);
+  const t0 = 0.16;
+  golpe(sr, a, t0, 160, 40, 0.09, 1, 1800);
+  const rug = new Bq(sr, 'lp', 380, 0.7);
+  for (let i = Math.floor(t0 * sr); i < a.length; i++) {
+    const u = i / sr - t0;
+    const env = Math.min(1, u / 0.03) * Math.exp(-u / 0.4);
+    a[i] += Math.tanh(rug.run(ruido()) * 2.6 * env) * 0.8;
+  }
+  chasquidos(sr, a, t0, 1, (t) => 120 * Math.exp(-(t - t0) / 0.35), { hp: 1200, amp: 0.8, largo: [0.0015, 0.007] });
+  return normaliza(a, 0.92);
+}
+
+/** Maverick: el riel raspa (fricción metálica) mientras el motor ruge y lo empuja. */
+function hornoLanzaMaverick(sr: number) {
+  const d = 1;
+  const a = new Float32Array(Math.floor(sr * d));
+  friccion(sr, a, 0, 0.18, 260, 180, [1100, 1700, 2600], 0.5);
+  const rug = new Bq(sr, 'lp', 600, 0.8);
+  const sis = new Bq(sr, 'bp', 1800, 1.2);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr;
+    const env = Math.min(1, t / 0.04) * Math.exp(-t / 0.35);
+    a[i] += Math.tanh((rug.run(ruido()) * 1.8 + sis.run(ruido()) * 0.6) * env * 1.2) * 0.8;
+  }
+  return normaliza(a, 0.9);
 }
 
 /** Racimo: «pop» de la carcasa y n petarditos repartidos en ~0.6 s y en el estéreo. */
@@ -3235,12 +3412,43 @@ const tirosCanon: Corta[] = [];
 const tirosLaser: Corta[] = [];
 
 /** Cañón rotatorio del F-22 (llamar en cada tiro, ~cada 45 ms; se limita a uno cada 40 ms y 3 voces). */
-export function vulcan(pan: number): void {
-  evento('vulcan', 0.04, (m, t) => corta(m, tirosVulcan, 3, 'vulcan', 0.22 * rand(0.9, 1) * enAire(), rand(0.96, 1.04), t, pan, m.explo));
+export function vulcan(pan: number, tono = 1): void {
+  evento('vulcan', 0.04, (m, t) => corta(m, tirosVulcan, 3, 'vulcan', 0.22 * rand(0.9, 1) * enAire(), rand(0.96, 1.04) * tono, t, pan, m.explo));
 }
 /** Cañón de 30 mm del Su-57 (llamar en cada tiro, ~cada 110 ms; se limita a uno cada 90 ms y 3 voces). */
-export function canon30(pan: number): void {
-  evento('canon30', 0.09, (m, t) => corta(m, tirosCanon, 3, 'canon30', 0.055 * rand(0.88, 1) * enAire(), rand(0.94, 1.05), t, pan, m.explo));
+export function canon30(pan: number, tono = 1): void {
+  evento('canon30', 0.09, (m, t) => corta(m, tirosCanon, 3, 'canon30', 0.055 * rand(0.88, 1) * enAire(), rand(0.94, 1.05) * tono, t, pan, m.explo));
+}
+const tirosRifle: Corta[] = [];
+const tirosBrowning: Corta[] = [];
+const tirosGau8: Corta[] = [];
+let nRifle = 0;
+/** Ametralladoras de calibre de fusil (.303, MG 17), ~cada 40–60 ms: traqueteo liviano con acento cada 4 tiros. */
+export function rifle(pan: number, tono = 1): void {
+  evento('rifle', 0.035, (m, t) => {
+    const acento = ++nRifle % 4 === 0 ? 1 : 0.78;
+    corta(m, tirosRifle, 3, 'rifle', 0.2 * acento * rand(0.88, 1) * enAire(), rand(0.94, 1.06) * tono, t, pan, m.explo);
+  });
+}
+/** Browning .50 (alas o torreta), ~cada 45–75 ms: golpe más grueso que la .30. */
+export function browning(pan: number, tono = 1): void {
+  evento('browning', 0.04, (m, t) => corta(m, tirosBrowning, 3, 'browning', 0.2 * rand(0.86, 1) * enAire(), rand(0.95, 1.05) * tono, t, pan, m.explo));
+}
+/** GAU-8 del A-10: cada llamada son tres tiros (se limita a una cada 45 ms y 3 voces): el «BRRRT». */
+export function gau8(pan: number, tono = 1): void {
+  evento('gau8', 0.045, (m, t) => corta(m, tirosGau8, 3, 'gau8', 0.17 * rand(0.92, 1) * enAire(), rand(0.97, 1.03) * tono, t, pan, m.explo));
+}
+const LANZA: Record<'aam' | 'amraam' | 'cohete' | 'tinytim' | 'maverick', [Nombre, number]> = {
+  aam: ['lz-aam', 0.26],
+  amraam: ['lz-amraam', 0.3],
+  cohete: ['lz-cohete', 0.28],
+  tinytim: ['lz-tinytim', 0.32],
+  maverick: ['lz-maverick', 0.28],
+};
+/** Lanzamiento de un misil o cohete del jugador según su familia (como mucho uno cada 0.12 s). */
+export function lanzamiento(tipo: keyof typeof LANZA, pan: number, tono = 1): void {
+  const [n, vol] = LANZA[tipo];
+  evento('lanza', 0.12, (m, t) => unaVez(m, n, vol * enAire(), rand(0.96, 1.04) * tono, t, lado(pan), LIMITE + 4, m.explo));
 }
 /** Láser del platillo (llamar en cada tiro, ~cada 70 ms; se limita a uno cada 60 ms y 3 voces). Suave. */
 export function laser(pan: number): void {

@@ -1,7 +1,8 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
-import { R, drawBomb, drawFlare } from './dibujo';
+import { R, drawBomb, drawFlare, drawMissile } from './dibujo';
 import type { BombaTipo } from './fisica-tipos';
+import type { LookMisil, Trazadora } from './hangar';
 
 /*
  * Weapon visuals for the plane game: bomb loads, cluster bomblets, phosphorus
@@ -337,4 +338,171 @@ export function drawBengalaTipo(g: Ctx, tipo: 'magnesio' | 'trampa' | 'holograma
   else if (tipo === 'trampa') trampa(g, x, y, t);
   else if (tipo === 'holograma') holograma(g, x, y, t);
   else drawChaff(g, x, y, t, 7);
+}
+
+/* ── The player's missiles, by family ────────────────────────────────────── */
+
+/** Outline colour per look, worked out once (looks are static objects). */
+const tintas = new WeakMap<LookMisil, string>();
+function tinta(l: LookMisil) {
+  let c = tintas.get(l);
+  if (!c) {
+    c = D.tone(l.aletas, -0.55);
+    tintas.set(l, c);
+  }
+  return c;
+}
+
+/**
+ * A player missile pointing along `angle` (screen radians), drawn by family:
+ * slim AAM with mid wings, AAM with canards behind the nose, the fat
+ * long-range/air-to-ground body, WWII rockets (RP-3 with its fat warhead, HVAR,
+ * the huge Tiny Tim) and the cruise missile with its pop-out wings.
+ */
+export function drawMisilKit(g: Ctx, x: number, y: number, angle: number, burning: boolean, t: number, l: LookMisil): void {
+  if (l.forma === 'casero') {
+    drawMissile(g, x, y, angle, false, burning, t, l);
+    return;
+  }
+  const f = l.forma;
+  g.save();
+  g.translate(Math.round(x), Math.round(y));
+  g.rotate(Math.round(angle / 0.1) * 0.1);
+  const len = Math.max(6, Math.round(l.largo * 0.85));
+  const th = f === 'tinytim' ? 6 : f === 'pesado' ? 5 : f === 'crucero' ? 4 : 3;
+  const h = th >> 1;
+  const x0 = -(len >> 1);
+  const ink = tinta(l);
+  // Fins behind the body.
+  if (f === 'rp3' || f === 'tinytim' || f === 'hvar') {
+    // Square cruciform fins sticking out top and bottom.
+    const fl = f === 'tinytim' ? 4 : f === 'rp3' ? 4 : 3;
+    const fh = f === 'hvar' ? 2 : 3;
+    R(g, x0 - 1, -h - fh - 1, fl + 2, th + fh * 2 + 2, ink);
+    R(g, x0, -h - fh, fl, th + fh * 2, l.aletas);
+  } else {
+    // Swept tail fins: taller for the big ones.
+    const fh = f === 'pesado' ? 3 : 2;
+    R(g, x0 - 1, -h - fh - 1, 3, th + fh * 2 + 2, ink);
+    R(g, x0, -h - fh, 2, th + fh * 2, l.aletas);
+    R(g, x0 + 2, -h - 1, 1, th + 2, ink);
+  }
+  // Body: outline, fill, a light along the top.
+  const bodyLen = f === 'rp3' ? len - 3 : len;
+  R(g, x0, -h - 1, bodyLen, th + 2, ink);
+  R(g, x0 + 1, -h, bodyLen - 2, th, l.cuerpo);
+  if (th >= 4) R(g, x0 + 2, -h, bodyLen - 5, 1, P.white);
+  else R(g, x0 + 2, -h, Math.max(1, bodyLen - 6), 1, P.white);
+  const xn = x0 + bodyLen;
+  if (f === 'rp3') {
+    // The 60 lb warhead: a fat round head on a thin tube.
+    D.disc(g, xn + 1, 0, 3, ink);
+    D.disc(g, xn + 1, 0, 2, l.punta);
+    R(g, xn, -2, 2, 1, P.white);
+  } else if (f === 'tinytim') {
+    // Blunt rounded nose and a bright band.
+    R(g, xn - 1, -h, 2, th, l.punta);
+    R(g, xn + 1, -h + 1, 1, th - 2, l.punta);
+    R(g, xn + 2, -h + 2, 1, th - 4, ink);
+    R(g, x0 + 5, -h, 1, th, P.gold);
+  } else {
+    // Pointed nose cone.
+    R(g, xn - 2, -h, 2, th, l.punta);
+    R(g, xn, -h + 1, 1, Math.max(1, th - 2), l.punta);
+    if (th >= 5) R(g, xn + 1, -1, 1, 2, l.punta);
+    R(g, xn + (th >= 5 ? 2 : 1), -h + 1, 1, Math.max(1, th - 2), ink);
+  }
+  if (f === 'aam' || f === 'pesado') {
+    // Mid-body wings (AMRAAM's little ones, the Phoenix's and Maverick's long strakes).
+    const wl = f === 'pesado' ? 5 : 3;
+    const wx = x0 + (len >> 1) - (f === 'pesado' ? 3 : 1);
+    R(g, wx - 1, -h - 2, wl + 1, 1, ink);
+    R(g, wx - 1, h + 1, wl + 1, 1, ink);
+    R(g, wx, -h - 1, wl - 1, 1, l.aletas);
+    R(g, wx, h, wl - 1, 1, l.aletas);
+    // Warhead band.
+    R(g, xn - 4, -h, 1, th, f === 'pesado' ? P.gold : '#c8a040');
+  } else if (f === 'canard') {
+    // Little canards right behind the seeker head.
+    R(g, xn - 4, -h - 2, 2, th + 4, ink);
+    R(g, xn - 4, -h - 1, 1, th + 2, l.aletas);
+  } else if (f === 'crucero') {
+    // Pop-out wings swept back under the body, and the intake.
+    const wx = x0 + (len >> 1);
+    for (let i = 0; i < 4; i++) R(g, wx - i, h + i, 3, 1, i === 3 ? ink : l.aletas);
+    R(g, wx - 1, -h - 1, 3, 1, ink);
+    R(g, x0 + 3, h, 3, 1, ink);
+  }
+  if (burning) {
+    const fl = 2 + (Math.floor(t * 30) % 2) + (th > 4 ? 2 : 0);
+    R(g, x0 - fl, -1, fl, 2, f === 'crucero' ? '#8ab4ff' : '#ff9a3c');
+    R(g, x0 - 2, -1, 1, 1, f === 'crucero' ? '#e8f4ff' : P.gold1);
+  }
+  g.restore();
+}
+
+/* ── Gun rounds ──────────────────────────────────────────────────────────── */
+
+/**
+ * One gun round at (hx, hy) going along (ux, uy) (screen unit vector), in its
+ * gun's look. `tracer` false: a plain ball round, a short dim glint.
+ */
+export function drawTrazadora(g: Ctx, hx: number, hy: number, ux: number, uy: number, k: Trazadora, tracer: boolean): void {
+  hx = Math.round(hx);
+  hy = Math.round(hy);
+  if (!tracer) {
+    R(g, hx - ux * 2, hy - uy * 2, 1, 1, k.c3);
+    R(g, hx - ux, hy - uy, 1, 1, k.c2);
+    R(g, hx, hy, 1, 1, k.c1);
+    return;
+  }
+  const a0 = g.globalAlpha;
+  const gw = k.cabeza + 3;
+  g.globalAlpha = a0 * (k.cabeza === 3 ? 0.5 : 0.35);
+  R(g, hx - (gw >> 1), hy - (gw >> 1), gw, gw, k.c2);
+  g.globalAlpha = a0;
+  const n = k.cola;
+  for (let i = 1; i <= n; i++) {
+    const u = i / n;
+    const c = u <= 0.3 ? k.c1 : u <= 0.65 ? k.c2 : k.c3;
+    const w = u <= 0.45 ? k.grosor : 1;
+    R(g, hx - ux * i * k.paso, hy - uy * i * k.paso, w, w, c);
+  }
+  if (k.cabeza === 3) {
+    // A fat glowing shell: dark-red rim, orange body, white-hot core.
+    R(g, hx - 2, hy - 2, 4, 4, k.c3);
+    R(g, hx - 1, hy - 1, 3, 3, k.c2);
+    R(g, hx - 1, hy - 1, 2, 2, k.c1);
+    R(g, hx, hy - 1, 1, 1, P.white);
+  } else if (k.cabeza === 2) {
+    R(g, hx - 1, hy - 1, 3, 3, '#3a2a6a');
+    R(g, hx, hy, 2, 2, P.white);
+  } else {
+    R(g, hx, hy, 1, 1, P.white);
+    R(g, hx - ux, hy - uy, 1, 1, k.c1);
+  }
+}
+
+/**
+ * Muzzle flash at the gun along (ux, uy) (screen): a star of radius `r`
+ * (2 for a rifle-calibre gun … 7 for the GAU-8), fading over its life `k` (1 → 0).
+ */
+export function drawFogonazo(g: Ctx, x: number, y: number, ux: number, uy: number, r: number, c: string, k: number, t: number): void {
+  const X = Math.round(x), Y = Math.round(y);
+  const a0 = g.globalAlpha;
+  const rr = Math.max(1, Math.round(r * (0.6 + 0.4 * k)));
+  g.globalAlpha = a0 * 0.45 * k;
+  disco(g, X, Y, rr + 1, c);
+  g.globalAlpha = a0 * Math.min(1, 0.4 + k);
+  disco(g, X, Y, Math.max(1, rr - 1), c);
+  // Forward spike and a little side cross, flickering.
+  const f = Math.floor(t * 40) % 2;
+  const n = Math.round(rr * 1.6) + f;
+  for (let i = 1; i <= n; i++) R(g, X + ux * i, Y + uy * i, 1, 1, i < n * 0.5 ? P.white : c);
+  for (let i = 1; i <= (rr >> 1) + f; i++) {
+    R(g, X - uy * i, Y + ux * i, 1, 1, c);
+    R(g, X + uy * i, Y - ux * i, 1, 1, c);
+  }
+  R(g, X - 1, Y - 1, 2, 2, P.white);
+  g.globalAlpha = a0;
 }

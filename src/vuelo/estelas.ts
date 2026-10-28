@@ -42,6 +42,11 @@ export type EstiloEstela = {
   chispas: number;
   /** Amplitud de la ondulación del humo, en píxeles. */
   ondula?: number;
+  /**
+   * Largo de la cinta de fuego respecto del normal (1): los cohetes de la
+   * Segunda Guerra la llevan larga y desflecada, el crucero una llamita corta.
+   */
+  fuego?: number;
 };
 
 /** Misil del jugador: fuego blanco-dorado, humo dorado tibio. */
@@ -72,7 +77,7 @@ const INTERVALO = 0.045; // s entre muestras de humo
 const MAX_PUNTOS = 60;
 const VIDA_EXTRA = 1.3; // la estela dura un poco más que su `largo` nominal
 const R_MIN = 1.5; // radio base mínimo del humo: finas, pero que no se pierdan
-const MAX_CHISPAS = 12;
+const MAX_CHISPAS = 16;
 /** Cuánto se exagera la ondulación del humo respecto de la amplitud de cada estilo. */
 const ONDULA_MUL = 2.6;
 const VIDA_FUEGO = 0.18; // s que un punto sigue siendo parte de la cinta de fuego
@@ -491,7 +496,7 @@ export function dibujarEstela(
   // 2) Cinta de fuego: sigue la estela reciente y, si es corta, se prolonga
   // hacia atrás por el rumbo para tener siempre el mismo largo.
   if (motor) {
-    const largoMax = 16 + rb * 2.4 + parpadeo * 3;
+    const largoMax = (16 + rb * 2.4 + parpadeo * 3) * (e.estilo.fuego ?? 1);
     fX[0] = e.mx - cs * COLA;
     fY[0] = e.my - sn * COLA;
     let fn = 1, total = 0;

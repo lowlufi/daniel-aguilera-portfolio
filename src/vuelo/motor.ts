@@ -473,26 +473,32 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   /** The player's missile: got its target over the datalink; seeker scan timer. */
   enlace?: boolean;
   busca?: number;
+  /** The player's unguided rocket: phase of its wobble. */
+  bam?: number;
 };
 /** A falling bomb of the player's, with its load; bomblets are the cluster's children. */
 type BombaJ = Bomba & { tipo: BombaTipo; sub?: boolean; rebotes?: number };
 /** Burning phosphorus on the ground or a drifting gas cloud: hurts what's inside for a while. */
 type Zona = { tipo: 'fuego' | 'gas' | 'hielo' | 'emp'; x: number; y: number; r: number; t: number; vida: number; tick: number };
-type Bala = Cuerpo & { life: number; d: number; g: number; c: HG.KitMetralla['color'] };
+/** A gun round: its gun's look `k`, and whether it's a tracer or a plain ball round. */
+type Bala = Cuerpo & { life: number; d: number; g: number; c: HG.KitMetralla['color']; k: HG.Trazadora; tr: boolean };
 let shotIds = 0;
 
 // Trail style per missile type, shortened a little so phones keep 60 fps.
-const trailStyles = new Map<string, E.EstiloEstela>();
+// The player's missiles each bring their kit's own trail.
+const trailStyles = new Map<string | E.EstiloEstela, E.EstiloEstela>();
 const trailStyle = (sh: Shot) => {
   const bumeran = sh.enemy && sh.vueltas !== undefined;
-  const key = bumeran ? 'bumeran' : sh.enemy ? sh.m.tipo : 'jugador';
+  const propia = !sh.enemy ? sh.k?.estela ?? E.ESTELA_JUGADOR : null;
+  const key = bumeran ? 'bumeran' : sh.enemy ? sh.m.tipo : propia!;
   let st = trailStyles.get(key);
   if (!st) {
     // Margarita's boomerangs leave a white-and-yellow trail of their own.
     const base = bumeran
       ? { ...MS.MISILES.buscador.estela, nucleo: '#ffffff', brillo: '#ffe048', humo: '#fff6c8' }
-      : sh.enemy ? MS.MISILES[sh.m.tipo].estela : E.ESTELA_JUGADOR;
-    st = { ...base, largo: Math.min(base.largo + 8, sh.enemy ? 32 : 38) };
+      : sh.enemy ? MS.MISILES[sh.m.tipo].estela : propia!;
+    // The long-range ones (Phoenix, cruise) keep their longer trail.
+    st = { ...base, largo: Math.min(base.largo + 8, sh.enemy ? 32 : Math.max(38, base.largo)) };
     trailStyles.set(key, st);
   }
   return st;
@@ -801,6 +807,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     hot: false,
     gunT: 0,
     gunWasDown: false,
+    /** Rounds fired (which barrel, which round is a tracer) and the muzzle flash still showing, s. */
+    gunN: 0,
+    bocaT: 0,
     mapa: 'valle' as Mapa,
     /** Along the coast at sea: 0 off San Antonio … 1 at Valparaíso; seconds sailed. */
     costa: 0,
@@ -2497,6 +2506,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    */
   function stepLock(dt: number) {
     const p = s.plane;
+    // WWII rockets have no seeker: nothing to lock, aim with the nose.
+    if (s.spec.kit.misil.cohete) {
+      s.lockT = 0;
+      s.lockCand = null;
+      s.lockKey = null;
+      return;
+    }
     let best: { key: object; f: Fijable } | null = null;
     // A wide cone (~29°) out to a long range; the target already being locked keeps
     // the lock in an even wider one (~46°), so a turning fight doesn't drop it.
@@ -2549,7 +2565,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function fireGun(dt: number) {
     const p = s.plane;
     s.gunT -= dt;
-    s.heat = Math.max(0, s.heat - dt * (s.hot ? 0.45 : 0.3));
+    s.bocaT = Math.max(0, s.bocaT - dt);
+    s.heat =Math.max(0, s.heat - dt * (s.hot ? 0.45 : 0.3));
     if (s.hot && s.heat < 0.35) s.hot = false;
     const gk = s.spec.kit.metralla;
     if (!input.gun) s.gunWasDown = false;
@@ -2569,24 +2586,40 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       pop(p.x, p.y + 16, '¡Metralla caliente!', P.r3);
       if (!s.attract) AB.recalentada();
     }
-    const a = p.rumbo + rand(-0.035, 0.035);
+    const tz = gk.traza;
+    const a = p.rumbo + rand(-tz.dispersion, tz.dispersion);
     const nose = s.spec.hit + 3;
-    // Two guns side by side with the upgrade, one otherwise.
-    for (const off of doble ? [-3, 3] : [0]) {
-      const ox = -Math.sin(p.rumbo) * off, oy = Math.cos(p.rumbo) * off;
+    const cs = Math.cos(p.rumbo), sn = Math.sin(p.rumbo);
+    // Wing guns and twin turrets alternate left and right; the upgrade adds a second stream.
+    const n = s.gunN++;
+    const lado = tz.ancho ? (n % 2 ? tz.ancho : -tz.ancho) : 0;
+    const tr = n % tz.cada === 0;
+    for (let i = 0; i < (doble ? 2 : 1); i++) {
+      const off = doble ? (i ? 3 : -3) + lado * 0.5 : lado;
       s.bullets.push({
-        x: p.x + Math.cos(p.rumbo) * nose + ox, y: p.y + Math.sin(p.rumbo) * nose + oy, vx: p.vx + Math.cos(a) * gk.vel, vy: p.vy + Math.sin(a) * gk.vel,
-        t: 0, life: 1500 / gk.vel, d: gk.dano, g: gk.gravedad, c: gk.color,
+        x: p.x + cs * nose - sn * off, y: p.y + sn * nose + cs * off, vx: p.vx + Math.cos(a) * gk.vel, vy: p.vy + Math.sin(a) * gk.vel,
+        t: 0, life: 1500 / gk.vel, d: gk.dano, g: gk.gravedad, c: gk.color, k: tz, tr,
       });
     }
+    s.bocaT = 0.05;
+    const mx = p.x + cs * nose, my = p.y + sn * nose;
+    // Spent cases tumbling down, and the A-10's grey gun smoke.
+    if (tz.casquillos && n % 2 === 0 && s.shards.length < 120) {
+      s.shards.push({ x: p.x - cs * 2, y: p.y - 2, vx: p.vx * 0.8 + rand(-25, 25), vy: p.vy * 0.8 - rand(10, 40), t: 0.6, c: n % 4 ? '#d8b040' : '#a07a20' });
+    }
+    if (tz.humo && n % 3 === 0) puff(mx + cs * 4, my + sn * 4, 3, false, 0.7, p.vx * 0.5, p.vy * 0.5 + 6);
     if (!s.attract) {
       const pan = panOf(p.x);
-      if (gk.sonido === 'vulcan') AB.vulcan(pan);
-      else if (gk.sonido === 'canon30') AB.canon30(pan);
+      const k = gk.tono ?? 1;
+      if (gk.sonido === 'vulcan') AB.vulcan(pan, k);
+      else if (gk.sonido === 'canon30') AB.canon30(pan, k);
+      else if (gk.sonido === 'gau8') AB.gau8(pan, k);
+      else if (gk.sonido === 'rifle') AB.rifle(pan, k);
+      else if (gk.sonido === 'browning') AB.browning(pan, k);
       else if (gk.sonido === 'laser') AB.laser(pan);
       else AB.metralla(pan);
     }
-    L.luz(s.luces, p.x + Math.cos(p.rumbo) * nose, p.y + Math.sin(p.rumbo) * nose, 6, gk.color === 'laser' ? '#7af0ff' : '#ffe48a', 0.04);
+    L.luz(s.luces, mx, my, 4 + tz.boca, tz.fogonazo, 0.04);
   }
 
   /** «Imán de premios»: balloons and crates drift to the plane. */
@@ -2934,10 +2967,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (h.derrotado) award(h.puntos ?? 0, b.x, b.y);
       }
       if (hit) {
-        VFX.chispazo(s.fx, b.x, b.y, b.vx, b.vy, still || s.calma);
-        L.luz(s.luces, b.x, b.y, 5, '#fff2c0', 0.05);
+        // Rifle bullets just ping; 30 mm shells burst with a puff and a bigger flash.
+        const im = b.k.impacto;
+        VFX.chispazo(s.fx, b.x, b.y, b.vx, b.vy, still || s.calma || im < 0.8);
+        if (im >= 2) {
+          if (!still && !s.calma) VFX.chispazo(s.fx, b.x, b.y, -b.vx, b.vy, true);
+          puff(b.x, b.y, 3, true, 0.5);
+        }
+        L.luz(s.luces, b.x, b.y, 3 + im * 2.5, im >= 2 ? '#ffb060' : '#fff2c0', im >= 2 ? 0.08 : 0.05);
         b.t = b.life;
-        s.shards.push({ x: b.x, y: b.y, vx: rand(-40, 40), vy: rand(10, 60), t: 0, c: P.gold });
+        if (s.shards.length < 140) s.shards.push({ x: b.x, y: b.y, vx: rand(-40, 40) * im, vy: rand(10, 60) * im, t: 0, c: b.k.c2 });
       }
     }
     s.bullets = s.bullets.filter((b) => b.t < b.life);
@@ -2976,8 +3015,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       m.combustible = km.opts.quemado;
       // No lock-on: the missile flies where the nose points.
       // Held the nose on an enemy long enough: this missile homes on it.
-      const locked = s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo() ? s.lockCand : undefined;
-      s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked, k: km });
+      // WWII rockets never home: they go out in pairs, one under each wing.
+      const locked = !km.cohete && s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo() ? s.lockCand : undefined;
+      s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked, k: km, bam: Math.random() * 6.3 });
+      if (km.cohete && km.cohete.salva > 1) {
+        const cs = Math.cos(p.rumbo), sn = Math.sin(p.rumbo);
+        m.x += sn * 4;
+        m.y -= cs * 4;
+        const par = FA.misilJugador(p, s.wave);
+        par.combustible = km.opts.quemado;
+        par.x -= sn * 4;
+        par.y += cs * 4;
+        s.shots.push({ m: par, enemy: false, tgt: null, trail: 0, k: km, bam: Math.random() * 6.3 });
+      }
       // Chorrillana: two more missiles fanned out either side of the nose.
       if (s.boost === 'chorrillana') {
         for (const da of [-0.14, 0.14]) {
@@ -2987,16 +3037,20 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           extra.rumbo += da;
           extra.vx = Math.cos(extra.rumbo) * sp;
           extra.vy = Math.sin(extra.rumbo) * sp;
-          s.shots.push({ m: extra, enemy: false, tgt: null, trail: 0, k: km });
+          s.shots.push({ m: extra, enemy: false, tgt: null, trail: 0, k: km, bam: Math.random() * 6.3 });
         }
       }
       usar('disparar');
       if (locked) usar('fijar');
       s.ammo--;
       s.fireT = km.cadencia;
-      if (km.sonido === 'orbe') { if (!s.attract) AB.orbe(panOf(p.x)); }
-      else if (km.sonido === 'crucero') { if (!s.attract) AB.crucero(panOf(p.x)); }
-      else fx('misil', sfx.launch, { vol: 0.4, rate: rand(0.95, 1.1), dur: 0.35 });
+      if (!s.attract) {
+        const pan = panOf(p.x), k = km.tono ?? 1;
+        if (km.sonido === 'orbe') AB.orbe(pan);
+        else if (km.sonido === 'crucero') AB.crucero(pan);
+        else if (km.sonido === 'misil') fx('misil', sfx.launch, { vol: 0.4, rate: rand(0.95, 1.1) * k, dur: 0.35 });
+        else AB.lanzamiento(km.sonido, pan, k);
+      }
     }
     if (input.bomb && s.bombT <= 0 && s.bombAmmo >= 1) {
       s.bombAmmo--;
@@ -3977,7 +4031,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (sh.m.t < 0) continue;
       const m = sh.m;
       sh.estela ??= E.crearEstela(trailStyle(sh));
-      if (m.combustible > 0) L.luz(s.luces, m.x - Math.cos(m.rumbo) * 6, m.y - Math.sin(m.rumbo) * 6, sh.enemy ? 7 : 9, sh.enemy ? MS.MISILES[sh.m.tipo].estela.brillo : '#ffb030', 0.05);
+      if (m.combustible > 0) L.luz(s.luces, m.x - Math.cos(m.rumbo) * 6, m.y - Math.sin(m.rumbo) * 6, sh.enemy ? 7 : 9, sh.enemy ? MS.MISILES[sh.m.tipo].estela.brillo : sh.estela.estilo.brillo, 0.05);
       E.empujarPunto(sh.estela, m.x, m.y, m.rumbo, m.combustible > 0, dt);
       E.actualizarEstela(sh.estela, dt, wind);
       if (sh.enemy && sh.cae) {
@@ -4147,7 +4201,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         // The player's rockets fly straight where the nose pointed.
         // A missile only homes on what the pilot locked: before launch, or over the
         // datalink if the lock comes while it's already flying. Unlocked, it flies straight.
-        if (!(sh.lock && sh.lock.vivo())) {
+        const kit = sh.k ?? s.spec.kit.misil;
+        if (!kit.cohete && !(sh.lock && sh.lock.vivo())) {
           if (s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo()) {
             sh.lock = s.lockCand;
             if (!sh.enlace) pop(m.x, m.y + 10, '📡 ¡Enlace!', '#9ad8ff');
@@ -4155,7 +4210,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }
         }
         const lk = sh.lock && sh.lock.vivo() ? sh.lock.pos() : null;
-        const kit = sh.k ?? s.spec.kit.misil;
+        // An unguided rocket wobbles on its motor (fins and an uneven burn); the fins drag it back on line.
+        if (kit.cohete && m.combustible > 0 && m.t > 0.15) {
+          const b = (sh.bam ?? 0) + m.t * 11;
+          m.rumbo += (Math.sin(b) + 0.5 * Math.sin(b * 2.3 + 1)) * kit.cohete.bamboleo * 2 * dt;
+        }
         const res = FA.pasoMisil(m, lk, dt, kit.opts, ground, !lk);
         // Out of fuel it keeps flying ballistic and, nose down, dives until it hits something.
         if (res === 'suelo' || m.t > 30 || m.y > CEIL + 400) {
@@ -4829,18 +4888,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         continue;
       }
       const v = Math.hypot(b.vx, b.vy) || 1;
-      const ux = b.vx / v, uy = -b.vy / v;
-      const hx = sx(b.x), hy = sy(b.y);
-      const blanco = b.c === 'blanco';
-      g.globalAlpha = 0.45;
-      A.R(g, hx - 2, hy - 2, 5, 5, '#ffe48a');
-      g.globalAlpha = 1;
-      for (let i = 1; i <= 7; i++) {
-        const c = blanco ? (i <= 3 ? P.white : i <= 5 ? '#d8e8ff' : '#9ab8e8') : i <= 2 ? P.gold1 : i <= 4 ? P.gold : i <= 6 ? '#ff9a3c' : '#ff4a3c';
-        A.R(g, Math.round(hx - ux * i * 1.6), Math.round(hy - uy * i * 1.6), i <= 3 ? 2 : 1, i <= 3 ? 2 : 1, c);
-      }
-      A.R(g, hx - 1, hy - 1, 3, 3, '#3a2a6a');
-      A.R(g, hx, hy, 2, 2, P.white);
+      AD.drawTrazadora(g, sx(b.x), sy(b.y), b.vx / v, -b.vy / v, b.k, b.tr);
+    }
+    // Muzzle flash at the guns, sized by the weapon.
+    const gkB = s.spec.kit.metralla;
+    if (s.bocaT > 0 && gkB && !s.dead) {
+      const gk = gkB, p = s.plane, nose = s.spec.hit + 3;
+      const cs = Math.cos(p.rumbo), sn = Math.sin(p.rumbo);
+      const lado = gk.traza.ancho ? ((s.gunN - 1) % 2 ? gk.traza.ancho : -gk.traza.ancho) : 0;
+      AD.drawFogonazo(g, sx(p.x + cs * nose - sn * lado), sy(p.y + sn * nose + cs * lado), cs, -sn, gk.traza.boca, gk.traza.fogonazo, s.bocaT / 0.05, s.t);
     }
     for (const sh of s.shells) A.drawShell(g, sx(sh.x), sy(sh.y));
     const tup: [number, number] = [0, 0];
@@ -4858,7 +4914,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       } else {
         const look = (sh.k ?? s.spec.kit.misil).look;
         if (look === 'orbe') AD.drawOrbe(g, sx(sh.m.x), sy(sh.m.y), s.t);
-        else A.drawMissile(g, sx(sh.m.x), sy(sh.m.y), -sh.m.rumbo, false, sh.m.combustible > 0, s.t, look);
+        else AD.drawMisilKit(g, sx(sh.m.x), sy(sh.m.y), -sh.m.rumbo, sh.m.combustible > 0, s.t, look);
       }
     }
 
