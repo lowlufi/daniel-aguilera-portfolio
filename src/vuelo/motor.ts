@@ -3247,7 +3247,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.bengalasR.push(b);
       // Margarita's flares fool fewer missiles: she must stay beatable with missiles.
       const jefa = (quien as { jefa?: boolean }).jefa ? 0.4 : 1;
-      if (!engano && Math.random() < (moderno ? 0.28 : 0.55) * jefa) {
+      const olaB = Math.min(0.17, Math.max(0, s.wave - 3) * 0.015);
+      if (!engano && Math.random() < ((moderno ? 0.28 : 0.55) + olaB) * jefa) {
         engano = true;
         sh.lock = { pos: () => b as Movil, vivo: () => b.t < 2.4 && s.bengalasR.includes(b), r: 3 };
       }
@@ -4535,8 +4536,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     s.fighters = s.fighters.filter((f) => f.hp > 0);
     // Enemy flyers defend themselves: a player missile closing in gets a burst of flares.
-    for (const f of s.fighters) defensaBengalas(f, f.a, f.jefa ? 0.8 : 1.6, f.jefa ? 5 : 3);
-    for (const a of s.aereos) if (a.tipo === 'helicoptero' && a.hp > 0) defensaBengalas(a, a, 2.4, 3);
+    // Each wave the mice drop flares sooner, more of them, and fool missiles more often.
+    const olaF = Math.max(0, s.wave - 3);
+    const cdF = Math.max(0.6, 1.6 - olaF * 0.09), nF = Math.min(7, 3 + Math.floor(olaF / 2));
+    for (const f of s.fighters) defensaBengalas(f, f.a, f.jefa ? 0.8 : cdF, f.jefa ? 5 : nF);
+    for (const a of s.aereos) if (a.tipo === 'helicoptero' && a.hp > 0) defensaBengalas(a, a, Math.max(1, 2.4 - olaF * 0.12), Math.min(6, 3 + Math.floor(olaF / 3)));
     for (const b of s.bengalasR) {
       FV.pasoBengala(b, dt, wind);
       b.t += dt;

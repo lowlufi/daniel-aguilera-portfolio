@@ -146,7 +146,8 @@ export function crear(x: number, y: number, haciaDerecha: boolean, oleada: numbe
   const m: ModeloAvion = modelo ?? (jefa ? 'sukhoi' : modeloPorOleada(oleada));
   const a = FV.nuevoAvion(m, x, y, haciaDerecha);
   const w = Math.max(0, fin(oleada, 3) - 3);
-  const hab = jefa ? 1 : clamp(0.2 + w * 0.075 + (agresivo ? 0.12 : 0), 0.2, 0.92);
+  // Skill climbs every wave (aim, energy management, defensive breaks), close to an ace by wave 12.
+  const hab = jefa ? 1 : clamp(0.22 + w * 0.085 + (agresivo ? 0.12 : 0), 0.2, 0.97);
   const hp = jefa ? 16 + Math.min(12, w * 0.9) : agresivo ? 1.5 + Math.min(0.9, w * 0.1) : 2.4 + Math.min(2.1, w * 0.2);
   return {
     id: ++ids, a, modelo: m, hp, hpMax: hp,
@@ -578,7 +579,8 @@ export function paso(
       c.avisoMisil = 0;
       if (c.misilCd < 1 && aa < 1.15 && d > 150 && d < 820) {
         out.misil = true;
-        c.misilCd = c.jefa ? 4.5 + Math.random() * 2 : clamp(11 - fin(oleada, 3) * 0.3, 6, 11) - h * 1.5 + Math.random() * 3;
+        // More missiles each wave: from one every ~9 s at wave 3 down to one every ~3.5 s.
+        c.misilCd = c.jefa ? 4.5 + Math.random() * 2 : clamp(10.5 - fin(oleada, 3) * 0.5, 3.5, 10.5) - h * 1.2 + Math.random() * 2.5;
       } else c.misilCd = 1.2;
     }
   } else if (c.misilCd <= 0 && aa < (c.jefa ? 0.95 : 0.7) && ata < 0.4 && d > 200 && d < 780 && lineaLibre(a.x, a.y, jugador.x, jugador.y, suelo)) {
