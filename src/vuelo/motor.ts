@@ -6251,6 +6251,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     g.globalAlpha = (0.16 + 0.35 * s.relampago) * llueve;
     const n = Math.round(((vw * vh) / 1500) * llueve);
     const W = vw + 40, H = vh + 40;
+    // Thousands of 1 px dots when zoomed out: gathered into one path per colour
+    // (two fills) instead of a fillStyle + fillRect each. A streak never hits
+    // the same pixel twice, so the look is the same.
+    const gotas = new Path2D(), claras = new Path2D();
     for (let i = 0; i < n; i++) {
       // World-anchored drops: the camera's motion shows in them, not just the clock.
       const bx = i * 73.13 - s.camX + (calm ? 0 : s.t * viento * 0.6);
@@ -6258,8 +6262,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const x = (((bx % W) + W) % W) - 20;
       const y = (((by % H) + H) % H) - 20;
       const L2 = largo * (0.7 + ((i * 7) % 5) * 0.12);
-      for (let j = 0; j < L2; j += 1.5) A.R(g, Math.round(x - ux * j), Math.round(y - uy * j), 1, 1, i % 4 ? '#9ab4e0' : '#c8daf8');
+      const ruta = i % 4 ? gotas : claras;
+      for (let j = 0; j < L2; j += 1.5) ruta.rect(Math.round(x - ux * j), Math.round(y - uy * j), 1, 1);
     }
+    g.fillStyle = '#9ab4e0';
+    g.fill(gotas);
+    g.fillStyle = '#c8daf8';
+    g.fill(claras);
     // Drops bursting on the plane's nose and wings.
     if (!s.dead && !calm && llueve > 0.3) {
       g.globalAlpha = 0.5;

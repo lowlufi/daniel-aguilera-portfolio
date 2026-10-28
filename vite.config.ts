@@ -100,6 +100,7 @@ function rutasCriticas(): Plugin {
       const vuelo = ruta('/src/vuelo/VueloGame.tsx')?.fileName;
       const clasico = ruta('/src/sitio/ClassicSite.tsx')?.fileName;
       headers = new Map([
+        // The game is the home page now; the island moved to /isla.
         ['/', precarga(vuelo, [fuente('nunito-latin')])],
         ['/aviones', precarga(vuelo, [fuente('nunito-latin')])],
         ['/isla', precarga(isla, [fuente('nunito-latin')])],
