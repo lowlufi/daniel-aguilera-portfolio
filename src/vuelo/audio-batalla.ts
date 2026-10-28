@@ -2207,21 +2207,41 @@ function buf(m: Mezcla, n: Nombre) {
  * Bakes every one-shot ahead of time, a few per idle moment, so the first
  * explosion or missile of a game doesn't stall a frame while it's synthesized.
  */
+let horneando = false;
+let hornoPausa = false;
+/**
+ * While a game is being played, the baking waits (each sound can take tens of ms
+ * on a phone, a visible hitch); it carries on in the menus and the pause.
+ */
+export function pausarHorneado(on: boolean) {
+  hornoPausa = on;
+}
 export function precalentar() {
   const m = salida(true);
-  if (!m) return;
+  if (!m || horneando) return;
   const pend = (Object.keys(HORNO) as Nombre[]).filter((n) => !hornos.has(n));
+  if (!pend.length) return;
+  horneando = true;
+  // Safari (iPhone) has no idle callback: one sound per 150 ms tick instead.
   const ocioso = (f: (d?: IdleDeadline) => void) =>
-    window.requestIdleCallback ? window.requestIdleCallback(f, { timeout: 2000 }) : window.setTimeout(() => f(), 60);
+    window.requestIdleCallback ? window.requestIdleCallback(f, { timeout: 3000 }) : window.setTimeout(() => f(), 150);
   const paso = (d?: IdleDeadline) => {
     // The context may have been replaced since: stop quietly.
-    if (salida(true) !== m) return;
+    if (salida(true) !== m) {
+      horneando = false;
+      return;
+    }
+    if (hornoPausa) {
+      window.setTimeout(() => ocioso(paso), 500);
+      return;
+    }
     do {
       const n = pend.shift();
-      if (!n) return;
-      buf(m, n);
-    } while (pend.length && d && d.timeRemaining() > 6);
+      if (!n) break;
+      if (!hornos.has(n)) buf(m, n);
+    } while (pend.length && d && d.timeRemaining() > 12);
     if (pend.length) ocioso(paso);
+    else horneando = false;
   };
   ocioso(paso);
 }

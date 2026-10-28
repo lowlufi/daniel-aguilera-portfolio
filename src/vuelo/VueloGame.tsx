@@ -625,6 +625,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     game.current = g;
     g.setArriba(barraRef.current?.getBoundingClientRect().height ?? 64);
     try {
+      g.setZoomAuto(localStorage.getItem('vuelo-zoomauto') !== '0');
+    } catch {
+      /* private mode: stays on */
+    }
+    try {
       g.setAutoGun(localStorage.getItem('vuelo-autogun') !== '0');
     } catch {
       /* private mode: stays on */
@@ -682,6 +687,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     if (introStep === 0) {
       tituloMusica();
       jingleIntro();
+      // The audio just woke up: bake the battle sounds now, during the intro and menus,
+      // so nothing is left to synthesize when the pilot boards the plane.
+      window.setTimeout(() => AB.precalentar(), 700);
       setIntroStep(1);
     } else if (introStep < 3) setIntroStep(3);
     else {
@@ -804,6 +812,23 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     }
   };
   useEffect(() => game.current?.setAutoGun(autoGun), [autoGun]);
+  // Auto zoom by speed (on by default).
+  const [zoomAuto, setZoomAutoUi] = useState(() => {
+    try {
+      return localStorage.getItem('vuelo-zoomauto') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const toggleZoomAuto = (on: boolean) => {
+    setZoomAutoUi(on);
+    try {
+      localStorage.setItem('vuelo-zoomauto', on ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  };
+  useEffect(() => game.current?.setZoomAuto(zoomAuto), [zoomAuto]);
   // PC: fly with the mouse (on by default): the nose follows the cursor, the buttons fire.
   const [ratonOn, setRatonOn] = useState(() => {
     try {
@@ -989,6 +1014,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       game.current?.girar(0);
     };
   }, [phase, touchUi, control, paused]);
+  // No sound baking while flying (it would hitch frames); it resumes in menus and pause.
+  useEffect(() => AB.pausarHorneado(phase === 'play' && !paused), [phase, paused]);
   // PC mouse mode: the cursor over the sky steers, left button = machine gun, right = missile.
   const conRaton = phase === 'play' && !touchUi && ratonOn && !paused;
   useEffect(() => {
@@ -1940,6 +1967,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </label>
               <label className="hud-ajuste">
                 <span>
+                  Zoom automático
+                  <small className="block text-[11px] font-bold text-[#c8c0e0]">A toda velocidad la cámara se aleja para ver lo que viene</small>
+                </span>
+                <input type="checkbox" role="switch" checked={zoomAuto} onChange={(e) => toggleZoomAuto(e.target.checked)} className="hud-switch" />
+              </label>
+              <label className="hud-ajuste">
+                <span>
                   Modo GORE (sangre)
                   <small className="block text-[11px] font-bold text-[#c8c0e0]">Sangre y ratones en pedazos. No apto para peques.</small>
                 </span>
@@ -2202,6 +2236,13 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                     <small className="block text-[11px] font-bold text-[#c8c0e0]">Sin sacudidas ni destellos fuertes</small>
                   </span>
                   <input type="checkbox" role="switch" checked={calma} onChange={(e) => toggleCalma(e.target.checked)} className="hud-switch" />
+                </label>
+                <label className="hud-ajuste">
+                  <span>
+                    Zoom automático
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">A toda velocidad la cámara se aleja para ver lo que viene</small>
+                  </span>
+                  <input type="checkbox" role="switch" checked={zoomAuto} onChange={(e) => toggleZoomAuto(e.target.checked)} className="hud-switch" />
                 </label>
                 <label className="hud-ajuste">
                   <span>

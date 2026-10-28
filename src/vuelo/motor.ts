@@ -619,7 +619,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * camera frames the plane in the free part. `radar`: CSS px of the slot the HUD bar keeps
    * for the radar on phones (its top-right corner), or null to use the default corner.
    */
-  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1, sinLejos: false, arriba: 64, derecha: 0, radar: null as { x: number; y: number } | null };
+  /** `auto`: extra steps out from the auto zoom (0 or 1); `autoOn`: the setting. */
+  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1, sinLejos: false, arriba: 64, derecha: 0, radar: null as { x: number; y: number } | null, auto: 0, autoOn: true };
+  let autoZoomT = 0;
   mapaActual = 'valle';
   resetHeights();
   const valleStrip = A.groundStrip(LEVEL, ground, PANTRY);
@@ -983,7 +985,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Keep the scale the player chose (1:1 by default) when the window changes.
     let best = 0;
     for (let i = 0; i < view.levels.length; i++) if (Math.abs(view.levels[i] - view.want) < Math.abs(view.levels[best] - view.want)) best = i;
-    view.zi = best;
+    // Auto zoom: fast flight pulls the camera one step farther out.
+    view.zi = Math.min(view.levels.length - 1, best + view.auto);
     sc = view.levels[view.zi];
     view.s = sc;
     view.vw = Math.ceil(cw / sc);
@@ -3032,12 +3035,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const kb = s.spec.kit.bengala;
     for (const sh of s.shots) {
       if (!(sh.enemy && sh.tgt === p && sh.m.guiado)) continue;
-      for (let k = 0; k < kb.intentos; k++) {
-        if (MS.engana(sh.m, f, p)) {
-          sh.tgt = f;
-          sv.enganados++;
-          break;
-        }
+      // Each try is its own throw (the shared dice in `engana` would repeat the same one).
+      const pr = MS.probEngano(sh.m, f, p);
+      if (pr > 0 && Math.random() < 1 - Math.pow(1 - pr, kb.intentos)) {
+        sh.tgt = f;
+        sv.enganados++;
       }
     }
     L.luz(s.luces, f.x, f.y, 10, '#fff2c0', 0.1);
@@ -3211,6 +3213,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       touch.y = Math.sin(p.rumbo + off);
       syncInput();
     } else turnK = 0;
+    // Auto zoom by speed: past ~78% of top speed (or on nitro) the camera steps out to
+    // see what's coming; below ~55% it comes back. Hysteresis and a pause between
+    // changes, so it doesn't pump.
+    autoZoomT = Math.max(0, autoZoomT - dt);
+    if (view.autoOn && s.mode === 'play' && !s.attract && !s.dead && autoZoomT <= 0) {
+      const vRel = Math.hypot(p.vx, p.vy) / FV.PARAMS[s.spec.id].velMax;
+      const quiere = s.despegue ? 0 : s.nitroT > 0 || vRel > 0.78 ? 1 : vRel < 0.55 ? 0 : view.auto;
+      if (quiere !== view.auto) {
+        view.auto = quiere;
+        autoZoomT = 2.2;
+        fit();
+      }
+    }
     // PC mouse: the nose follows the cursor (re-aimed every frame, the plane moves under it).
     if (raton && !turn && s.mode === 'play' && !s.dead && !s.attract) {
       const vx = raton.x / view.s - (p.x - s.camX);
@@ -4924,6 +4939,24 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g.globalAlpha = 1;
     }
     for (const e of s.eyectados) dibujarEyectado(sx(e.x), sy(e.y), e.t, e.jefa, e.roto);
+    // The player's health bar, floating over the plane: one segment per point of hull,
+    // green → yellow → red, blinking when it's nearly gone. Sized to stay readable at any zoom.
+    if (s.mode === 'play' && !s.dead && !s.attract) {
+      const u = clamp(Math.round(1.6 / view.s), 1, 3);
+      const max = Math.max(1, s.spec.hp);
+      const hp = clamp(s.hp, 0, max);
+      const k = hp / max;
+      const seg = 4 * u, gap = u, h = 2 * u;
+      const w = max * seg + (max - 1) * gap;
+      const X = Math.round(sx(s.plane.x) - w / 2), Y = Math.round(sy(s.plane.y) - (s.spec.hit + 10) * Math.max(1, u * 0.8));
+      const parpadea = k <= 0.25 && Math.floor(s.t * 6) % 2 === 0;
+      A.R(g, X - u, Y - u, w + 2 * u, h + 2 * u, 'rgba(26,20,40,0.75)');
+      for (let i = 0; i < max; i++) {
+        const lleno = i < hp;
+        const c = !lleno ? '#4a3a5a' : parpadea ? '#ffffff' : k > 0.5 ? '#7af0a0' : k > 0.25 ? '#ffd84a' : '#ff5a6a';
+        A.R(g, X + i * (seg + gap), Y, seg, h, c);
+      }
+    }
     if (s.say) {
       const esc = clamp(Math.round(2 / view.s), 1, 6);
       // Phones: pinned at the top centre under the HUD, so the thumb buttons never cover it,
@@ -5778,6 +5811,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       touch.x = vx / d;
       touch.y = vy / d;
       syncInput();
+    },
+    /** Auto zoom by speed on/off. */
+    setZoomAuto(on: boolean) {
+      view.autoOn = on;
+      if (!on && view.auto) {
+        view.auto = 0;
+        fit();
+      }
     },
     /** PC mouse mode on/off: the nose follows the cursor (`ratonEn`) and Space becomes the bomb key. */
     setModoRaton(on: boolean) {

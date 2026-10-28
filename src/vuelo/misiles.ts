@@ -831,7 +831,7 @@ export function golpear(m: MisilEnemigo, dmg = 1): boolean {
  * pulsación bien soltada engaña a un buscador ≈ 65–75 % en la oleada 1 y
  * ≈ 55–65 % en la 10 (de lado más, de frente/cola menos).
  */
-const BENGALA_MAX = 0.85;
+const BENGALA_MAX = 0.95;
 
 /**
  * Probabilidad de que UNA bengala engañe a este misil. Parte de `probBengala`
@@ -850,23 +850,26 @@ export function probEngano(m: MisilEnemigo, bengala: Vec, avion: Vec): number {
   const ficha = MISILES[m.tipo];
   const k = ficha.engañable;
   if (k <= 0 || !m.guiado) return 0;
-  const base = probBengala(m, bengala, avion, opsDe(m.tipo, m.nivel).cono) / 0.9; // 0…1
-  if (!(base > 0)) return 0;
   const av = avion as Vec & { vx?: number; vy?: number };
   const avx = fin(av.vx ?? 0), avy = fin(av.vy ?? 0);
   const rx = fin(avion.x) - m.x, ry = fin(avion.y) - m.y;
   const r = Math.max(1, Math.hypot(rx, ry));
+  // A missile already closing on the plane sees the flare blossom right next to it:
+  // within ~500 px it counts as in the seeker's view even off the exact cone.
+  const enCono = probBengala(m, bengala, avion, opsDe(m.tipo, m.nivel).cono) / 0.9; // 0…1
+  const base = r < 500 ? Math.max(enCono, 0.65) : enCono;
+  if (!(base > 0)) return 0;
   const rvx = avx - m.vx, rvy = avy - m.vy;
   const vc = -(rx * rvx + ry * rvy) / r;
   const tgo = vc > 1 ? r / vc : 99;
   // Mejor con el misil encima, pero soltarla antes también sirve (piso 0,35).
-  const fT = tgo < 0.15 ? 0.3 : tgo <= 0.35 ? lerp(0.3, 1, (tgo - 0.15) / 0.2) : tgo <= 1.2 ? 1 : clamp(1 - (tgo - 1.2) / 2.5, 0.35, 1);
+  const fT = tgo < 0.15 ? 0.45 : tgo <= 0.35 ? lerp(0.6, 1, (tgo - 0.15) / 0.2) : tgo <= 1.2 ? 1 : clamp(1 - (tgo - 1.2) / 2.5, 0.6, 1);
   const va = Math.hypot(avx, avy);
   const lado = va > 1 ? Math.abs(avx * ry - avy * rx) / (va * r) : 0.5; // |sen| del ángulo vel-avión / línea de mira
-  const fA = 0.7 + 0.3 * lado;
-  const fN = lerp(1, 0.75, progreso(m.nivel));
+  const fA = 0.8 + 0.2 * lado;
+  const fN = lerp(1, 0.85, progreso(m.nivel));
   const fP = m.combustible > 0 ? 1 : 1.3;
-  return clamp(BENGALA_MAX * k * Math.min(1, base * 1.5) * fT * fA * fN * fP, 0, 0.9);
+  return clamp(BENGALA_MAX * k * Math.min(1, base * 1.5) * fT * fA * fN * fP, 0, 0.95);
 }
 
 /** Dado compartido por (bengala, salva): los misiles de una salva miran la misma escena. */
