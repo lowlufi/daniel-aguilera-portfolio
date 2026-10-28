@@ -23,7 +23,7 @@ import * as MS from './misiles';
 import * as FU from './fuegos';
 import { dibujarMisilEnemigo } from './misiles-dibujo';
 import * as E from './estelas';
-import { apagarLienzo, dibujarFondo, dibujarLucesSuelo, lucesDeSuelo, nombreZona, precalentarFondo, zonaAltitud, type LucesSuelo } from './fondo';
+import { apagarLienzo, dibujarFondo, dibujarLucesSuelo, fondoListo, fondoPendiente, lucesDeSuelo, nombreZona, pedirFondo, precalentarFondo, zonaAltitud, type LucesSuelo, type Paisaje } from './fondo';
 import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Piloto, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
 import { CASA, NOMBRE, PILOTOS, pilotoGuardado } from './pilotos';
 import * as HG from './hangar';
@@ -32,6 +32,7 @@ import * as AD from './armas-dibujo';
 import { dibujarPops } from './jugo';
 import * as ARS from './arsenal';
 import { dibujarTransicion, precalentarTransicion, type MapaId } from './transiciones';
+import { fijarVista } from './lienzo';
 
 /*
  * The plane game: Dui, Lulu or Almendrita fly over a strip of hills while
@@ -566,6 +567,22 @@ type Say = { text: string; t: number; x: number; y: number };
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+/**
+ * Keeps in `a` only what passes `ok`, in place (same order, `ok` called once
+ * per item): the per-substep clean-ups (~20 lists, 120 times a second) used to
+ * build a fresh array each with `.filter`, all garbage a moment later.
+ */
+function quedar<T>(a: T[], ok: (x: T) => boolean) {
+  let n = 0;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    if (ok(x)) {
+      if (n !== i) a[n] = x;
+      n++;
+    }
+  }
+  if (n !== a.length) a.length = n;
+}
 
 /* ── Saved game ──────────────────────────────────────────────────────────── */
 
@@ -652,7 +669,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * `frente` instead and graded to the hour's light, then laid on the screen
    * and lit by the lights (luces.ts). See draw().
    */
-  const gPantalla = canvas.getContext('2d')!;
+  // Opaco: el cielo cubre todo el lienzo en cada cuadro, así el navegador no
+  // mezcla el lienzo con la página. (Sin `desynchronized`: el lienzo lleva el
+  // HUD encima y un transform CSS en cada cambio de zoom, que lo sacan del
+  // camino de baja latencia y en algunos Android lo hacen parpadear.)
+  const gPantalla = canvas.getContext('2d', { alpha: false })!;
   let g = gPantalla;
   const frente = document.createElement('canvas');
   const gFrente = frente.getContext('2d')!;
@@ -675,8 +696,81 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * for the radar on phones (its top-right corner), or null to use the default corner.
    */
   /** `auto`: extra steps out from the auto zoom (0 or 1); `autoOn`: the setting. */
-  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1, sinLejos: false, arriba: 64, derecha: 0, radar: null as { x: number; y: number } | null, auto: 0, autoOn: true };
+  /** `rx`, `ry`: real canvas pixels per virtual pixel (1, or less when the quality governor lowers the resolution). */
+  const view = { vw: 400, vh: 240, s: 2, levels: [2], zi: 0, touch: false, want: 1, sinLejos: false, arriba: 64, derecha: 0, radar: null as { x: number; y: number } | null, auto: 0, autoOn: true, rx: 1, ry: 1 };
   let autoZoomT = 0;
+  /*
+   * Adaptive quality, from full to lightest. The canvas resolution goes down
+   * first (`css`: most real canvas pixels per CSS pixel; on a phone the GPU
+   * fills every one of them each frame, so it is the biggest lever), then the
+   * storm's rain (`lluvia`) thins out, then, only at the two lowest steps,
+   * the throwaway bits of the blasts (`fx`: extra sparks, embers, smoke
+   * puffs), and last (phones only, as before) the 1/3 zoom is taken off the
+   * list (`lejos`). Missile trails and their colourful sparks are never
+   * touched. Phones start at step 1 (canvas at most 2 px per CSS px);
+   * computers at 0 (as sharp as the screen allows).
+   */
+  const NIVELES: { css: number; fx: number; lluvia: number; lejos: boolean }[] = [
+    { css: Infinity, fx: 1, lluvia: 1, lejos: true },
+    { css: 2, fx: 1, lluvia: 1, lejos: true },
+    { css: 1.6, fx: 1, lluvia: 0.8, lejos: true },
+    { css: 1.3, fx: 1, lluvia: 0.6, lejos: true },
+    { css: 1, fx: 0.7, lluvia: 0.45, lejos: true },
+    { css: 1, fx: 0.7, lluvia: 0.45, lejos: false },
+  ];
+  const N_MUESTRAS = 120;
+  /**
+   * The governor's state (see `gobernar`): the step in use, the lowest step
+   * allowed (`piso`), and the last frames' intervals and work times (ms) in a
+   * ring. `fijo` ≥ 0 pins a step (dev hook, benchmarks).
+   */
+  const calidad = {
+    nivel: 0,
+    piso: 0,
+    fijo: -1,
+    fijoVisto: -1,
+    iv: new Float32Array(N_MUESTRAS),
+    tr: new Float32Array(N_MUESTRAS),
+    tmp: new Float32Array(N_MUESTRAS),
+    n: 0,
+    i: 0,
+    evalT: 0,
+    cambioT: 0,
+    subidaT: -1e9,
+    /** Until when (performance.now) each step is off limits after a step up to it didn't hold. */
+    bloqueo: new Float64Array(NIVELES.length),
+    espera: 30000,
+    /** p90 of the frame work (ms): the frame has room to paint the coming sky ahead when it's low. */
+    trabajoP90: 99,
+  };
+  try {
+    const q = Number(localStorage.getItem('vuelo-calidad'));
+    if (q >= 0 && q < NIVELES.length) calidad.nivel = Math.floor(q);
+  } catch {
+    /* private mode */
+  }
+  /** Most real canvas pixels per CSS pixel at the current step. */
+  function pxPorCss() {
+    const k = NIVELES[calidad.nivel].css;
+    return k === Infinity ? Infinity : Math.min(k, Math.max(1, window.devicePixelRatio || 1));
+  }
+  /** Moves to step `n` (clamped to what this device allows) and applies it. */
+  function aplicarCalidad(n: number) {
+    n = clamp(Math.round(n), calidad.piso, view.touch ? NIVELES.length - 1 : NIVELES.length - 2);
+    const antes = NIVELES[calidad.nivel], q = NIVELES[n];
+    calidad.nivel = n;
+    VFX.fijarDensidad(q.fx);
+    if (view.sinLejos !== !q.lejos) {
+      view.sinLejos = !q.lejos;
+      zoomSuave(() => fit());
+      s.hudKey = '';
+    } else if (antes.css !== q.css) fit();
+    try {
+      localStorage.setItem('vuelo-calidad', String(n));
+    } catch {
+      /* private mode */
+    }
+  }
   mapaActual = 'valle';
   resetHeights();
   // San Antonio's ground (hills, houses, the port) is toned down once, so the
@@ -806,6 +900,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   let filaBajo: HTMLCanvasElement | null = filaDeFondo(valleStrip.canvas);
   /** Splash columns where things hit the sea: screen-independent, world coords. */
   const splashes: { x: number; t: number }[] = [];
+  /** Where the magic sea is stirred this frame (reused, not rebuilt each frame). */
+  const agitados: number[] = [];
   /** Everything that meets the sea: spouts, columns, domes, foam, duds sinking, bubbles, wrecks (agua.ts). */
   const mar = AG.crearMar();
   // A dud with a delayed fuse goes off down there: a dome heaves up and the blast reaches the surface.
@@ -1225,11 +1321,27 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     view.s = sc;
     view.vw = Math.ceil(cw / sc);
     view.vh = Math.ceil(ch / sc);
-    canvas.width = view.vw;
-    canvas.height = view.vh;
+    // Render resolution: at the far zooms a virtual pixel is smaller than a CSS
+    // pixel, and the canvas used to have more pixels than the screen itself (at
+    // 1/3 on a phone, 2745×1236 for a 915 px wide view). It never needs more
+    // than the screen shows, and the quality governor caps it lower on a phone
+    // that can't keep up (`calidad`): the biggest lever there is, as the GPU
+    // fills every one of those pixels each frame. Drawing stays in virtual
+    // pixels, scaled by (rx, ry) (see draw).
+    const tope = pxPorCss();
+    const r = Math.min(1, tope * sc);
+    const w = Math.max(1, Math.round(view.vw * r));
+    const h = Math.max(1, Math.round(view.vh * r));
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    view.rx = w / view.vw;
+    view.ry = h / view.vh;
+    fijarVista(canvas, view.vw, view.vh);
     canvas.style.width = `${view.vw * sc}px`;
     canvas.style.height = `${view.vh * sc}px`;
-    g.imageSmoothingEnabled = false;
+    gPantalla.imageSmoothingEnabled = false;
   }
   /**
    * A zoom step changes the canvas resolution at once; to hide the jump the canvas starts
@@ -1254,6 +1366,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   const ro = new ResizeObserver(fit);
   ro.observe(box);
   fit();
+  VFX.fijarDensidad(NIVELES[calidad.nivel].fx);
 
   const ceiling = () => CEIL;
 
@@ -1634,6 +1747,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * sea, flown by an autopilot that never loses and never saves.
    */
   function attract() {
+    // The game that a «Jugar» will start: its sky gets painted ahead while the title plays.
+    const guardada = readSave();
+    fondoInicio = { mapa: guardada?.mapa ?? 'valle', wave: guardada?.wave ?? 1 };
     const aviones = HG.HANGAR.map((a) => a.id);
     start(PILOTOS[Math.floor(Math.random() * PILOTOS.length)], null, true, Math.random() < 0.5 ? undefined : aviones[Math.floor(Math.random() * aviones.length)]);
     const mapas: Mapa[] = ['valle', 'oceano', 'valparaiso', 'tormenta'];
@@ -3475,7 +3591,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         for (const f of s.fighters) if (f.hp > 0 && dentro(f.a.x, f.a.y)) hurtFighter(f, dmg);
       }
     }
-    s.zonas = s.zonas.filter((z) => z.t < z.vida);
+    quedar(s.zonas, (z) => z.t < z.vida);
   }
 
   /** Moves the tracers and hits whatever they touch. */
@@ -3576,7 +3692,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (s.shards.length < 140) s.shards.push({ x: b.x, y: b.y, vx: rand(-40, 40) * im, vy: rand(10, 60) * im, t: 0, c: b.k.c2 });
       }
     }
-    s.bullets = s.bullets.filter((b) => b.t < b.life);
+    quedar(s.bullets, (b) => b.t < b.life);
   }
 
   /** On the ground before take-off every weapon is locked (safety on): a dry click and a note per press. */
@@ -3889,6 +4005,32 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   /* ── Simulation ── */
 
+  /*
+   * Reused lists for what the enemies see each substep (120 times a second):
+   * built in place instead of with filter/map, so no garbage piles up.
+   */
+  const misilesJ: Shot['m'][] = [];
+  const misilesJVivos: Shot['m'][] = [];
+  const vecinosV: IA.Vista['vecinos'] = [];
+  /** The player's missiles (`vivos`: only those already flying, t ≥ 0). */
+  function misilesDelJugador(vivos: boolean) {
+    const l = vivos ? misilesJVivos : misilesJ;
+    l.length = 0;
+    for (const sh of s.shots) if (!sh.enemy && (!vivos || sh.m.t >= 0)) l.push(sh.m);
+    return l;
+  }
+  /** The convoy as the mice see it (one small object per vehicle, kept from substep to substep). */
+  function vecinosDelConvoy() {
+    for (let i = 0; i < s.cars.length; i++) {
+      const c = s.cars[i];
+      const o = vecinosV[i] ?? (vecinosV[i] = { x: 0, kind: '', vx: 0 });
+      o.x = c.x;
+      o.kind = c.kind;
+      o.vx = c.vx;
+    }
+    vecinosV.length = s.cars.length;
+    return vecinosV;
+  }
   function step(dt: number) {
     s.t += dt;
     const p = s.plane;
@@ -4441,8 +4583,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const vista: IA.Vista = {
       avion: { x: p.x, y: p.y, vx: p.vx, vy: p.vy, vivo: s.mode === 'play' && !s.dead },
       bombas: s.bombs,
-      misilesJugador: s.shots.filter((sh) => !sh.enemy).map((sh) => sh.m),
-      vecinos: s.cars.map((c) => ({ x: c.x, kind: c.kind, vx: c.vx })),
+      misilesJugador: misilesDelJugador(false),
+      vecinos: vecinosDelConvoy(),
       ola: s.wave,
       t: s.t,
       suelo: ground,
@@ -4540,7 +4682,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
     }
-    s.cars = s.cars.filter((c) => c.hp > 0);
+    quedar(s.cars, (c) => c.hp > 0);
 
     // Ground units of every size.
     for (const u of s.gigantes) {
@@ -4560,7 +4702,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
     }
-    s.gigantes = s.gigantes.filter((u) => !u.quitar);
+    quedar(s.gigantes, (u) => !u.quitar);
     stepBoss(dt, vista);
     // Hang around in space too long and the mothership comes looking.
     s.motherCd = Math.max(0, s.motherCd - dt);
@@ -4628,9 +4770,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.ufoMode.delete(a.id);
       s.airFlash.delete(a.id);
     }
-    s.aereos = s.aereos.filter((a) => a.hp > 0);
+    quedar(s.aereos, (a) => a.hp > 0);
     // Enemy fighters: fly, shoot, and crash if they hit the ground.
-    const misJ = s.shots.filter((sh) => !sh.enemy && sh.m.t >= 0).map((sh) => sh.m);
+    const misJ = misilesDelJugador(true);
     for (const f of s.fighters) {
       const r = CZ.paso(f, p, flyingNow(), dt, ground, CEIL, s.wave, s.fighters, misJ);
       for (const d of r.disparos) s.proy.push(AE.nuevoProyectil({ ...d, tipo: 'balin', trazador: true }));
@@ -4650,7 +4792,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       // Gore mode: a badly hit fighter's wounded pilot streaks red behind it.
       if (s.gore && !f.jefa && f.hp > 0 && f.hp < f.hpMax * 0.5 && Math.random() < dt * 16) GR.rastro(s.sangre, f.a.x, f.a.y, f.a.vx, f.a.vy);
     }
-    s.fighters = s.fighters.filter((f) => f.hp > 0);
+    quedar(s.fighters, (f) => f.hp > 0);
     // Enemy flyers defend themselves: a player missile closing in gets a burst of flares.
     // Each wave the mice drop flares sooner, more of them, and fool missiles more often.
     const olaF = Math.max(0, s.wave - 3);
@@ -4663,7 +4805,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       L.luz(s.luces, b.x, b.y, 10, '#ffb070', 0.05);
       if (Math.random() < dt * 25) puff(b.x, b.y, rand(0.4, 0.7), false, 0.55, 0, 3);
     }
-    s.bengalasR = s.bengalasR.filter((b) => b.t < 2.4 && b.y > ground(b.x));
+    quedar(s.bengalasR, (b) => b.t < 2.4 && b.y > ground(b.x));
     for (const [k, v] of s.bengalaCd) if (v - dt <= 0) s.bengalaCd.delete(k); else s.bengalaCd.set(k, v - dt);
     for (const q of s.proy) {
       const st = AE.pasoProyectil(q, dt, ground, wind);
@@ -4690,7 +4832,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         q.t = -1;
       }
     }
-    s.proy = s.proy.filter((q) => q.t >= 0);
+    quedar(s.proy, (q) => q.t >= 0);
 
     // Missiles.
     let warn = false;
@@ -5020,8 +5162,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     if (s.estelas.length > 28) s.estelas.splice(0, s.estelas.length - 28);
     for (const e of s.estelas) E.actualizarEstela(e, dt, wind);
-    s.estelas = s.estelas.filter(E.viva);
-    s.shots = s.shots.filter((sh) => sh.m.t >= 0);
+    quedar(s.estelas, E.viva);
+    quedar(s.shots, (sh) => sh.m.t >= 0);
     if (warn) {
       s.warnT -= dt;
       if (s.warnT <= 0) {
@@ -5094,7 +5236,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     s.bombs.push(...racimos);
-    s.bombs = s.bombs.filter((b) => b.t >= 0 && b.x > 0 && b.x < LEVEL);
+    quedar(s.bombs, (b) => b.t >= 0 && b.x > 0 && b.x < LEVEL);
     stepZonas(dt);
     stepBullets(dt);
 
@@ -5107,7 +5249,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         blast(sh.x, sh.y, FA.ENERGIA.obus, 'raton', 1);
       }
     }
-    s.shells = s.shells.filter((sh) => sh.fuse >= 0);
+    quedar(s.shells, (sh) => sh.fuse >= 0);
 
     // Bailed-out pilots under their parachutes; the radio line fading.
     if (s.radio) s.radio.t += dt;
@@ -5158,17 +5300,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (Math.random() < dt * 40) puff(f.x, f.y, rand(0.4, 0.7), false, 0.6, 0, 3);
       }
     }
-    s.flareBodies = s.flareBodies.filter((f) => f.t < 2.6 && f.y > ground(f.x));
+    quedar(s.flareBodies, (f) => f.t < 2.6 && f.y > ground(f.x));
     for (const h of s.puffs) {
       FA.pasoHumo(h, dt, wind);
       h.t += dt;
     }
-    s.puffs = s.puffs.filter((h) => h.t < h.life);
+    quedar(s.puffs, (h) => h.t < h.life);
     for (const e of s.shards) {
       FA.pasoEsquirla(e, dt, ground);
       e.t += dt;
     }
-    s.shards = s.shards.filter((e) => e.t < 1.6);
+    quedar(s.shards, (e) => e.t < 1.6);
     for (const j of s.junk) {
       FA.pasoBalistico(j, dt, FA.ARRASTRE_OBUS, wind);
       j.t += dt;
@@ -5186,7 +5328,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         puff(j.x, j.y + 2, 3, j.kind === 'macetero', 0.8);
       }
     }
-    s.junk = s.junk.filter((j) => j.fuse >= 0 && j.t < 8);
+    quedar(s.junk, (j) => j.fuse >= 0 && j.t < 8);
     const boss = s.cars.find((c) => isBoss(c.kind));
     if (s.say) {
       s.say.t += dt;
@@ -5239,7 +5381,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         catchPrize(q.kind, q.x, q.y);
       }
     }
-    s.prizes = s.prizes.filter((q) => q.t < 99);
+    quedar(s.prizes, (q) => q.t < 99);
     for (const c of s.crates) {
       c.t += dt;
       if (iman) atraer(c, dt);
@@ -5264,7 +5406,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
     }
-    s.crates = s.crates.filter((c) => c.landed < 6);
+    quedar(s.crates, (c) => c.landed < 6);
     VFX.actualizar(s.fx, dt, wind, ground);
     if (s.gore || !GR.vacio(s.sangre)) {
       GR.camara(s.sangre, s.plane.x, s.plane.y, s.mode === 'play' && !s.attract && !s.dead && !s.calma && !still);
@@ -5276,7 +5418,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     L.pasoLuces(s.luces, dt);
     for (const q of s.pops) q.t += dt;
-    s.pops = s.pops.filter((q) => q.t < 1.3);
+    quedar(s.pops, (q) => q.t < 1.3);
 
     // Camera: leads in the direction of flight, and climbs with the plane
     // once it's above the middle of the screen.
@@ -5371,22 +5513,73 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /* ── Drawing ── */
 
   const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  /** The hour a map shows by itself on a wave (`atardecer`: at sea, the carrier fight's sunset). */
+  function temaDe(mapa: Mapa, wave: number, atardecer: boolean): Theme {
+    return mapa === 'tormenta' ? 'noche'
+      : mapa === 'oceano' ? (atardecer ? 'tarde' : 'dia')
+      // Valparaíso at dusk; on the third lap it's Año Nuevo, at midnight.
+      : mapa === 'valparaiso' && wave % 4 === 3 ? (wave >= 9 ? 'noche' : 'tarde')
+      : THEMES[Math.max(0, wave - 1) % 3];
+  }
+  const paisajeDe = (m: Mapa): Paisaje => (m === 'tormenta' ? 'oceano' : m);
+  /**
+   * The hour on screen and the one asked for. A new hour (next wave, the sky
+   * button) waits, keeping the old sky, until its backdrop is painted (a few
+   * frames, in the background: see `frame`), then cross-fades in as always.
+   * Painting it all at once used to stall the frame for ~0.1–0.5 s on a phone.
+   */
+  let temaVisto: Theme | null = null;
+  let temaQuiere: Theme = 'dia';
+  /** Where a game from the title screen will start (map and wave), so its sky is painted ahead. */
+  let fondoInicio: { mapa: Mapa; wave: number } = { mapa: 'valle', wave: 1 };
+  /** What the backdrop must keep painted (fondo.ts drops the rest, ~70 MB of canvases when all were kept). */
+  const pedidoFondo = { ambientes: [] as Theme[], altos: [] as Theme[], paisajes: [] as Paisaje[], tormenta: false };
+  function actualizarPedidoFondo() {
+    const P = pedidoFondo;
+    P.ambientes.length = 0;
+    P.paisajes.length = 0;
+    const hora = (a: Theme) => {
+      if (!P.ambientes.includes(a)) P.ambientes.push(a);
+    };
+    const mapa = (m: Mapa) => {
+      if (!P.paisajes.includes(paisajeDe(m))) P.paisajes.push(paisajeDe(m));
+    };
+    // On screen first, then the one waiting to come in, then the next wave's (here or on the map we're flying to).
+    hora(temaVisto ?? temaQuiere);
+    hora(temaQuiere);
+    const prox = s.toMapa || s.mapa;
+    hora(s.themePick === 'auto' ? temaDe(prox, s.wave + 1, false) : s.themePick);
+    mapa(s.mapa);
+    mapa(prox);
+    // Title screen: also the sky the game will start under.
+    if (s.attract || s.mode !== 'play') {
+      hora(s.themePick === 'auto' ? temaDe(fondoInicio.mapa, fondoInicio.wave, false) : s.themePick);
+      mapa(fondoInicio.mapa);
+    }
+    P.altos = P.ambientes;
+    P.tormenta = s.mapa === 'tormenta' || prox === 'tormenta' || (s.mode !== 'play' && fondoInicio.mapa === 'tormenta');
+    pedirFondo(P);
+  }
   function draw() {
     g = gPantalla;
     const { vw, vh } = view;
+    // Everything is drawn in virtual pixels; the canvas may have fewer real ones (quality, see `fit`).
+    g.setTransform(view.rx, 0, 0, view.ry, 0, 0);
     // At sea the carrier fight turns to sunset as Valparaíso comes into view.
-    const carrierK = (() => {
-      const c = s.cars.find((q) => q.kind === 'portaaviones');
-      return c ? 1 - clamp(c.hp / s.bossMax, 0, 1) : 0;
-    })();
+    let carrierK = 0;
+    for (const c of s.cars)
+      if (c.kind === 'portaaviones') {
+        carrierK = 1 - clamp(c.hp / s.bossMax, 0, 1);
+        break;
+      }
     const atardecer = s.mapa === 'oceano' && (s.enValpo || carrierK > 0.35);
-    const nocheTormenta = s.mapa === 'tormenta';
-    const autoTheme: Theme = nocheTormenta ? 'noche'
-      : s.mapa === 'oceano' ? (atardecer ? 'tarde' : 'dia')
-      // Valparaíso at dusk; on the third lap it's Año Nuevo, at midnight.
-      : s.mapa === 'valparaiso' && s.wave % 4 === 3 ? (s.wave >= 9 ? 'noche' : 'tarde')
-      : THEMES[Math.max(0, s.wave - 1) % 3];
-    const theme = s.themePick === 'auto' ? autoTheme : s.themePick;
+    temaQuiere = s.themePick === 'auto' ? temaDe(s.mapa, s.wave, atardecer) : s.themePick;
+    let theme = temaQuiere;
+    if (temaVisto && temaVisto !== theme) {
+      const p = paisajeDe(s.mapa), torm = s.mapa === 'tormenta';
+      if (!fondoListo(theme, p, torm) && fondoListo(temaVisto, p, torm)) theme = temaVisto;
+    }
+    temaVisto = theme;
     // The hour's light eases in (a theme change, or the storm clearing) instead of snapping.
     {
       const ahora = performance.now() / 1000;
@@ -5415,7 +5608,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (temaPrevio && temaPrevio !== theme && !still) {
       fundido.width = canvas.width;
       fundido.height = canvas.height;
-      dibujarFondo(fundido.getContext('2d')!, { ...optsFondo, ambiente: temaPrevio });
+      const gf = fundido.getContext('2d')!;
+      gf.setTransform(view.rx, 0, 0, view.ry, 0, 0);
+      gf.imageSmoothingEnabled = false;
+      dibujarFondo(gf, { ...optsFondo, ambiente: temaPrevio });
       fundidoT = FUNDIDO;
     }
     temaPrevio = theme;
@@ -5424,7 +5620,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       fundidoT = Math.max(0, fundidoT - dtLuz);
       const k = fundidoT / FUNDIDO;
       g.globalAlpha = k * k * (3 - 2 * k);
-      g.drawImage(fundido, 0, 0);
+      g.drawImage(fundido, 0, 0, vw, vh);
       g.globalAlpha = 1;
     }
     // The life on the ground (vida.ts): cast for this map and wave; Año Nuevo's fireworks go behind the hills.
@@ -5499,14 +5695,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // The storm: the sea is lost under a heaving floor of dark cloud.
     if (s.mapa === 'tormenta' && s.despeje < 1) {
       g.globalAlpha = 1 - s.despeje;
+      // One path per colour (two fills) instead of two fillRects per 2 px column:
+      // ~1400 columns at the 1/3 zoom. Same pixels (columns never overlap; the rim still goes over the body).
+      const cuerpo = new Path2D(), borde = new Path2D();
       for (let x = 0; x < vw; x += 2) {
         const wx = x + cam;
         const top = sy(250 + 14 * Math.sin(wx / 37 + s.t * 0.4) + 8 * Math.sin(wx / 13 - s.t * 0.7));
         if (top < vh) {
-          A.R(g, x, top, 2, vh - top, '#2b2a48');
-          A.R(g, x, top, 2, 2, '#4a4870');
+          cuerpo.rect(x, top, 2, vh - top);
+          borde.rect(x, top, 2, 2);
         }
       }
+      g.fillStyle = '#2b2a48';
+      g.fill(cuerpo);
+      g.fillStyle = '#4a4870';
+      g.fill(borde);
     }
     g.globalAlpha = 1;
     const marTormenta = s.mapa === 'tormenta' && s.despeje > 0;
@@ -5516,7 +5719,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g.globalAlpha = 1;
       // The cleared storm: bioluminescent sea and whales under the moon.
       if (marTormenta) {
-        const agitados = splashes.map((w) => w.x);
+        agitados.length = 0;
+        for (const w of splashes) agitados.push(w.x);
         if (sobreMar(s.plane.x) && s.plane.y - OC.NIVEL_MAR < 40) agitados.push(s.plane.x);
         OC.dibujarMarMagico(g, cam, sy(OC.NIVEL_MAR), vw, vh, s.t, s.despeje, still, agitados);
       }
@@ -5541,8 +5745,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         frente.width = canvas.width;
         frente.height = canvas.height;
       }
+      fijarVista(frente, vw, vh);
       gFrente.setTransform(1, 0, 0, 1, 0, 0);
       gFrente.clearRect(0, 0, frente.width, frente.height);
+      gFrente.setTransform(view.rx, 0, 0, view.ry, 0, 0);
       gFrente.imageSmoothingEnabled = false;
       g = gFrente;
     }
@@ -5933,17 +6139,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (kN > 0.01) {
         gFrente.globalAlpha = 0.4 * kN;
         gFrente.fillStyle = '#16123c';
-        gFrente.fillRect(0, 0, frente.width, frente.height);
+        gFrente.fillRect(0, 0, vw, vh);
       }
       if (tardeK > 0.01) {
         gFrente.globalAlpha = 0.13 * tardeK;
         gFrente.fillStyle = '#7a3048';
-        gFrente.fillRect(0, 0, frente.width, frente.height);
+        gFrente.fillRect(0, 0, vw, vh);
       }
       gFrente.globalAlpha = 1;
       gFrente.globalCompositeOperation = 'source-over';
       g = gPantalla;
-      g.drawImage(frente, 0, 0);
+      g.drawImage(frente, 0, 0, vw, vh);
       L.dibujarLuces(g, s.luces, toScreen, s.t, ySuperficie);
     }
 
@@ -6055,12 +6261,25 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
     // No enemy in view: an arrow at the edge points to the nearest one, with the distance.
     if (s.mode === 'play' && !s.dead) {
-      const seen = (x: number, y: number) => sx(x) >= 0 && sx(x) < vw && sy(y) >= 0 && sy(y) < vh;
-      const foes: { x: number; y: number }[] = [...s.cars, ...s.aereos, ...s.gigantes.filter((u) => u.viva), ...s.fighters.map((f) => f.a)];
-      if (s.jefe) foes.push(s.jefe);
-      if (foes.length && !foes.some((f) => seen(f.x, f.y))) {
-        let best = foes[0];
-        for (const f of foes) if (Math.hypot(f.x - p.x, f.y - p.y) < Math.hypot(best.x - p.x, best.y - p.y)) best = f;
+      // (No lists built per frame: every enemy is looked at in place.)
+      let visto = false, hay = false, bx = 0, by = 0, bd = Infinity;
+      const mira = (x: number, y: number) => {
+        hay = true;
+        if (sx(x) >= 0 && sx(x) < vw && sy(y) >= 0 && sy(y) < vh) visto = true;
+        const d = Math.hypot(x - p.x, y - p.y);
+        if (d < bd) {
+          bd = d;
+          bx = x;
+          by = y;
+        }
+      };
+      for (const c of s.cars) mira(c.x, c.y);
+      for (const a of s.aereos) mira(a.x, a.y);
+      for (const u of s.gigantes) if (u.viva) mira(u.x, u.y);
+      for (const f of s.fighters) mira(f.a.x, f.a.y);
+      if (s.jefe) mira(s.jefe.x, s.jefe.y);
+      if (hay && !visto) {
+        const best = { x: bx, y: by };
         const right = best.x > p.x;
         // On phones the weapon buttons cover the right edge: the arrow sits just left of them, under the HUD bar.
         const ax = right ? vw - 22 - (view.touch ? Math.round(view.derecha / view.s) : 0) : 14;
@@ -6249,7 +6468,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const ux = rvx / rv, uy = -rvy / rv;
     const largo = clamp(rv / 90, 2, 7);
     g.globalAlpha = (0.16 + 0.35 * s.relampago) * llueve;
-    const n = Math.round(((vw * vh) / 1500) * llueve);
+    const n = Math.round(((vw * vh) / 1500) * llueve * NIVELES[calidad.nivel].lluvia);
     const W = vw + 40, H = vh + 40;
     // Thousands of 1 px dots when zoomed out: gathered into one path per colour
     // (two fills) instead of a fillStyle + fillRect each. A streak never hits
@@ -6263,7 +6482,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const y = (((by % H) + H) % H) - 20;
       const L2 = largo * (0.7 + ((i * 7) % 5) * 0.12);
       const ruta = i % 4 ? gotas : claras;
-      for (let j = 0; j < L2; j += 1.5) ruta.rect(Math.round(x - ux * j), Math.round(y - uy * j), 1, 1);
+      // Pixels of the streak that fall one under the other in the same column go
+      // in as one taller rect: the same pixels with about a third fewer rects.
+      let cx = 0, cy0 = 0, cy1 = 0, hay = false;
+      for (let j = 0; j < L2; j += 1.5) {
+        const px = Math.round(x - ux * j), py = Math.round(y - uy * j);
+        if (hay && px === cx && py === cy1 + 1) cy1 = py;
+        else if (hay && px === cx && py === cy0 - 1) cy0 = py;
+        else {
+          if (hay) ruta.rect(cx, cy0, 1, cy1 - cy0 + 1);
+          cx = px;
+          cy0 = cy1 = py;
+          hay = true;
+        }
+      }
+      if (hay) ruta.rect(cx, cy0, 1, cy1 - cy0 + 1);
     }
     g.fillStyle = '#9ab4e0';
     g.fill(gotas);
@@ -6453,10 +6686,33 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       mision: s.mode === 'play' && s.mision ? { texto: s.mision.texto, prog: s.mision.prog, meta: s.mision.meta, hecha: s.mision.hecha, fallida: s.mision.fallida } : null,
     };
     const key = JSON.stringify(h);
-    if (key !== s.hudKey) {
-      s.hudKey = key;
-      hooks.onHud(h);
-    }
+    if (key === s.hudKey) return;
+    // The numbers that tick while flying (altitude, heat, wind, score…) refresh
+    // the HUD at most 4 times a second; anything else (alerts, ammo, banners,
+    // buttons) goes through at once. Each refresh re-renders the whole React
+    // HUD, which used to happen up to 12.5 times a second.
+    const ahora = performance.now();
+    const lenta = claveLenta(h);
+    if (lenta === hudLenta && ahora - hudT < 250) return;
+    s.hudKey = key;
+    hudLenta = lenta;
+    hudT = ahora;
+    hooks.onHud(h);
+  }
+  let hudLenta = '';
+  let hudT = 0;
+  /** The HUD's key without the fast-ticking numbers. */
+  function claveLenta(h: Hud) {
+    const { altitude, heat, nitroK, wind, hielo, score, left, boostT, boss, mision } = h;
+    const bossHp = boss?.hp ?? 0, prog = mision?.prog ?? 0;
+    h.altitude = h.heat = h.nitroK = h.wind = h.hielo = h.score = h.left = h.boostT = 0;
+    if (boss) boss.hp = 0;
+    if (mision) mision.prog = 0;
+    const k = JSON.stringify(h);
+    Object.assign(h, { altitude, heat, nitroK, wind, hielo, score, left, boostT });
+    if (boss) boss.hp = bossHp;
+    if (mision) mision.prog = prog;
+    return k;
   }
 
   /* ── Keyboard ── */
@@ -6667,36 +6923,78 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   let raf = 0;
   let last = performance.now();
+  /** The `q` quantile of the first `n` samples of `a` (sorted in a scratch array, nothing allocated). */
+  function cuantil(a: Float32Array, n: number, q: number) {
+    const tmp = calidad.tmp;
+    for (let i = 0; i < tmp.length; i++) tmp[i] = i < n ? a[i] : Infinity;
+    tmp.sort();
+    return tmp[Math.min(n - 1, Math.floor(n * q))];
+  }
   /*
-   * Quality governor, phones only: frames are counted in 3 s windows while a
-   * game is really being flown at the 1/3 zoom. If two windows in a row have more than 8% of
-   * frames slower than 20 ms (a p95 well over budget), the 1/3 zoom (a canvas
-   * nine times the 1:1 size) is taken off the list and the view steps in to
-   * 1/2. Nothing else changes, and capable devices never trigger it.
+   * Quality governor (all devices; phones are the ones that need it): the last
+   * ~2 s of frames, in a ring, while a game is really being flown. Twice a
+   * second it looks at the p90 frame interval:
+   *  - over 21 ms (more than 1 frame in 10 missed a 60 Hz beat): one step
+   *    lighter (see NIVELES), 2 s after the last change at the earliest (1 s
+   *    when it's far over);
+   *  - steady (p90 under 18 ms) with the frame's own work well under budget
+   *    (p90 under 8 ms) for 8 s: one step back up.
+   * Hysteresis so it never see-saws: if a step up doesn't hold for 15 s, that
+   * step is off limits for 30 s, then 60 s, 120 s… (a GPU-bound phone reports
+   * little work but still misses frames).
    */
-  const gob = { t0: 0, n: 0, lentos: 0, malas: 0 };
-  function gobernar(now: number, ms: number) {
-    if (view.sinLejos || !view.touch || view.s > 0.4 || s.mode !== 'play' || s.paused || s.attract || s.transT > 0 || document.visibilityState !== 'visible' || ms > 250) {
-      gob.t0 = now;
-      gob.n = gob.lentos = 0;
+  function gobernar(now: number, ms: number, trabajo: number) {
+    const c = calidad;
+    if (c.fijo >= 0) {
+      if (c.fijo !== c.fijoVisto) aplicarCalidad(c.fijo);
+      c.fijoVisto = c.fijo;
       return;
     }
-    gob.n++;
-    if (ms > 20) gob.lentos++;
-    if (now - gob.t0 < 3000) return;
-    gob.malas = gob.n >= 60 && gob.lentos > gob.n * 0.08 ? gob.malas + 1 : 0;
-    gob.t0 = now;
-    gob.n = gob.lentos = 0;
-    if (gob.malas >= 2 && view.levels.includes(1 / 3)) {
-      view.sinLejos = true;
-      fit();
-      s.hudKey = '';
+    c.fijoVisto = -1;
+    if (c.nivel < c.piso) aplicarCalidad(c.piso);
+    if (s.mode !== 'play' || s.paused || s.attract || s.transT > 0 || document.visibilityState !== 'visible' || ms > 250) {
+      c.n = c.i = 0;
+      return;
+    }
+    c.iv[c.i] = ms;
+    c.tr[c.i] = trabajo;
+    c.i = (c.i + 1) % N_MUESTRAS;
+    if (c.n < N_MUESTRAS) c.n++;
+    if (c.n < 60 || now - c.evalT < 500) return;
+    c.evalT = now;
+    const p90 = cuantil(c.iv, c.n, 0.9);
+    c.trabajoP90 = cuantil(c.tr, c.n, 0.9);
+    const tope = view.touch ? NIVELES.length - 1 : NIVELES.length - 2;
+    // (Far over budget, 1 frame in 10 over 33 ms: step down again sooner.)
+    if (p90 > 21 && c.nivel < tope && now - c.cambioT > (p90 > 33 ? 1000 : 2000)) {
+      if (now - c.subidaT < 15000) {
+        c.bloqueo[c.nivel] = now + c.espera;
+        c.espera = Math.min(c.espera * 2, 600000);
+      }
+      aplicarCalidad(c.nivel + 1);
+      c.cambioT = now;
+      c.n = c.i = 0;
+    } else if (c.nivel > c.piso && p90 < 18 && c.trabajoP90 < 8 && now - c.cambioT > 8000 && now > c.bloqueo[c.nivel - 1]) {
+      aplicarCalidad(c.nivel - 1);
+      c.cambioT = c.subidaT = now;
+      c.n = c.i = 0;
     }
   }
+  /** The frame before's own work (ms): the governor and the sky painted ahead look at it. */
+  let trabajo = 0;
+  let precalT = 0;
+  /** Saving (JSON + localStorage, a few ms on a phone) waits for a quiet moment. */
+  const enReposo = (fn: () => void) => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(() => fn(), { timeout: 2000 });
+    else fn();
+  };
   const frame = (now: number) => {
     raf = requestAnimationFrame(frame);
-    gobernar(now, now - last);
-    let dt = Math.min(0.05, (now - last) / 1000);
+    const t0 = performance.now();
+    gobernar(now, now - last, trabajo);
+    // Frame pacing: a late frame moves the world at most 50 ms (no jump after a
+    // stall: the game slows for that frame instead), in substeps of ≤ 1/120 s.
+    let dt = Math.min(0.05, Math.max(0, now - last) / 1000);
     last = now;
     if (s.hitStop > 0) {
       // Hit-stop: a quarter-speed blink after a kill.
@@ -6716,23 +7014,34 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       for (let i = 0; i < n; i++) step(dt);
     }
     draw();
-    // Build the other skies ahead of time while nobody is flying.
+    // Paint the coming skies ahead (fondo.ts; whole tasks of a few ms each):
+    // freely in menus and pauses, under the curtain between maps, one task a
+    // frame while a new hour waits for its sky, and otherwise only when the
+    // frame has room to spare, a few times a second.
     if (s.mode !== 'play' || s.paused) precalentarFondo(4);
+    else if (s.attract) precalentarFondo(2);
+    else if (s.transT > 0 || temaVisto !== temaQuiere) precalentarFondo(0);
+    else if (now - precalT > 250 && calidad.trabajoP90 < 6 && fondoPendiente()) {
+      precalT = now;
+      precalentarFondo(0);
+    }
     s.hudT -= dtCuadro;
     if (s.hudT <= 0) {
       s.hudT = 0.08;
       hud();
       engines();
+      actualizarPedidoFondo();
       s.saveT -= 0.08;
       if (s.saveT <= 0) {
         s.saveT = 5;
-        save();
+        enReposo(save);
       }
     }
+    trabajo = performance.now() - t0;
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, AB, ground, abatirAereo, hurtCar, spawnAir, A, AD, drawPlaneGiro, mar, AG, blast };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, fit, zoom, calidad, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, AB, ground, abatirAereo, hurtCar, spawnAir, A, AD, drawPlaneGiro, mar, AG, blast };
 
   return {
     start,
@@ -6882,6 +7191,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       view.touch = t;
       s.autoGun = t && autoGunPref;
+      // Phones never start sharper than 2 canvas px per CSS px (see NIVELES).
+      calidad.piso = t ? 1 : 0;
+      aplicarCalidad(calidad.nivel);
     },
     /** Phones: whether the machine gun fires by itself (the gun button always works). */
     setAutoGun(on: boolean) {

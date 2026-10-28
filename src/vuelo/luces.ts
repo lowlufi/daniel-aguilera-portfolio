@@ -17,6 +17,7 @@
  *
  * Coordenadas del mundo: x a la derecha, y = altitud hacia arriba.
  */
+import { altoVista, anchoVista } from './lienzo';
 
 /* ── Constantes ─────────────────────────────────────────────────────────── */
 
@@ -190,7 +191,7 @@ export function dibujarLuces(
   const op = g.globalCompositeOperation, alfa0 = g.globalAlpha;
   g.imageSmoothingEnabled = false;
   g.globalCompositeOperation = 'lighter';
-  const W = g.canvas.width + MARGEN, H = g.canvas.height + MARGEN;
+  const W = anchoVista(g) + MARGEN, H = altoVista(g) + MARGEN;
   const cuadro = Math.floor(t * 30);
   const base = 0.5 + 0.5 * noche, crece = 1 + 0.3 * noche;
   for (let i = 0; i < L.n; i++) {

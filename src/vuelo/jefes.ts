@@ -4,6 +4,7 @@ import { solucionTiro } from './fisica-armas';
 import { dificultad, VEL_BALIN, VEL_COHETE, type Disparo, type TipoAereo } from './aereos';
 import type { TipoMisil } from './misiles';
 import type { Vista } from './ia';
+import { anchoVista } from './lienzo';
 
 /*
  * JEFES AÉREOS (bosses), both crewed by mice:
@@ -2964,7 +2965,7 @@ function motas(g: Ctx, ox: number, oy: number, a: number, largo: number, semi: n
  */
 function hacesCosta(g: Ctx, j: Jefe, x0: number, y0: number, t: number) {
   const H = haces();
-  const vw = g.canvas.width;
+  const vw = anchoVista(g);
   const ySea = y0 + (j.y - 18);
   const fin = j.muriendo >= 0 ? Math.max(0, 1 - j.muriendo / 2) : 1;
   if (fin <= 0) return;

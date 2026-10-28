@@ -1,4 +1,5 @@
 import { tone } from '../game/dulce';
+import { altoVista, anchoVista } from './lienzo';
 
 /*
  * Efectos «dulces»: explosiones, escombros, fuego y humo en pixel art pastel,
@@ -437,10 +438,20 @@ function nueva(e: Efectos, prio: number): number {
   return -1;
 }
 
-/** Fracción de llenado → factor para lo descartable (degradación suave). */
+/**
+ * Densidad que pide la calidad adaptativa (motor.ts) para lo descartable de
+ * los estallidos: 1 = completo; en el escalón más bajo, algo menos de chispas,
+ * brasas y humito (nunca cero: siguen las chispas de colores).
+ */
+let densidad = 1;
+export function fijarDensidad(k: number): void {
+  densidad = Math.max(0.4, Math.min(1, k));
+}
+
+/** Fracción de llenado → factor para lo descartable (degradación suave), por la densidad de la calidad. */
 function holgura(e: Efectos) {
   const c = e.n / MAX_P;
-  return c < 0.45 ? 1 : Math.max(0.15, 1 - (c - 0.45) * 1.7);
+  return (c < 0.45 ? 1 : Math.max(0.15, 1 - (c - 0.45) * 1.7)) * densidad;
 }
 
 function bolita(
@@ -1166,7 +1177,7 @@ export function dibujar(
 ): void {
   g.imageSmoothingEnabled = false;
   const alfa0 = g.globalAlpha;
-  const Wc = g.canvas.width + MARGEN, Hc = g.canvas.height + MARGEN;
+  const Wc = anchoVista(g) + MARGEN, Hc = altoVista(g) + MARGEN;
   const X = e.x, Y = e.y, ED = e.edad, VI = e.vida;
   const cuadro = Math.floor(t * 30);
 
