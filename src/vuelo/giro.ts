@@ -123,12 +123,16 @@ const sideHead = (g: Ctx, x: number, y: number) => miniHead(g, pilotoActual(), x
  */
 function topHead(g: Ctx, x: number, y: number, tilt: number, m: Piloto = pilotoActual()) {
   if (m === 'naxo') {
-    // Naxo: short dark hair, ears to both sides, the round dark lenses and the mustache in front.
+    // Naxo: buzzed round head, the punk crest running front to back, ears to both
+    // sides, the round dark lenses and the mustache in front.
     const S = '#9a5c30', S0 = '#6e3e1e';
     R(g, x - 1, y - 4, 2, 1, S0);
     R(g, x - 1, y + 4, 2, 1, S0);
-    D.disc(g, x, y, 3, '#2a1e1a');
-    R(g, x - 1, y - 1, 2, 1, '#4a3a32');
+    D.disc(g, x, y, 3, '#4e3222');
+    R(g, x - 3, y, 6, 1, '#2a1e1a');
+    R(g, x - 2, y - 1, 1, 3, '#2a1e1a');
+    R(g, x, y - 1, 1, 3, '#2a1e1a');
+    R(g, x - 1, y, 1, 1, '#4a3a32');
     R(g, x + 2, y - 2, 2, 5, S);
     R(g, x + 2, y - 2, 1, 2, '#1c1622');
     R(g, x + 2, y + 1, 1, 2, '#1c1622');

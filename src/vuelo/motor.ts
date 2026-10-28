@@ -51,7 +51,7 @@ const PRESENTA: Record<Piloto, string> = {
   lulu: 'Lulu, la gatita negra de ojos amarillos. Ágil: gira cerrado y suelta bombas seguido.',
   dui: 'Dui, el gato naranja. El más veloz: deja atrás a los misiles y dispara más.',
   almendrita: 'Almendrita, la yorkshire. Lenta pero blindada: suelta tres bombas de una vez.',
-  naxo: 'Naxo, enfermero del CESFAM: bajito, guatoncito y puro músculo. Con las seis .50 de su Mustang no deja a nadie sin control.',
+  naxo: 'Naxo, enfermero del CESFAM: bajito, cresta punk y cuerpo de luchador, puro músculo. Con las seis .50 de su Mustang no deja a nadie sin control.',
   nelo: 'Ñelo, de Juanaspe: jockey, lentes negros y polerón. Se tira en picada con su Stuka y la bomba cae justo donde apunta.',
 };
 /** A pilot on the character select: who, their home plane, and that plane's numbers. */

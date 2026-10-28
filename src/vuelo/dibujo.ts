@@ -96,21 +96,29 @@ function almendritaHead(g: Ctx, x: number, y: number) {
 const PIEL = ['#6e3e1e', '#9a5c30', '#c07c48'] as const;
 
 /**
- * Naxo: CESFAM nurse, short dark hair, a big mustache and round dark
- * Ozzy-style glasses on a thin wire. Looking forward (+x); (x, y) is the chin.
+ * Naxo: CESFAM nurse with a luchador's build, a round face, a punk crest
+ * over buzzed sides, a big mustache and round dark Ozzy-style glasses on a
+ * thin wire. Looking forward (+x); (x, y) is the chin.
  */
 function naxoHead(g: Ctx, x: number, y: number) {
-  const [S0, S, S1] = PIEL, H = '#2a1e1a', L = '#1c1622';
+  const [S0, S, S1] = PIEL, H = '#2a1e1a', L = '#1c1622', RAP = '#5e3820';
   D.disc(g, x, y - 3, 4, S);
-  // Round cheeks: a bit of a chubby face.
-  D.oval(g, x + 1, y - 1, 5, 2, S);
+  // Full round cheeks and a round jaw.
+  D.oval(g, x + 1, y - 1, 5, 3, S);
   R(g, x - 2, y - 2, 2, 2, S0);
   R(g, x + 1, y - 6, 3, 1, S1);
-  // Short dark hair, faded at the back and over the ear.
-  R(g, x - 4, y - 8, 8, 2, H);
-  R(g, x - 3, y - 9, 6, 1, H);
-  R(g, x - 5, y - 7, 2, 4, H);
-  R(g, x - 2, y - 9, 3, 1, '#4a3a32');
+  R(g, x + 3, y - 2, 1, 1, '#b85a40');
+  // Buzzed side of the head and the spiky crest along the top.
+  R(g, x - 4, y - 7, 7, 1, RAP);
+  R(g, x - 4, y - 6, 2, 3, RAP);
+  R(g, x - 3, y - 6, 1, 1, H);
+  R(g, x - 4, y - 4, 1, 1, H);
+  R(g, x - 3, y - 8, 6, 1, H);
+  R(g, x - 4, y - 10, 1, 2, H);
+  R(g, x - 2, y - 11, 1, 3, H);
+  R(g, x, y - 12, 1, 4, H);
+  R(g, x + 2, y - 10, 1, 2, H);
+  R(g, x, y - 11, 1, 1, '#5a4a42');
   R(g, x - 2, y - 5, 2, 2, S0);
   // The round dark lens and its wire to the ear.
   R(g, x - 1, y - 5, 2, 1, '#9a8a7a');
@@ -256,10 +264,15 @@ export function pilotoActual(): Piloto {
 /** Small pilot heads for the cockpit (the big ones are for the hangar portraits). (x, y) is the chin. */
 export function miniHead(g: Ctx, m: Piloto, x: number, y: number) {
   if (m === 'naxo') {
+    // Round face, buzzed side, the punk crest's spikes on top.
     const [S0, S] = PIEL, H = '#2a1e1a';
     D.disc(g, x, y - 3, 3, S);
-    R(g, x - 3, y - 7, 6, 2, H);
-    R(g, x - 4, y - 6, 2, 3, H);
+    D.oval(g, x + 1, y - 1, 3, 2, S);
+    R(g, x - 3, y - 6, 3, 2, '#4e3222');
+    R(g, x - 3, y - 7, 5, 1, H);
+    R(g, x - 2, y - 8, 1, 1, H);
+    R(g, x, y - 9, 1, 2, H);
+    R(g, x + 2, y - 8, 1, 1, H);
     R(g, x - 2, y - 4, 1, 2, S0);
     R(g, x - 1, y - 4, 2, 1, '#9a8a7a');
     R(g, x + 1, y - 5, 2, 2, '#1c1622');
