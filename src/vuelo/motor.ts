@@ -20,7 +20,7 @@ import * as FV from './fisica-vuelo';
 import * as FA from './fisica-armas';
 import * as MS from './misiles';
 import * as E from './estelas';
-import { dibujarFondo, nombreZona, precalentarFondo, zonaAltitud } from './fondo';
+import { apagarLienzo, dibujarFondo, dibujarLucesSuelo, lucesDeSuelo, nombreZona, precalentarFondo, zonaAltitud, type LucesSuelo } from './fondo';
 import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Piloto, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
 import { CASA, NOMBRE, PILOTOS, pilotoGuardado } from './pilotos';
 import * as HG from './hangar';
@@ -627,7 +627,26 @@ function writeBest(v: number) {
 export type Vuelo = ReturnType<typeof createVuelo>;
 
 export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: { onHud: (h: Hud) => void; onOver: (r: Result) => void; onJefeVencido?: (tipo: JF.TipoJefe) => void }) {
-  const g = canvas.getContext('2d')!;
+  /**
+   * The context everything is drawn on. At dusk and at night the world in front
+   * of the backdrop (units, effects, smoke, splashes, the plane) is drawn on
+   * `frente` instead and graded to the hour's light, then laid on the screen
+   * and lit by the lights (luces.ts). See draw().
+   */
+  const gPantalla = canvas.getContext('2d')!;
+  let g = gPantalla;
+  const frente = document.createElement('canvas');
+  const gFrente = frente.getContext('2d')!;
+  /** Smoothed hour light: 0 = day … 1 = night (dusk ≈ 0.5); `tardeK` = how much dusk. */
+  let nocheK = 0;
+  let tardeK = 0;
+  let tLuz = 0;
+  let dtLuz = 0;
+  /** Cross-fade of the backdrop when the hour changes: the old sky, frozen, fades out over the new one. */
+  const fundido = document.createElement('canvas');
+  let fundidoT = 0;
+  let temaPrevio: Theme | null = null;
+  const FUNDIDO = 1.4;
   // `levels` are the zoom steps (whole-number pixel scales), `zi` the current one.
   /** `sinLejos`: the quality governor (see the loop) dropped the 1/3 zoom on a struggling phone. */
   /** `arriba`: CSS px taken by the HUD bar along the top edge (the radar sits right under it). */
@@ -641,7 +660,24 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   let autoZoomT = 0;
   mapaActual = 'valle';
   resetHeights();
+  // San Antonio's ground (hills, houses, the port) is toned down once, so the
+  // enemies driving and flying over it stand out.
   const valleStrip = A.groundStrip(LEVEL, ground, PANTRY);
+  // Its windows and street lamps, for dusk and night (found before toning down).
+  const lucesValle0 = lucesDeSuelo(valleStrip.canvas);
+  apagarLienzo(valleStrip.canvas, { desat: 0.28, velo: 0.05, oscuro: 0.08 });
+  const copiaLienzo = (c: HTMLCanvasElement, d?: HTMLCanvasElement) => {
+    const o = d ?? document.createElement('canvas');
+    o.width = c.width;
+    o.height = c.height;
+    const og = o.getContext('2d')!;
+    og.clearRect(0, 0, o.width, o.height);
+    og.drawImage(c, 0, 0);
+    return o;
+  };
+  /** The lit windows of the ground strip in use (craters punch holes in them too), or null at sea. */
+  let lucesSuelo: LucesSuelo | null = { ...lucesValle0, a: copiaLienzo(lucesValle0.a), b: copiaLienzo(lucesValle0.b), brillo: copiaLienzo(lucesValle0.brillo) };
+  const lucesValle = lucesSuelo;
   let strip = valleStrip;
   // An untouched copy, to repaint the ground when a new game starts.
   const pristine = document.createElement('canvas');
@@ -668,19 +704,74 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       // The storm is over the open sea, hidden under a floor of dark cloud.
       marStrip ??= OC.aguaStrip(LEVEL, ground, PANTRY);
       strip = marStrip;
+      lucesSuelo = null;
     } else if (m === 'valparaiso') {
       // Painted fresh on every visit, so old craters don't linger on the hillside.
       valpoStrip = VP.valpoStrip(LEVEL, ground, PANTRY);
+      lucesSuelo = lucesDeSuelo(valpoStrip.canvas);
+      // The busy hillside, toned down once (it used to cost a full-screen blend every frame).
+      apagarLienzo(valpoStrip.canvas, { desat: 0.24, velo: 0.04, oscuro: 0.06 });
       strip = valpoStrip;
     } else {
       strip = valleStrip;
       strip.canvas.getContext('2d')!.clearRect(0, 0, strip.canvas.width, strip.canvas.height);
       strip.canvas.getContext('2d')!.drawImage(pristine, 0, 0);
+      copiaLienzo(lucesValle0.a, lucesValle.a);
+      copiaLienzo(lucesValle0.b, lucesValle.b);
+      copiaLienzo(lucesValle0.brillo, lucesValle.brillo);
+      lucesSuelo = lucesValle;
     }
     sg = strip.canvas.getContext('2d')!;
+    filaBajo = filaDeFondo(strip.canvas, m !== 'valle');
     s.craters = [];
     s.bridges = [];
   }
+  /**
+   * What shows under the ground strip: one row per world x with the most common
+   * colour of the strip's bottom rows (no polka dots), stretched down. So the
+   * dirt, the port's concrete, the beach or the cerros each continue below
+   * with their own colour, with no seam. `uniforme`: one colour for the whole
+   * row (the commonest), for strips whose bottom is busy (Valparaíso's houses, the pier's piles).
+   */
+  function filaDeFondo(cv: HTMLCanvasElement, uniforme = false) {
+    const N = 6;
+    const W = cv.width;
+    const src = cv.getContext('2d')!.getImageData(0, cv.height - N, W, N).data;
+    const fila = document.createElement('canvas');
+    fila.width = W;
+    fila.height = 1;
+    const fg = fila.getContext('2d')!;
+    const out = fg.createImageData(W, 1);
+    const o = new Uint32Array(out.data.buffer);
+    const v = new Uint32Array(src.buffer);
+    for (let x = 0; x < W; x++) {
+      let best = v[(N - 1) * W + x];
+      let bestN = 0;
+      for (let i = 0; i < N; i++) {
+        const c = v[i * W + x];
+        let n = 0;
+        for (let j = 0; j < N; j++) if (v[j * W + x] === c) n++;
+        if (n > bestN && c >>> 24 === 255) {
+          best = c;
+          bestN = n;
+        }
+      }
+      o[x] = best | 0xff000000;
+    }
+    if (uniforme) {
+      const cuenta = new Map<number, number>();
+      let moda = o[0];
+      for (let x = 0; x < W; x++) {
+        const n = (cuenta.get(o[x]) ?? 0) + 1;
+        cuenta.set(o[x], n);
+        if (n > (cuenta.get(moda) ?? 0)) moda = o[x];
+      }
+      o.fill(moda);
+    }
+    fg.putImageData(out, 0, 0);
+    return fila;
+  }
+  let filaBajo: HTMLCanvasElement | null = filaDeFondo(valleStrip.canvas);
   /** Splash columns where things hit the sea: screen-independent, world coords. */
   const splashes: { x: number; t: number }[] = [];
   /** Duds: missiles that hit the sea without going off and sink, trailing bubbles. */
@@ -732,6 +823,19 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     sg.globalCompositeOperation = 'destination-out';
     D.disc(sg, x, row(y), r, '#000');
     sg.globalCompositeOperation = 'source-over';
+    // No lit window floating over the hole.
+    if (lucesSuelo) {
+      for (const c of [lucesSuelo.a, lucesSuelo.b]) {
+        const cg = c.getContext('2d')!;
+        cg.globalCompositeOperation = 'destination-out';
+        D.disc(cg, x, row(y), r + 1, '#000');
+        cg.globalCompositeOperation = 'source-over';
+      }
+      const bg = lucesSuelo.brillo.getContext('2d')!;
+      bg.globalCompositeOperation = 'destination-out';
+      D.disc(bg, Math.round(x / 2), Math.round(row(y) / 2), Math.ceil(r / 2) + 2, '#000');
+      bg.globalCompositeOperation = 'source-over';
+    }
     for (let xi = Math.max(0, Math.round(x - r)); xi <= Math.min(LEVEL, Math.round(x + r)); xi++) {
       const dx = xi - x;
       const bottom = y - Math.sqrt(Math.max(0, r * r - dx * dx));
@@ -4701,6 +4805,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   const still = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   function draw() {
+    g = gPantalla;
     const { vw, vh } = view;
     // At sea the carrier fight turns to sunset as Valparaíso comes into view.
     const carrierK = (() => {
@@ -4714,7 +4819,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       : s.mapa === 'valparaiso' && s.wave % 4 === 3 ? 'tarde'
       : THEMES[Math.max(0, s.wave - 1) % 3];
     const theme = s.themePick === 'auto' ? autoTheme : s.themePick;
-    L.intensidadNoche(theme === 'noche' || s.plane.y > 2300 ? 1 : theme === 'tarde' ? 0.5 : 0);
+    // The hour's light eases in (a theme change, or the storm clearing) instead of snapping.
+    {
+      const ahora = performance.now() / 1000;
+      const dtL = Math.min(0.1, Math.max(0, ahora - tLuz));
+      tLuz = ahora;
+      dtLuz = dtL;
+      const kq = still ? 1 : Math.min(1, dtL * 1.5);
+      nocheK += ((theme === 'noche' ? 1 : theme === 'tarde' ? 0.5 : 0) - nocheK) * kq;
+      tardeK += ((theme === 'tarde' ? 1 : 0) - tardeK) * kq;
+    }
+    L.intensidadNoche(Math.max(nocheK, s.plane.y > 2300 ? 1 : 0));
     const shake = still || s.calma ? 0 : Math.min(9, s.shake);
     const shx = shake > 0.3 ? Math.round(rand(-shake, shake)) : 0;
     const shy = shake > 0.3 ? Math.round(rand(-shake, shake)) : 0;
@@ -4725,16 +4840,35 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // The cozy backdrop: sky, clouds, mountains, the village and the woods.
     // The far layers move at half speed when the camera climbs.
     const horizon = Math.round(vh - A.DIRT - 18 + s.camY * 0.5 + shy);
-    dibujarFondo(g, { vw, vh, camX: cam, camY: s.camY, horizonte: horizon, t: s.t, ambiente: theme, quieto: still, paisaje: s.mapa === 'tormenta' ? 'oceano' : s.mapa, costa: s.mapa === 'tormenta' ? 0.5 : s.costa, viaje: s.viaje, tormenta: s.mapa === 'tormenta', despeje: s.despeje });
+    const optsFondo = { vw, vh, camX: cam, camY: s.camY, horizonte: horizon, t: s.t, ambiente: theme, quieto: still, paisaje: s.mapa === 'tormenta' ? ('oceano' as const) : s.mapa, costa: s.mapa === 'tormenta' ? 0.5 : s.costa, viaje: s.viaje, tormenta: s.mapa === 'tormenta', despeje: s.despeje };
+    // The hour changed: freeze the old sky once and fade it out over the new one.
+    if (temaPrevio && temaPrevio !== theme && !still) {
+      fundido.width = canvas.width;
+      fundido.height = canvas.height;
+      dibujarFondo(fundido.getContext('2d')!, { ...optsFondo, ambiente: temaPrevio });
+      fundidoT = FUNDIDO;
+    }
+    temaPrevio = theme;
+    dibujarFondo(g, optsFondo);
+    if (fundidoT > 0) {
+      fundidoT = Math.max(0, fundidoT - dtLuz);
+      const k = fundidoT / FUNDIDO;
+      g.globalAlpha = k * k * (3 - 2 * k);
+      g.drawImage(fundido, 0, 0);
+      g.globalAlpha = 1;
+    }
     // Backdrop filter: a little less colour and a soft dusk veil, so planes,
-    // missiles, enemies and effects stand out against any scenery.
+    // missiles, enemies and effects stand out against any scenery. San Antonio
+    // (the brightest, busiest map) gets a stronger one; its layers are also
+    // toned down when they're painted (fondo.ts, APAGADO_SA).
     if (!s.sinFiltro) {
+      const sa = s.mapa === 'valle';
       g.globalCompositeOperation = 'saturation';
-      g.globalAlpha = 0.45;
+      g.globalAlpha = sa ? 0.5 : 0.45;
       g.fillStyle = '#808080';
       g.fillRect(0, 0, vw, vh);
       g.globalCompositeOperation = 'source-over';
-      g.globalAlpha = theme === 'noche' ? 0.1 : 0.18;
+      g.globalAlpha = theme === 'noche' ? (sa ? 0.12 : 0.1) : sa ? 0.24 : 0.18;
       g.fillStyle = '#2a2048';
       g.fillRect(0, 0, vw, vh);
       g.globalAlpha = 1;
@@ -4742,12 +4876,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
     // Ground strip (painted once for the whole level) and the pantry's flag.
     g.drawImage(strip.canvas, cam, 0, vw, strip.canvas.height, 0, sy(strip.top), vw, strip.canvas.height);
-    // The ground takes the light of the hour too (night, dusk), and the busy
-    // Valparaíso hillside is toned down so the mice on it stay readable.
+    // Under the strip, a flat fill of its bottom colour (before the veil, so it darkens at night too).
+    const below = sy(-A.DIRT);
+    if (below < vh) {
+      if (filaBajo) g.drawImage(filaBajo, cam, 0, vw, 1, 0, below, vw, vh - below);
+      else A.R(g, 0, below, vw, vh - below, P.e1);
+    }
+    // The ground takes the light of the hour too (night, dusk). The busy ground
+    // strips were toned down once when painted (see cambiarMapa).
     {
       const veil = theme === 'noche' ? 0.38 : theme === 'tarde' ? 0.14 : 0;
-      const desat = s.mapa === 'valparaiso' && !s.sinFiltro ? 0.15 : 0;
-      if (veil > 0 || desat > 0) {
+      if (veil > 0) {
         g.save();
         g.beginPath();
         g.moveTo(0, vh);
@@ -4755,21 +4894,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         g.lineTo(vw, vh);
         g.closePath();
         g.clip();
-        if (desat > 0) {
-          g.globalCompositeOperation = 'saturation';
-          g.globalAlpha = desat;
-          g.fillStyle = '#808080';
-          g.fillRect(0, 0, vw, vh);
-          g.globalCompositeOperation = 'source-over';
-        }
-        if (veil > 0) {
-          g.globalAlpha = veil;
-          g.fillStyle = theme === 'noche' ? '#2a2048' : '#5a3048';
-          g.fillRect(0, 0, vw, vh);
-        }
+        g.globalAlpha = veil;
+        g.fillStyle = theme === 'noche' ? '#2a2048' : '#5a3048';
+        g.fillRect(0, 0, vw, vh);
         g.restore();
       }
     }
+    // Dusk and night: the strip's windows light up (some at dusk, the rest after dark) and the street lamps come on.
+    if (lucesSuelo && nocheK > 0.02 && strip !== marStrip) dibujarLucesSuelo(g, lucesSuelo, cam, sy(strip.top), vw, nocheK, still ? 0 : s.t, (x: number) => sy(ground(x)));
     if (s.mapa === 'valparaiso') VP.dibujarDetallesValpo(g, cam, (alt: number) => sy(alt), vw, s.t, still);
     // The storm: the sea is lost under a heaving floor of dark cloud.
     if (s.mapa === 'tormenta' && s.despeje < 1) {
@@ -4787,7 +4919,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const marTormenta = s.mapa === 'tormenta' && s.despeje > 0;
     if (s.mapa === 'oceano' || marTormenta) {
       OC.dibujarOlas(g, cam, sy(OC.NIVEL_MAR), vw, s.t, still, marTormenta ? 'noche' : theme);
-      for (const w of splashes) OC.dibujarSalpicadura(g, sx(w.x), sy(OC.NIVEL_MAR), 1 - w.t / 0.9);
       for (const h of hundidos) {
         const k = 1 - h.t / 3.2;
         const X = sx(h.x), Y = sy(h.y);
@@ -4810,8 +4941,6 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         OC.dibujarMarMagico(g, cam, sy(OC.NIVEL_MAR), vw, vh, s.t, s.despeje, still, agitados);
       }
     }
-    const below = sy(-A.DIRT);
-    if (below < vh) A.R(g, 0, below, vw, vh - below, s.mapa === 'oceano' || s.mapa === 'tormenta' ? OC.COLOR_LECHO : P.e1);
     A.drawFlag(g, sx(PANTRY.x0 + 70), sy(ground(PANTRY.x0 + 70)), s.t);
     // The home runway: asphalt with a dashed centre line, at the start of San Antonio.
     if (s.mapa === 'valle') {
@@ -4824,6 +4953,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
 
+    // From here to the plane, the world in front of the backdrop. At dusk and
+    // night it's drawn on its own layer to be graded to the hour's light.
+    const gradua = !s.sinFiltro && nocheK > 0.02;
+    if (gradua) {
+      if (frente.width !== canvas.width || frente.height !== canvas.height) {
+        frente.width = canvas.width;
+        frente.height = canvas.height;
+      }
+      gFrente.setTransform(1, 0, 0, 1, 0, 0);
+      gFrente.clearRect(0, 0, frente.width, frente.height);
+      gFrente.imageSmoothingEnabled = false;
+      g = gFrente;
+    }
+    // Splash columns on the sea (in front, so they take the hour's light).
+    if (s.mapa === 'oceano' || marTormenta) for (const w of splashes) OC.dibujarSalpicadura(g, sx(w.x), sy(OC.NIVEL_MAR), 1 - w.t / 0.9);
     // Gore mode: blood stains on the ground and pink patches on the water.
     GR.dibujarSuelo(g, s.sangre, sx, sy, vw, OC.NIVEL_MAR);
 
@@ -4988,6 +5132,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       tup[1] = toS(y) + shy;
       return tup;
     };
+    // Open water under the action: the lights are mirrored on it.
+    const ySuperficie = s.mapa === 'oceano' || (s.mapa === 'tormenta' && s.despeje > 0.2) ? sy(OC.NIVEL_MAR) : -1;
     for (const e of s.estelas) E.dibujarEstela(g, e, toScreen, s.t);
     for (const sh of s.shots) if (sh.estela) E.dibujarEstela(g, sh.estela, toScreen, s.t);
     for (const sh of s.shots) {
@@ -5013,7 +5159,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       return tupFx;
     }, s.t);
     GR.dibujar(g, s.sangre, sx, sy);
-    L.dibujarLuces(g, s.luces, toScreen, s.t);
+    // By day the glows go here, under the plane; graded, they go on top (below).
+    if (!gradua) L.dibujarLuces(g, s.luces, toScreen, s.t, ySuperficie);
     const blink = s.inv > 0 && Math.floor(s.t * 14) % 2 === 0;
     // Boarding: the pilot walks out of the house to the plane and hops in.
     if (s.despegue === 'subiendo') {
@@ -5175,6 +5322,31 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       g.fillRect(0, 0, vw, 3);
       g.fillRect(0, vh - 3, vw, 3);
       g.globalAlpha = 1;
+    }
+
+    // Grade the world to the hour: only its own pixels (source-atop) take a cool
+    // moonlit wash at night or a warm one at dusk; a lightning flash lifts it.
+    // Then it goes on the screen and the lights (flames, blasts, muzzle flashes)
+    // glow over everything they'd light, reflected on the water.
+    if (gradua) {
+      const flash = Math.min(1, s.relampago * 1.4);
+      gFrente.globalCompositeOperation = 'source-atop';
+      const kN = Math.max(0, nocheK - 0.5 * tardeK) * (1 - flash);
+      if (kN > 0.01) {
+        gFrente.globalAlpha = 0.4 * kN;
+        gFrente.fillStyle = '#16123c';
+        gFrente.fillRect(0, 0, frente.width, frente.height);
+      }
+      if (tardeK > 0.01) {
+        gFrente.globalAlpha = 0.13 * tardeK;
+        gFrente.fillStyle = '#7a3048';
+        gFrente.fillRect(0, 0, frente.width, frente.height);
+      }
+      gFrente.globalAlpha = 1;
+      gFrente.globalCompositeOperation = 'source-over';
+      g = gPantalla;
+      g.drawImage(frente, 0, 0);
+      L.dibujarLuces(g, s.luces, toScreen, s.t, ySuperficie);
     }
 
     // Enemy markers: a small red chevron over every enemy in view, so none blends into the scenery.

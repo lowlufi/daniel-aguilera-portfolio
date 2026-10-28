@@ -23,6 +23,7 @@
 const MAX_L = 64;
 const MAX_RL = 48; // radio máximo de un halo, px
 const MARGEN = 48;
+const REFLEJO = 90; // px sobre el agua a los que una luz aún se refleja
 const ALTURA_MAX = 220; // px de altura a los que la sombra ya no se ve
 const MAX_RS = 40; // semieje máximo de una sombra
 const SOMBRA = '#2a1f4e'; // violeta hondo de la paleta, nunca negro puro
@@ -173,12 +174,17 @@ export function pasoLuces(L: Luces, dt: number): void {
   }
 }
 
-/** Pinta todas las luces (sumando color). Llamar después de lo que iluminan. */
+/**
+ * Pinta todas las luces (sumando color). Llamar después de lo que iluminan.
+ * `ySup`: fila de pantalla de una superficie de agua (o -1): las luces cerca
+ * de ella se reflejan, aplastadas y temblando, más fuerte de noche.
+ */
 export function dibujarLuces(
   g: CanvasRenderingContext2D,
   L: Luces,
   toScreen: (x: number, y: number) => [number, number],
   t: number,
+  ySup = -1,
 ): void {
   if (L.n === 0 || typeof document === 'undefined') return;
   const op = g.globalCompositeOperation, alfa0 = g.globalAlpha;
@@ -198,7 +204,17 @@ export function dibujarLuces(
     const x = Math.round(q[0]), y = Math.round(q[1]);
     if (x < -MARGEN || y < -MARGEN || x > W || y > H) continue;
     g.globalAlpha = alfa0 * a * base;
-    g.drawImage(halo(L.col[i], r, (x + y) & 1), x - r, y - r);
+    const h = halo(L.col[i], r, (x + y) & 1);
+    g.drawImage(h, x - r, y - r);
+    // Reflection on the water: half height, wobbling sideways, fading with the gap.
+    if (ySup >= 0 && y < ySup && ySup - y < REFLEJO) {
+      const k = 1 - (ySup - y) / REFLEJO;
+      const ry = Math.max(1, r >> 1);
+      const yr = ySup + 2 + Math.round((ySup - y) * 0.3);
+      const dx = ((cuadro >> 1) + L.sem[i]) & 1 ? 1 : -1;
+      g.globalAlpha = alfa0 * a * k * (0.18 + 0.32 * noche);
+      g.drawImage(h, x - r + dx, yr - (ry >> 1), 2 * r + 1, ry + 1);
+    }
   }
   g.globalCompositeOperation = op;
   g.globalAlpha = alfa0;
@@ -226,7 +242,8 @@ export function sombra(g: CanvasRenderingContext2D, xPantalla: number, ySueloPan
   const x = Math.round(xPantalla), y = Math.round(ySueloPantalla);
   const s = elipse(rx, (x + y) & 1);
   const alfa0 = g.globalAlpha;
-  g.globalAlpha = alfa0 * 0.4 * a;
+  // Under the moon there's no hard sun: shadows go soft and faint at night.
+  g.globalAlpha = alfa0 * 0.4 * a * (1 - 0.65 * noche);
   g.drawImage(s, x - rx, y - ((s.height - 1) >> 1));
   g.globalAlpha = alfa0;
 }
