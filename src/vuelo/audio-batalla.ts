@@ -2780,18 +2780,19 @@ export function nitroFin(): void {
 
 /* Tono de fijación propio (el jugador fija a un enemigo): más agudo, más
  * puro y más bajo que las alarmas de misil, para no confundirlos. */
-type Mira = { v: Voz; osc: OscillatorNode; g: GainNode; prox: number; visto: number; solido: number };
+type Mira = { v: Voz; osc: OscillatorNode; g: GainNode; prox: number; visto: number; solido: number; paso: number };
 let mira: Mira | null = null;
 
 function miraViva(m: Mezcla, t: number): Mira {
   if (mira) return mira;
   const osc = m.ctx.createOscillator();
-  osc.setPeriodicWave(m.ctx.createPeriodicWave(new Float32Array(3), new Float32Array([0, 1, 0.18])));
+  // Áspero (varios armónicos) para que el gruñido del buscador suene a zumbido, no a pitido.
+  osc.setPeriodicWave(m.ctx.createPeriodicWave(new Float32Array(6), new Float32Array([0, 1, 0.5, 0.32, 0.18, 0.1])));
   osc.frequency.value = 1500;
   const g = ganancia(m, 0);
   const v = voz(osc, [g], m.bus, false);
   osc.start(t);
-  mira = { v, osc, g, prox: 0, visto: t, solido: 0 };
+  mira = { v, osc, g, prox: 0, visto: t, solido: 0, paso: 0 };
   return mira;
 }
 
@@ -2804,9 +2805,11 @@ function mantenerMira(t: number) {
 }
 
 /**
- * Fijando blanco: llamar cada cuadro con k 0…1 mientras se fija. Bips que
- * se aceleran (de ~3 a ~14 por segundo) y suben de tono. Al dejar de
- * llamarla se calla sola en ≤ 0.1 s.
+ * Fijando blanco, como el buscador infrarrojo de un Sidewinder: mientras busca,
+ * un gruñido grave y áspero (pulsos de ~30 por segundo con el tono temblando)
+ * que sube y se hace más fuerte; con el blanco fijado (k = 1), el chillido agudo
+ * y sostenido del buscador, con un leve trino, mientras se siga llamando.
+ * Llamar cada cuadro; al dejar de llamarla se calla sola en ≤ 0.16 s.
  */
 export function fijando(k: number): void {
   const m = salida();
@@ -2815,29 +2818,41 @@ export function fijando(k: number): void {
   const kk = clamp(num(k), 0, 1);
   const f = miraViva(m, t);
   f.visto = t;
-  if (t < f.solido) return; // el tono sólido manda
-  const intervalo = 0.3 - 0.23 * Math.pow(kk, 1.2);
-  const largo = Math.min(0.05, intervalo * 0.45);
-  const vol = (0.05 + 0.035 * kk) * (1 - 0.5 * alarma);
-  hacia(f.osc.frequency, 1500 + 400 * kk, t, 0.02);
+  if (t < f.solido) return; // el «clic» de fijar manda
   if (f.prox < t) f.prox = t + 0.005;
+  if (kk >= 1) {
+    const vol = 0.07 * (1 - 0.4 * alarma);
+    while (f.prox < t + 0.12) {
+      f.osc.frequency.setValueAtTime(f.paso++ % 2 ? 1720 : 1640, f.prox);
+      f.prox += 0.045;
+    }
+    sujeta(f.g.gain, t);
+    f.g.gain.linearRampToValueAtTime(vol, t + 0.012);
+    f.g.gain.setValueAtTime(vol, t + 0.12);
+    f.g.gain.linearRampToValueAtTime(0, t + 0.16);
+    return;
+  }
+  const vol = (0.035 + 0.05 * kk) * (1 - 0.5 * alarma);
+  const base = 380 + 260 * kk;
   while (f.prox < t + 0.1) {
     const b = f.prox;
+    const v = vol * rand(0.6, 1);
+    f.osc.frequency.setValueAtTime(base * rand(0.94, 1.06), b);
     f.g.gain.setValueAtTime(0, b);
-    f.g.gain.linearRampToValueAtTime(vol, b + 0.004);
-    f.g.gain.setValueAtTime(vol, b + largo - 0.005);
-    f.g.gain.linearRampToValueAtTime(0, b + largo);
-    f.prox += intervalo;
+    f.g.gain.linearRampToValueAtTime(v, b + 0.004);
+    f.g.gain.setValueAtTime(v, b + 0.018);
+    f.g.gain.linearRampToValueAtTime(0, b + 0.024);
+    f.prox += 0.032;
   }
 }
 
-/** Blanco fijado: tono sólido de ~0.5 s (una vez, en el momento de fijar). */
+/** Blanco fijado: un «clic» agudo corto; después sigue el tono sostenido de `fijando(1)`. */
 export function fijado(): void {
   const m = salida();
   if (!m) return;
   const t = m.ctx.currentTime;
   const f = miraViva(m, t);
-  if (t < f.solido - 0.3) return;
+  if (t < f.solido - 0.1) return;
   const vol = 0.1 * (1 - 0.4 * alarma);
   sujeta(f.g.gain, t);
   f.g.gain.setTargetAtTime(0, t, 0.003);
@@ -2845,10 +2860,10 @@ export function fijado(): void {
   f.osc.frequency.setValueAtTime(1900, t + 0.012);
   f.g.gain.setValueAtTime(0, t + 0.012);
   f.g.gain.linearRampToValueAtTime(vol, t + 0.02);
-  f.g.gain.setValueAtTime(vol, t + 0.5);
-  f.g.gain.linearRampToValueAtTime(0, t + 0.54);
-  f.solido = t + 0.56;
-  f.prox = t + 0.6;
+  f.g.gain.setValueAtTime(vol, t + 0.12);
+  f.g.gain.linearRampToValueAtTime(0, t + 0.14);
+  f.solido = t + 0.15;
+  f.prox = t + 0.15;
   f.visto = t;
 }
 
@@ -3651,7 +3666,7 @@ export function paracaidas(pan = 0): void {
  * aceleran y suben con la cercanía; muy cerca, tono continuo. Sin vibrato:
  * el tono solo se desliza con `cerca`.
  */
-type Rwr = { v: Voz; osc: OscillatorNode; g: GainNode; prox: number; continuo: boolean; quieto: number; activo: boolean };
+type Rwr = { v: Voz; osc: OscillatorNode; g: GainNode; prox: number; continuo: boolean; quieto: number; activo: boolean; paso: number };
 let rwr: Rwr | null = null;
 
 /**
@@ -3689,7 +3704,7 @@ export function alertaMisil(cerca: number): void {
     const g = ganancia(m, 0);
     const v = voz(osc, [lp, g], m.bus, false);
     osc.start(t);
-    rwr = { v, osc, g, prox: t + 0.01, continuo: false, quieto: t, activo: false };
+    rwr = { v, osc, g, prox: t + 0.01, continuo: false, quieto: t, activo: false, paso: 0 };
   }
   const f = rwr;
   if (!f.activo) {
@@ -3698,8 +3713,8 @@ export function alertaMisil(cerca: number): void {
   }
   // Si ya suena la alarma fuerte, el RWR da un paso atrás (no compiten).
   const vol = (0.07 + 0.05 * c) * (1 - 0.5 * nivelFuerte);
-  hacia(f.osc.frequency, 820 + 420 * c, t, 0.03);
   if (c >= 0.93) {
+    hacia(f.osc.frequency, 1300, t, 0.02);
     // Tono continuo que se sostiene mientras lo sigan llamando.
     sujeta(f.g.gain, t);
     if (!f.continuo) f.g.gain.linearRampToValueAtTime(vol, t + 0.01);
@@ -3719,8 +3734,12 @@ export function alertaMisil(cerca: number): void {
   const intervalo = 0.07 + 0.55 * Math.pow(1 - c, 1.4);
   const largo = Math.min(0.09, intervalo * 0.5);
   if (f.prox < t) f.prox = t + 0.01;
+  // Como un receptor de alerta real ante un lanzamiento: un trino de dos tonos
+  // («di-du-di-du») que se apura con la cercanía.
+  const lo = 820 + 420 * c;
   while (f.prox < t + 0.13) {
     const b = f.prox;
+    f.osc.frequency.setValueAtTime(f.paso++ % 2 ? lo * 1.33 : lo, b);
     f.g.gain.setValueAtTime(0, b);
     f.g.gain.linearRampToValueAtTime(vol, b + 0.004);
     f.g.gain.setValueAtTime(vol, b + largo - 0.005);

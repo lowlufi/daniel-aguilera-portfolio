@@ -2515,7 +2515,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         AB.fijado();
         if (s.fighters.some((f) => b.f.pos() === f.a)) radio('Ratón en apuros', RADIO.fijado, true);
       }
-      else if (s.lockT < LOCK_TIME && s.lockT > 0.1 && !s.attract) AB.fijando(s.lockT / LOCK_TIME);
+      // The seeker's growl while it hunts, then its high steady tone for as long as the lock holds.
+      else if (s.lockT > 0.1 && !s.attract && s.mode === 'play') AB.fijando(Math.min(1, s.lockT / LOCK_TIME));
     } else if (b) {
       s.lockKey = b.key;
       s.lockCand = b.f;
