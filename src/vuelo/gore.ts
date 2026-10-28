@@ -22,13 +22,13 @@ type Ctx = CanvasRenderingContext2D;
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
 
-const MAX_P = 220; // droplets + gibs + water drops
-const MAX_MANCHAS = 160; // ground stains
-const MAX_TINTES = 12; // patches on the water
+const MAX_P = 420; // droplets + gibs + water drops
+const MAX_MANCHAS = 280; // ground stains
+const MAX_TINTES = 18; // patches on the water
 const GRAV = 190; // px/s²
-const VIDA_MANCHA = 22; // s
-const VIDA_TROZO = 7; // s
-const VIDA_TINTE = 4.5; // s
+const VIDA_MANCHA = 45; // s
+const VIDA_TROZO = 12; // s
+const VIDA_TINTE = 7; // s
 
 // Particle kinds.
 const T_GOTA = 0, T_TROZO = 1, T_AGUA = 2;
@@ -226,7 +226,15 @@ export function despedazar(e: Gore, x: number, y: number, vx: number, vy: number
   trozo(e, x, y, ex(0.6), ey(0.7), TORSO, pelo.ropa, pelo.casco);
   for (let k = 0; k < 4; k++) trozo(e, x + rnd(-2, 2), y + rnd(-2, 2), ex(1.2), ey(1), MIEMBRO, k < 2 ? pelo.ropa : pelo.piel, pelo.casco);
   trozo(e, x, y - 2, ex(1), ey(0.9), COLA, COLA_C, pelo.casco);
-  sangre(e, x, y, vx * 0.01, 1, 16, 1.25);
+  // Bloody scraps of what was inside.
+  for (let k = 0; k < 4; k++) trozo(e, x + rnd(-2, 2), y + rnd(-1, 2), ex(1.3), ey(0.8), MIEMBRO, k % 2 ? ROJO[1] : ROJO[2], ROJO[0]);
+  // A fountain up and a fast red mist all round.
+  sangre(e, x, y, vx * 0.01, 1, 30, 1.4);
+  for (let k = 0; k < 14; k++) {
+    const a = (k / 14) * Math.PI * 2 + rnd(-0.2, 0.2);
+    const v = rnd(90, 150);
+    gota(e, x, y, vx * 0.2 + Math.cos(a) * v, vy * 0.2 + Math.sin(a) * v);
+  }
 }
 
 /**
@@ -307,7 +315,7 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
     if (t === T_TROZO) {
       e.ang[i] += e.giro[i] * dt;
       // Fresh pieces drip as they fly.
-      if (e.edad[i] < 1.2 && Math.random() < dt * 10) gota(e, x, e.y[i], e.vx[i] * 0.2, e.vy[i] * 0.2);
+      if (e.edad[i] < 2.5 && Math.random() < dt * 18) gota(e, x, e.y[i], e.vx[i] * 0.2, e.vy[i] * 0.2);
     }
     if (e.y[i] > piso) continue;
     if (mar) {
@@ -317,13 +325,14 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
       continue;
     }
     if (t === T_GOTA) {
-      if (Math.random() < 0.7) mancha(e, x, piso, e.forma[i] + (Math.random() < 0.4 ? 1 : 0));
+      mancha(e, x, piso, e.forma[i] + (Math.random() < 0.6 ? 1 : 0));
       quitar(e, i);
       continue;
     }
     // A gib: bounces twice, smearing the ground, then lies still.
     e.y[i] = piso;
-    if (e.rebotes[i] === 0) mancha(e, x, piso, 3);
+    // Every landing leaves a smear; the first a real pool.
+    mancha(e, x, piso, e.rebotes[i] === 0 ? 6 : 3);
     if (e.rebotes[i] < 2 && e.vy[i] < -25) {
       e.vy[i] = -e.vy[i] * 0.38;
       e.vx[i] *= 0.55;

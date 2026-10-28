@@ -52,7 +52,7 @@ const SONIDOS_CC0 = ['modusmogulus', 'craigsmith', 'qubodup', 'unfa', 'josecruz9
 /** A HUD instrument plate (night-purple, bevelled, pixel-notched corners): see .hud-panel in index.css. */
 const CHIP = 'hud-panel h-8 [@media(min-height:500px)]:h-9 gap-1.5 px-2 text-sm';
 /** The phone HUD: the same plates, small, in one tight row so the sky stays clear. */
-const CHIP_M = 'hud-panel h-6 gap-1 px-1.5 text-[11px]';
+const CHIP_M = 'hud-panel h-5 gap-0.5 px-1 text-[10px]';
 /** The HUD's cockpit switches: cream key caps on the same pixel frame. */
 const TECLA = 'hud-key h-8 [@media(min-height:500px)]:h-9 text-sm';
 const TECLA_M = 'hud-key h-7 text-xs';
@@ -580,7 +580,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const chip = movil ? CHIP_M : CHIP;
   // The HUD's switches (square cream key caps) and its icon scale.
   const tecla = movil ? `${TECLA_M} w-7` : `${TECLA} w-8 [@media(min-height:500px)]:w-9`;
-  const ic = movil ? 1.5 : 2;
+  // Phones: a compact HUD, so the sky and the thumbs get the screen.
+  const ic = movil ? 1.25 : 2;
   const [verticalOk, setVerticalOk] = useState(false);
 
   /*
@@ -623,6 +624,11 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     const g = createVuelo(canvasRef.current!, boxRef.current!, hooks);
     game.current = g;
     g.setArriba(barraRef.current?.getBoundingClientRect().height ?? 64);
+    try {
+      g.setAutoGun(localStorage.getItem('vuelo-autogun') !== '0');
+    } catch {
+      /* private mode: stays on */
+    }
     // The title screen's background: a game flown by the autopilot.
     g.attract();
     return () => {
@@ -781,6 +787,23 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     }
     if (on) vibrar(20);
   };
+  // Automatic machine gun on phones (on by default); off, it only fires from the button.
+  const [autoGun, setAutoGunUi] = useState(() => {
+    try {
+      return localStorage.getItem('vuelo-autogun') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const toggleAutoGun = (on: boolean) => {
+    setAutoGunUi(on);
+    try {
+      localStorage.setItem('vuelo-autogun', on ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  };
+  useEffect(() => game.current?.setAutoGun(autoGun), [autoGun]);
   // «Menos movimiento», remembered on this device.
   const [calma, setCalma] = useState(() => {
     // The system's «reduce motion» turns it on unless the player chose otherwise.
@@ -1042,7 +1065,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       setDerechaBotones(px);
       game.current?.setDerecha(px);
       const r = radarRef.current?.getBoundingClientRect();
-      game.current?.setRadar(r ? { x: r.right, y: r.top } : null);
+      // The radar hangs from the HUD bar, so it must also end left of the key column.
+      game.current?.setRadar(r ? { x: b ? Math.min(r.right, b.left - 6) : r.right, y: r.top } : null);
     };
     medir();
     const ro = new ResizeObserver(medir);
@@ -1263,8 +1287,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       </div>
 
       {/* Top bar: the instrument panel on the left, the cockpit switches on the right. */}
-      <div ref={barraRef} className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-        <div className={`pointer-events-auto flex flex-wrap items-center ${movil ? 'gap-1.5' : 'gap-2'}`}>
+      <div
+        ref={barraRef}
+        className={`pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-2 ${
+          movil
+            ? 'p-1.5 pt-[max(0.375rem,env(safe-area-inset-top))] pl-[max(0.375rem,env(safe-area-inset-left))] pr-[max(0.375rem,env(safe-area-inset-right))]'
+            : 'p-3 pt-[max(0.75rem,env(safe-area-inset-top))] pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]'
+        }`}
+      >
+        <div className={`pointer-events-auto flex flex-wrap items-center ${movil ? 'gap-1' : 'gap-2'}`}>
           {phase === 'intro' || phase === 'titulo' || phase === 'creditos' || phase === 'ajustes' ? null : phase === 'menu' ? (
             <span className={`${chip} px-3`}>
               <Px i="avion" s={ic} />
@@ -1421,7 +1452,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
         <div className={`pointer-events-auto flex items-center justify-end gap-2 ${movil ? 'shrink-0 flex-nowrap' : 'flex-wrap'}`}>
           {/* Phones: the radar is drawn in this slot (left of the pause key), so the HUD chips
               never run under it and the thumb buttons get the whole right edge below. */}
-          {phase === 'play' && movil && <span ref={radarRef} aria-hidden className="pointer-events-none block h-7 w-[104px] shrink-0" />}
+          {phase === 'play' && movil && <span ref={radarRef} aria-hidden className="pointer-events-none block h-5 w-[150px] shrink-0" />}
           {phase === 'play' && (
             <button type="button" aria-label={paused ? 'Seguir' : 'Pausa'} title={paused ? 'Seguir (Esc)' : 'Pausa (Esc o P)'} onClick={togglePause} className={`${tecla} ${movil ? "relative after:absolute after:-inset-2 after:content-['']" : ''}`}>
               <Px i={paused ? 'play' : 'pausa'} s={ic} />
@@ -1851,6 +1882,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               {touchUi && (
                 <label className="hud-ajuste">
                   <span>
+                    Metralla automática
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">Dispara sola con un enemigo en la mira. Apagada, solo con el botón Balas</small>
+                  </span>
+                  <input type="checkbox" role="switch" checked={autoGun} onChange={(e) => toggleAutoGun(e.target.checked)} className="hud-switch" />
+                </label>
+              )}
+              {touchUi && (
+                <label className="hud-ajuste">
+                  <span>
                     Vibración
                     <small className="block text-[11px] font-bold text-[#c8c0e0]">Un toque corto al apretar y al acercarse un misil</small>
                   </span>
@@ -2098,6 +2138,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 {touchUi && (
                   <label className="hud-ajuste">
                     <span>
+                      Metralla automática
+                      <small className="block text-[11px] font-bold text-[#c8c0e0]">Dispara sola con un enemigo en la mira. Apagada, solo con el botón Balas</small>
+                    </span>
+                    <input type="checkbox" role="switch" checked={autoGun} onChange={(e) => toggleAutoGun(e.target.checked)} className="hud-switch" />
+                  </label>
+                )}
+                {touchUi && (
+                  <label className="hud-ajuste">
+                    <span>
                       Vibración
                       <small className="block text-[11px] font-bold text-[#c8c0e0]">Un toque corto al apretar y al acercarse un misil</small>
                     </span>
@@ -2195,41 +2244,41 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               </>
             )}
           </div>
-          {/* Right thumb: two vertical columns along the right edge — the big flares and
-              missile on the outside, machine gun, bomb and throttle on the inside (nuke on top when there is one). */}
-          <div ref={botonesRef} className="absolute bottom-4 right-3 z-10 flex items-end gap-2.5 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] [@media(max-height:420px)]:bottom-2 [@media(max-height:420px)]:gap-2">
-            <div className="flex flex-col items-center gap-2.5 [@media(min-height:421px)_and_(max-height:500px)]:gap-1.5 [@media(max-height:420px)]:gap-1">
-              {!!hud?.nukes && (
-                <TouchButton label={`Nuclear ×${hud.nukes}`} corto="Nuclear" {...hold('nuke')}>
-                  <Px i="nuclear" s={3} />
-                </TouchButton>
+          {/* Right thumb: every key in one column along the right edge, from under the HUD bar
+              to the bottom; the flares and missile get the most room, nuke on top when there is one. */}
+          <div
+            ref={botonesRef}
+            className="absolute right-2 z-10 flex w-[3.75rem] flex-col gap-1 pb-[env(safe-area-inset-bottom)] pr-[env(safe-area-inset-right)] box-content"
+            style={{ top: barraH + 4, bottom: 6 }}
+          >
+            {!!hud?.nukes && (
+              <TouchButton fila label={`Nuclear ×${hud.nukes}`} corto="Nuclear" {...hold('nuke')}>
+                <Px i="nuclear" s={2.5} />
+              </TouchButton>
+            )}
+            <TouchButton fila big label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} corto="Bengalas" alerta={!!hud?.warn} guia={tutoVisible && tuto === 2} {...hold('flare')}>
+              <Px i="bengala" s={3} />
+            </TouchButton>
+            <TouchButton fila big label="Misil" guia={tutoVisible && tuto === 1} {...hold('fire')}>
+              <Px i="misil" s={3} />
+            </TouchButton>
+            <TouchButton fila label={hud?.hot ? 'Metralla: recalentada' : 'Metralla'} corto={hud?.hot ? '¡Calor!' : 'Balas'} active={!!hud?.hot} {...hold('gun')}>
+              <Px i="bala" s={2.5} />
+            </TouchButton>
+            <TouchButton fila label="Bomba" {...hold('bomb')}>
+              <Px i="bomba" s={2.5} />
+            </TouchButton>
+            <TouchButton fila label={hud?.nitro === 'listo' ? 'Acelerar (doble toque: nitro)' : 'Acelerar'} corto={hud?.nitro === 'listo' ? 'Gas ×2' : 'Gas'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
+              {hud?.nitro === 'activo' ? <Px i="llama" s={2.5} /> : (
+                <span className="relative inline-flex">
+                  <Px i="acelerar" s={2.5} />
+                  {hud?.nitro === 'listo' && <Px i="llama" s={1.25} className="absolute -right-2.5 -top-2" />}
+                </span>
               )}
-              <TouchButton label={hud?.hot ? 'Metralla: recalentada' : 'Metralla'} corto={hud?.hot ? '¡Calor!' : 'Balas'} active={!!hud?.hot} {...hold('gun')}>
-                <Px i="bala" s={3} />
-              </TouchButton>
-              <TouchButton label="Bomba" {...hold('bomb')}>
-                <Px i="bomba" s={3} />
-              </TouchButton>
-              <TouchButton label={hud?.nitro === 'listo' ? 'Acelerar (doble toque: nitro)' : 'Acelerar'} corto={hud?.nitro === 'listo' ? 'Gas ×2' : 'Gas'} active={hud?.throttle === 1 || hud?.nitro === 'activo'} {...throttle(1)}>
-                {hud?.nitro === 'activo' ? <Px i="llama" s={3} /> : (
-                  <span className="relative inline-flex">
-                    <Px i="acelerar" s={3} />
-                    {hud?.nitro === 'listo' && <Px i="llama" s={1.5} className="absolute -right-2.5 -top-2" />}
-                  </span>
-                )}
-              </TouchButton>
-              <TouchButton label="Frenar" corto="Freno" active={hud?.throttle === -1} {...throttle(-1)}>
-                <Px i="frenar" s={3} />
-              </TouchButton>
-            </div>
-            <div className="flex flex-col items-center gap-2.5 [@media(max-height:420px)]:gap-1.5">
-              <TouchButton label={hud?.warn ? 'Bengalas: ¡misil encima!' : 'Bengalas'} corto="Bengalas" big alerta={!!hud?.warn} guia={tutoVisible && tuto === 2} {...hold('flare')}>
-                <Px i="bengala" s={4} />
-              </TouchButton>
-              <TouchButton label="Misil" big guia={tutoVisible && tuto === 1} {...hold('fire')}>
-                <Px i="misil" s={4} />
-              </TouchButton>
-            </div>
+            </TouchButton>
+            <TouchButton fila label="Frenar" corto="Freno" active={hud?.throttle === -1} {...throttle(-1)}>
+              <Px i="frenar" s={2.5} />
+            </TouchButton>
           </div>
         </>
       )}
@@ -2283,14 +2332,17 @@ function vibrar(ms: number | number[]) {
  * pointer capture `:active` isn't reliable on every phone), and `guia` rings it while the
  * first-flight tutorial points at it.
  */
-function TouchButton({ label, corto, big, active, alerta, guia, children, ...rest }: { label: string; corto?: string; big?: boolean; active?: boolean; alerta?: boolean; guia?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+function TouchButton({ label, corto, big, fila, active, alerta, guia, children, ...rest }: { label: string; corto?: string; big?: boolean; fila?: boolean; active?: boolean; alerta?: boolean; guia?: boolean; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const [down, setDown] = useState(false);
   return (
     <button
       type="button"
       aria-label={label}
       className={`hud-touch flex flex-col items-center justify-center ${active ? 'hud-touch-on' : ''} ${down ? 'hud-touch-down' : ''} ${alerta ? 'hud-touch-alerta' : ''} ${guia ? 'hud-touch-guia' : ''} ${
-        big
+        // In the single right-edge column the keys share its height (the big ones a larger share).
+        fila
+          ? `min-h-0 w-full ${big ? 'flex-[1.45]' : 'flex-1'}`
+          : big
           ? 'h-20 w-20 [@media(max-height:420px)]:h-[4.5rem] [@media(max-height:420px)]:w-[4.5rem]'
           : // Short (landscape phone) screens: 48 px, then the 44 px minimum, so the column clears the radar even with the nuke key.
             'h-14 w-14 [@media(min-height:421px)_and_(max-height:500px)]:h-12 [@media(min-height:421px)_and_(max-height:500px)]:w-12 [@media(max-height:420px)]:h-11 [@media(max-height:420px)]:w-11'

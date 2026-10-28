@@ -2323,7 +2323,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const cx = u.x, cy = u.y + 6;
     const dx = cx - hx || (Math.random() < 0.5 ? -1 : 1), dy = cy - hy;
     if (bala) {
-      GR.sangre(s.sangre, hx, hy, dx, Math.max(0, dy) + 2, muerto ? 10 : 5);
+      GR.sangre(s.sangre, hx, hy, dx, Math.max(0, dy) + 2, muerto ? 20 : 9, 1.2);
       return;
     }
     if (!muerto) return;
@@ -3128,13 +3128,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       touch.y = Math.sin(p.rumbo + off);
       syncInput();
     } else turnK = 0;
-    // Phones: the machine gun fires by itself whenever an enemy sits in the sights.
+    // Phones: the machine gun fires by itself whenever an enemy sits in the sights
+    // (on its own flag, so the gun button still fires whenever it's held).
     if (s.autoGun && s.mode === 'play' && !s.dead && !s.attract) {
       const enMira = enemigoEnMira(p);
-      if (enMira !== touch.gun) {
-        touch.gun = enMira;
+      if (enMira !== gunSola) {
+        gunSola = enMira;
         syncInput();
       }
+    } else if (gunSola) {
+      gunSola = false;
+      syncInput();
     }
 
     // The plane: the player flies it; in the menu it flies itself.
@@ -5024,7 +5028,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (!s.attract && s.mode === 'play') {
       const u = clamp(Math.round(2 / view.s), 1, 6);
       // Phones get a slightly smaller one.
-      const S = (view.touch ? 46 : 62) * u;
+      const S = (view.touch ? 40 : 62) * u;
       const ALC = 760; // world px from the plane to the radar's edge
       const k = S / (2 * ALC);
       // Top-right corner, under the pause key and the HUD bar (the bottom is for the thumbs and the road).
@@ -5371,6 +5375,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     KeyE: 'acc', ShiftLeft: 'acc', ShiftRight: 'acc', KeyQ: 'brake', ControlLeft: 'brake', ControlRight: 'brake', KeyZ: 'zoom',
   };
   const touch = { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false };
+  /** The automatic machine gun's own trigger (phones), apart from the gun button. */
+  let gunSola = false;
+  let autoGunPref = true;
   /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none; and how far into the hold (0…1). */
   let turn = 0;
   let turnK = 0;
@@ -5403,7 +5410,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     input.fire = keys.has('fire') || touch.fire;
     input.bomb = keys.has('bomb') || touch.bomb;
     input.flare = keys.has('flare') || touch.flare;
-    input.gun = keys.has('gun') || touch.gun;
+    input.gun = keys.has('gun') || touch.gun || gunSola;
     input.nuke = keys.has('nuke') || touch.nuke;
     input.tonel = keys.has('tonel') || touch.tonel;
   }
@@ -5676,7 +5683,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         fit();
       }
       view.touch = t;
-      s.autoGun = t;
+      s.autoGun = t && autoGunPref;
+    },
+    /** Phones: whether the machine gun fires by itself (the gun button always works). */
+    setAutoGun(on: boolean) {
+      autoGunPref = on;
+      s.autoGun = view.touch && on;
     },
     /** Height in CSS px of the HUD bar along the top, so the radar sits below it. */
     setArriba(px: number) {
