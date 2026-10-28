@@ -100,8 +100,10 @@ function rutasCriticas(): Plugin {
       const vuelo = ruta('/src/vuelo/VueloGame.tsx')?.fileName;
       const clasico = ruta('/src/sitio/ClassicSite.tsx')?.fileName;
       headers = new Map([
-        ['/', precarga(isla, [fuente('nunito-latin')])],
+        // The game is the home page now; the island moved to /isla.
+        ['/', precarga(vuelo, [fuente('nunito-latin')])],
         ['/aviones', precarga(vuelo, [fuente('nunito-latin')])],
+        ['/isla', precarga(isla, [fuente('nunito-latin')])],
         ...['/clasico', '/proyectos', '/sobre-mi'].map((r) => [r, precarga(clasico, [fuente('inter-latin')])] as [string, string[]]),
       ]);
       precache = vuelo
