@@ -951,6 +951,9 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
 
   const togglePause = useCallback(() => {
     if (phase !== 'play') return;
+    // Al seguir jugando (un toque o una tecla): iOS deja el audio «interrumpido»
+    // tras pasar a segundo plano y solo lo reanuda desde un gesto.
+    if (paused) initAudio(muted);
     setPaused((p) => {
       game.current?.setPaused(!p);
       menu.pausa(!p);
@@ -959,7 +962,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     // Fingers held when pausing are forgotten (the touch layer unmounts and never hears them lift).
     fingers.current.clear();
     setTurning(0);
-  }, [phase]);
+  }, [phase, paused, muted]);
 
   /** Back to the hangar to pick another plane (the self-playing game keeps flying behind). */
   const toHangar = useCallback(() => {
