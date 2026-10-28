@@ -6,6 +6,7 @@ import { ESCUADRON, createVuelo, dibujo, readSave, type Hud, type Mejorable, typ
 import type { BombaTipo, ModeloAvion as Avion, Piloto } from './fisica-tipos';
 import { CASA } from './pilotos';
 import * as HG from './hangar';
+import { PARAMS } from './fisica-vuelo';
 import * as AB from './audio-batalla';
 import { FPS, FRAMES, fondoTarjeta, retrato, type Pose } from './retratos';
 import Cinematica from './Cinematica';
@@ -334,6 +335,24 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
     return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
   const sel = HG.especDe(avion);
+  // The list is long: filter it by engine, or show only what's unlocked (remembered per browser).
+  const [filtro, setFiltroEstado] = useState<FiltroHangar>(() => {
+    try {
+      const f = localStorage.getItem('escuadron-dui-filtro');
+      return f === 'helice' || f === 'jet' || f === 'libres' ? f : 'todos';
+    } catch {
+      return 'todos';
+    }
+  });
+  const setFiltro = (f: FiltroHangar) => {
+    setFiltroEstado(f);
+    try {
+      localStorage.setItem('escuadron-dui-filtro', f);
+    } catch {
+      /* private mode */
+    }
+  };
+  const visibles = HG.HANGAR.filter((a) => a.id === avion || pasaFiltro(filtro, a.id, libres));
   return (
     <div
       ref={dialogo}
@@ -347,11 +366,24 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
     >
       <div className="w-full max-w-4xl rounded-[1.6rem] bg-[#fff8e7] p-3 text-[#6b4f3a] ring-4 ring-[#ead6b3] [@media(max-height:500px)]:p-2">
         <div className="sticky -top-3 z-10 -mx-3 -mt-3 flex items-center justify-between gap-2 rounded-t-[1.6rem] bg-[#fff8e7] px-3 pb-1 pt-3 [@media(max-height:500px)]:-top-1.5 [@media(max-height:500px)]:-mx-2 [@media(max-height:500px)]:-mt-2 [@media(max-height:500px)]:px-2 [@media(max-height:500px)]:pt-2">
-          <h2 className="logo-dui text-2xl font-black sm:text-3xl">🛩️ HANGAR</h2>
+          <h2 className="logo-dui text-2xl font-black sm:text-3xl [@media(max-height:500px)]:text-xl">🛩️ HANGAR</h2>
+          <div role="group" aria-label="Filtrar aviones" className="flex flex-wrap gap-1">
+            {FILTROS.map(([f, txt]) => (
+              <button
+                key={f}
+                type="button"
+                aria-pressed={filtro === f}
+                onClick={() => setFiltro(f)}
+                className={`rounded-full px-2.5 py-1 text-xs font-black ${filtro === f ? 'bg-[#3a2a6a] text-white' : 'bg-white/80 text-[#6b4f3a]'}`}
+              >
+                {txt} <span className="opacity-70">{HG.HANGAR.filter((a) => pasaFiltro(f, a.id, libres)).length}</span>
+              </button>
+            ))}
+          </div>
           <button type="button" autoFocus onClick={onClose} className={GO + ' py-2 text-sm'}>Listo ✓</button>
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7 [@media(max-height:500px)]:grid-cols-7 [@media(max-height:500px)]:gap-1">
-          {HG.HANGAR.map((a) => {
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5 xl:grid-cols-8 [@media(max-height:500px)]:grid-cols-8 [@media(max-height:500px)]:gap-1">
+          {visibles.map((a) => {
             const libre = libres.includes(a.id);
             const elegido = a.id === avion;
             return (
@@ -398,7 +430,7 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
           </ul>
         </div>
         <p className="mt-2 text-sm font-black">💣 Bombas</p>
-        <div className="mt-1 grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+        <div className="mt-1 grid grid-cols-2 gap-1.5 sm:grid-cols-5 [@media(max-height:500px)]:grid-cols-6 [@media(max-height:500px)]:gap-1">
           {HG.TIPOS_BOMBA.map((b) => {
             const info = HG.BOMBAS[b];
             const libre = bombas.includes(b);
@@ -422,7 +454,7 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
                   <img src={bombaSprites[b]} alt="" className={`h-5 w-auto ${libre ? '' : 'opacity-40 grayscale'}`} style={{ imageRendering: 'pixelated' }} />
                   <span className="text-xs font-black">{info.nombre}</span>
                 </div>
-                {libre ? <div className="text-[10px] font-bold opacity-80">{info.texto}</div> : <div className="text-[10px] font-black">🔒 {HG.corto(info.desbloqueo)}</div>}
+                {libre ? <div className={`text-[10px] font-bold opacity-80 ${elegida ? '' : '[@media(max-height:500px)]:hidden'}`}>{info.texto}</div> : <div className="text-[10px] font-black">🔒 {HG.corto(info.desbloqueo)}</div>}
               </button>
             );
           })}
@@ -432,6 +464,15 @@ function Hangar({ piloto, avion, bomba, libres, bombas, onAvion, onBomba, onClos
   );
 }
 
+type FiltroHangar = 'todos' | 'helice' | 'jet' | 'libres';
+const FILTROS: [FiltroHangar, string][] = [['todos', 'Todos'], ['helice', '🌀 Hélice'], ['jet', '🔥 Reacción'], ['libres', '🔓 Libres']];
+function pasaFiltro(f: FiltroHangar, id: Avion, libres: Avion[]) {
+  if (f === 'libres') return libres.includes(id);
+  if (f === 'helice') return PARAMS[id].helice;
+  if (f === 'jet') return !PARAMS[id].helice;
+  return true;
+}
+
 /** A one-line kind for each plane, under its name in the hangar. */
 const TIPO_AVION: Record<Avion, string> = {
   avioneta: 'De la casa', caza: 'De la casa', bombardero: 'De la casa',
@@ -439,6 +480,10 @@ const TIPO_AVION: Record<Avion, string> = {
   tomcat: 'Caza de portaaviones', a10: 'Ataque a tierra', spitfire: 'Caza clásico de hélice',
   stuka: 'Bombardero en picada', mustang: 'Caza clásico de escolta', corsair: 'Caza clásico naval',
   f16: 'Caza polivalente', mig29: 'Caza de superioridad',
+  pillan: 'Entrenador chileno', zero: 'Caza clásico naval', hurricane: 'Cazatanques de hélice', bf109: 'Caza clásico de hélice',
+  p38: 'Caza bimotor de dos colas', mosquito: 'Bimotor de madera', a37: 'Ataque ligero', a4: 'Ataque naval', f5: 'Caza ligero',
+  mig21: 'Interceptor', harrier: 'Despegue vertical', mirage: 'Caza delta', gripen: 'Caza ligero delta', rafale: 'Caza polivalente',
+  typhoon: 'Caza de superioridad', f35: 'Caza furtivo', carton: '¿Avión?',
 };
 
 /** The mice's radio: a little transmission card, the line typing itself out. */
@@ -690,6 +735,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       // The audio just woke up: bake the battle sounds now, during the intro and menus,
       // so nothing is left to synthesize when the pilot boards the plane.
       window.setTimeout(() => AB.precalentar(), 700);
+      window.setTimeout(() => AB.precalentarArsenal(), 2500);
       setIntroStep(1);
     } else if (introStep < 3) setIntroStep(3);
     else {

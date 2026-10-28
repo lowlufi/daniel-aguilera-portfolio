@@ -126,11 +126,11 @@ export function cuantos(oleada: number): number {
  */
 /** The airframes the mice can field: each wave they get their hands on better ones. */
 const FLOTA: { desde: number; modelos: ModeloAvion[] }[] = [
-  { desde: 0, modelos: ['caza', 'spitfire', 'mustang', 'stuka'] },
-  { desde: 5, modelos: ['caza', 'mustang', 'corsair', 'f16'] },
-  { desde: 7, modelos: ['f16', 'mig29', 'corsair', 'tomcat'] },
-  { desde: 9, modelos: ['f16', 'mig29', 'tomcat', 'sukhoi'] },
-  { desde: 12, modelos: ['mig29', 'sukhoi', 'raptor', 'tomcat'] },
+  { desde: 0, modelos: ['caza', 'spitfire', 'mustang', 'stuka', 'zero', 'bf109', 'hurricane'] },
+  { desde: 5, modelos: ['caza', 'mustang', 'corsair', 'f16', 'f5', 'a4', 'mig21'] },
+  { desde: 7, modelos: ['f16', 'mig29', 'corsair', 'tomcat', 'mig21', 'mirage'] },
+  { desde: 9, modelos: ['f16', 'mig29', 'tomcat', 'sukhoi', 'gripen', 'rafale'] },
+  { desde: 12, modelos: ['mig29', 'sukhoi', 'raptor', 'tomcat', 'typhoon', 'f35'] },
 ];
 
 /** A fighter airframe for this wave: mostly the current tier, now and then the next one up. */

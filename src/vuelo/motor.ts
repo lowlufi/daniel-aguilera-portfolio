@@ -28,6 +28,7 @@ import { CASA, NOMBRE, PILOTOS, pilotoGuardado } from './pilotos';
 import * as HG from './hangar';
 import * as AD from './armas-dibujo';
 import { dibujarPops } from './jugo';
+import * as ARS from './arsenal';
 import { dibujarTransicion, precalentarTransicion, type MapaId } from './transiciones';
 
 /*
@@ -446,11 +447,16 @@ let carIds = 0;
 // Points for shooting down each kind of flying mouse.
 const AIR_SCORE: Record<AE.TipoAereo, number> = { helicoptero: 300, dron: 80, globo: 150, ovni: 150 };
 // How hard each plane's missiles hit a flying boss: the bomber has few, so they count more.
-const BOSS_MUL: Record<ModeloAvion, number> = { avioneta: 1.2, caza: 1, bombardero: 1.6, raptor: 1, sukhoi: 1, b2: 1.3, ovni: 1.1, tomcat: 1.1, a10: 1.5, spitfire: 1.1, stuka: 1.5, mustang: 1.1, corsair: 1.2, f16: 1, mig29: 1 };
+const BOSS_MUL: Record<ModeloAvion, number> = { avioneta: 1.2, caza: 1, bombardero: 1.6, raptor: 1, sukhoi: 1, b2: 1.3, ovni: 1.1, tomcat: 1.1, a10: 1.5, spitfire: 1.1, stuka: 1.5, mustang: 1.1, corsair: 1.2, f16: 1, mig29: 1,
+  pillan: 1.4, zero: 1.1, hurricane: 1.3, bf109: 1.1, p38: 1.2, mosquito: 1.3, a37: 1.3, a4: 1.3, f5: 1, mig21: 1, harrier: 1.2,
+  mirage: 1, gripen: 1, rafale: 1, typhoon: 1, f35: 1.1, carton: 1.5,
+};
 /** How each plane sounds in a dive: the Stuka's siren, the Corsair's whistle, props screaming, jets roaring. */
 const PICADA_CLASE: Record<ModeloAvion, AB.ClasePicada> = {
   avioneta: 'helice', caza: 'jet', bombardero: 'helice', raptor: 'jet', sukhoi: 'jet', b2: 'jet', ovni: null,
   tomcat: 'jet', a10: 'jet', spitfire: 'helice', stuka: 'sirena', mustang: 'helice', corsair: 'silbo', f16: 'jet', mig29: 'jet',
+  pillan: 'helice', zero: 'helice', hurricane: 'helice', bf109: 'helice', p38: 'helice', mosquito: 'helice', a37: 'jet', a4: 'jet',
+  f5: 'jet', mig21: 'jet', harrier: 'jet', mirage: 'jet', gripen: 'jet', rafale: 'jet', typhoon: 'jet', f35: 'jet', carton: null,
 };
 // Enemy missiles carry their type (misiles.ts); the player's are plain rockets.
 /** Missiles let go together share one salvo group, so they never blow each other up. */
@@ -1109,6 +1115,39 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   // The self-playing game behind the title menu makes no sound.
   callarJuegoSi(() => s.attract || s.mode !== 'play');
+  /** The second batch of bomb loads (arsenal.ts): their flight, arrival, fires, mines and confetti. */
+  const ars = ARS.crear({
+    blast: (x, y, e, d) => blast(x, y, e, 'jugador', d),
+    ground: (x) => ground(x),
+    sobreMar: (x) => sobreMar(x),
+    nivelMar: OC.NIVEL_MAR,
+    coches: () => s.cars,
+    caja: (c) => A.VEH_LOOK[(c as Car).kind],
+    hurtCar: (c, d) => hurtCar(c as Car, d * danoMul()),
+    empujar: (c, vx, vy) => FA.empujeVehiculo(c as Car, vx, vy),
+    crater: (x, y, r) => crater(x, y, r),
+    puff: (x, y, r, dark, life, vx, vy) => puff(x, y, r, dark, life, vx, vy),
+    chapoteo: (x, f) => chapoteo(x, f),
+    luz: (x, y, r, c, t) => L.luz(s.luces, x, y, r, c, t),
+    pop: (x, y, text, c) => pop(x, y, text, c),
+    sacudir: (n) => {
+      if (s.mode === 'play') s.shake = Math.max(s.shake, n);
+    },
+    later: (fn, ms) => later(fn, ms),
+    cegar: (x0, x1, y0, y1) => {
+      let n = 0;
+      for (const sh of s.shots) {
+        if (!sh.enemy || sh.m.t < 0 || !sh.m.guiado) continue;
+        if (sh.m.x < x0 || sh.m.x > x1 || sh.m.y < y0 || sh.m.y > y1) continue;
+        sh.m.guiado = false;
+        sh.tgt = null;
+        n++;
+      }
+      return n;
+    },
+    pan: (x) => panOf(x),
+    mudo: () => s.attract,
+  });
 
   /* ── Sizing ── */
 
@@ -1183,8 +1222,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const vol = (o.vol ?? 1) * (x === undefined ? 1 : near(x)) * (0.25 + 0.75 * AB.aireActual());
     if (!S.suena(n, { ...o, vol, pan: x === undefined ? 0 : panOf(x) })) synth();
   }
-  const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero', raptor: 'motor-jet', sukhoi: 'motor-jet', b2: 'motor-jet', ovni: 'motor-jet', tomcat: 'motor-jet', a10: 'motor-jet', spitfire: 'motor-avioneta', stuka: 'motor-avioneta', mustang: 'motor-avioneta', corsair: 'motor-avioneta', f16: 'motor-jet', mig29: 'motor-jet' };
-  const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85, raptor: 165, sukhoi: 160, b2: 120, ovni: 130, tomcat: 160, a10: 110, spitfire: 115, stuka: 95, mustang: 125, corsair: 120, f16: 160, mig29: 155 };
+  const MOTOR: Record<ModeloAvion, S.Motor> = { avioneta: 'motor-avioneta', caza: 'motor-jet', bombardero: 'motor-bombardero', raptor: 'motor-jet', sukhoi: 'motor-jet', b2: 'motor-jet', ovni: 'motor-jet', tomcat: 'motor-jet', a10: 'motor-jet', spitfire: 'motor-avioneta', stuka: 'motor-avioneta', mustang: 'motor-avioneta', corsair: 'motor-avioneta', f16: 'motor-jet', mig29: 'motor-jet' ,
+    pillan: 'motor-avioneta', zero: 'motor-avioneta', hurricane: 'motor-avioneta', bf109: 'motor-avioneta', p38: 'motor-bombardero', mosquito: 'motor-bombardero',
+    a37: 'motor-jet', a4: 'motor-jet', f5: 'motor-jet', mig21: 'motor-jet', harrier: 'motor-jet', mirage: 'motor-jet', gripen: 'motor-jet', rafale: 'motor-jet',
+    typhoon: 'motor-jet', f35: 'motor-jet', carton: 'motor-avioneta',
+  };
+  const CRUISE: Record<ModeloAvion, number> = { avioneta: 100, caza: 150, bombardero: 85, raptor: 165, sukhoi: 160, b2: 120, ovni: 130, tomcat: 160, a10: 110, spitfire: 115, stuka: 95, mustang: 125, corsair: 120, f16: 160, mig29: 155 ,
+    pillan: 90, zero: 112, hurricane: 105, bf109: 122, p38: 125, mosquito: 125, a37: 120, a4: 145, f5: 155, mig21: 165, harrier: 125,
+    mirage: 160, gripen: 160, rafale: 162, typhoon: 168, f35: 158, carton: 80,
+  };
   /** A target locked, a missile in the rack and reloaded: the moment to fire. */
   function disparaYa() {
     return s.mode === 'play' && !s.dead && !s.despegue && s.lockT >= LOCK_TIME && !!s.lockCand?.vivo() && s.ammo >= 1 && s.fireT <= 0.05 && !!s.spec.kit.misil;
@@ -1320,6 +1366,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.puffs = [];
     s.bullets = [];
     s.zonas = [];
+    ars.reiniciar();
     s.heat = 0;
     s.hot = false;
     s.shards = [];
@@ -1719,6 +1766,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (s.combo >= 3 && s.mision?.id === 'combo3') completaMision();
     s.score += points * mult;
     s.kills++;
+    // Every enemy downed counts towards the hangar's «derribos» unlocks (kept across games).
+    if (!s.attract && s.mode === 'play') celebrar(HG.registrar({ derribos: 1 }));
     pop(x, y + 14, mult > 1 ? `+${points * mult} ×${mult}` : `+${points}`);
     const shout = ({ 2: '¡Doble!', 3: '¡Triple!', 5: '¡Imparable!', 8: '¡Leyenda!' } as Record<number, string>)[s.combo];
     if (shout) {
@@ -3066,6 +3115,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       else if (gk.sonido === 'rifle') AB.rifle(pan, k);
       else if (gk.sonido === 'browning') AB.browning(pan, k);
       else if (gk.sonido === 'laser') AB.laser(pan);
+      else if (gk.sonido === 'minigun' || gk.sonido === 'pompom' || gk.sonido === 'revolver' || gk.sonido === 'hispano' || gk.sonido === 'porotos') AB.metrallaArsenal(gk.sonido, pan, k);
       else AB.metralla(pan);
     }
     L.luz(s.luces, mx, my, 4 + tz.boca, tz.fogonazo, 0.04);
@@ -3217,6 +3267,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
   }
   function impactoBombaCuerpo(b: BombaJ) {
+    if (ARS.esNueva(b.tipo)) return ars.impacto(b);
     const x = b.x, y = Math.max(b.y, ground(b.x));
     const pan = panOf(x);
     const enSuelo = y - ground(x) < 30;
@@ -3300,6 +3351,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** Phosphorus fires and gas clouds: damage over time to what's inside. */
   function stepZonas(dt: number) {
     const wind = FV.viento(s.t, s.plane.x, 0);
+    ars.paso(dt, wind);
     for (const z of s.zonas) {
       z.t += dt;
       if (z.tipo === 'gas') {
@@ -3477,16 +3529,30 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       // Held the nose on an enemy long enough: this missile homes on it.
       // WWII rockets never home: they go out in pairs, one under each wing.
       const locked = !km.cohete && s.lockT >= LOCK_TIME && s.lockCand && s.lockCand.vivo() ? s.lockCand : undefined;
-      s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked, k: km, bam: Math.random() * 6.3 });
-      if (km.cohete && km.cohete.salva > 1) {
+      s.shots.push({ m, enemy: false, tgt: null, trail: 0, lock: locked, k: HG.kitVariante(km), bam: Math.random() * 6.3 });
+      // Salvos: two rockets one under each wing, or more (pods, tube clusters, a guided ripple)
+      // fanned out to both sides; only the first one takes the lock.
+      const salva = km.cohete?.salva ?? km.salva ?? 1;
+      if (salva > 1) {
         const cs = Math.cos(p.rumbo), sn = Math.sin(p.rumbo);
         m.x += sn * 4;
         m.y -= cs * 4;
-        const par = FA.misilJugador(p, s.wave);
-        par.combustible = km.opts.quemado;
-        par.x -= sn * 4;
-        par.y += cs * 4;
-        s.shots.push({ m: par, enemy: false, tgt: null, trail: 0, k: km, bam: Math.random() * 6.3 });
+        for (let i = 1; i < salva; i++) {
+          const par = FA.misilJugador(p, s.wave);
+          par.combustible = km.opts.quemado;
+          const lado = i % 2 ? -1 : 1, fila = Math.ceil(i / 2);
+          par.x += sn * 4 * lado * fila;
+          par.y -= cs * 4 * lado * fila;
+          if (salva > 2) {
+            // A pod's rockets spread a little and leave a few ms apart.
+            const sp = Math.hypot(par.vx, par.vy);
+            par.rumbo += lado * fila * 0.035;
+            par.vx = Math.cos(par.rumbo) * sp;
+            par.vy = Math.sin(par.rumbo) * sp;
+            par.combustible -= i * 0.04;
+          }
+          s.shots.push({ m: par, enemy: false, tgt: null, trail: 0, k: HG.kitVariante(km), bam: Math.random() * 6.3 });
+        }
       }
       // Chorrillana: two more missiles fanned out either side of the nose.
       if (s.boost === 'chorrillana') {
@@ -3509,6 +3575,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (km.sonido === 'orbe') AB.orbe(pan);
         else if (km.sonido === 'crucero') AB.crucero(pan);
         else if (km.sonido === 'misil') fx('misil', sfx.launch, { vol: 0.4, rate: rand(0.95, 1.1) * k, dur: 0.35 });
+        else if (km.sonido === 'ramjet' || km.sonido === 'ripple' || km.sonido === 'zuni' || km.sonido === 'hydra' || km.sonido === 'fuegos' || km.sonido === 'mortero') AB.lanzamientoArsenal(km.sonido, pan, k);
         else AB.lanzamiento(km.sonido, pan, k);
       }
     }
@@ -3622,6 +3689,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     pop(s.plane.x, s.plane.y + 26, '🏅 ¡Misión cumplida! +300 · +1 ⭐', P.gold);
     s.puntosMejora++;
     AB.misionCumplida();
+    if (!s.attract) celebrar(HG.registrar({ misiones: 1 }));
   }
   /** Any balloon, even when every slot is full (the guaranteed one per wave). */
   function maybePrizeAny(): Premio {
@@ -4843,6 +4911,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const racimos: BombaJ[] = [];
     for (const b of s.bombs) {
       FA.pasoBomba(b, dt, wind);
+      // The second batch (arsenal.ts) flies its own way; the piñata and the darts burst in the air.
+      if (ARS.esNueva(b.tipo) && ars.vuelo(b, dt)) {
+        b.t = -1;
+        continue;
+      }
       // A cluster canister opens over the target and sows its bomblets.
       if (b.tipo === 'racimo' && !b.sub && b.t > 0.3 && (b.y - ground(b.x) < 110 || b.t > 2.4)) {
         b.t = -1;
@@ -5461,6 +5534,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         g.globalAlpha = 1;
       }
     }
+    ars.dibujar(g, sx, sy, s.t, s.bombs);
+    ars.dibujarEncima(g, sx, sy, s.t);
     for (const f of s.flareBodies) AD.drawBengalaTipo(g, f.tipo, sx(f.x), sy(f.y), s.t + f.t);
     for (const b of s.bengalasR) AD.drawBengalaTipo(g, 'trampa', sx(b.x), sy(b.y), s.t + b.t);
     if (s.nuke) dibujarNuke(sx(s.nuke.x), sy(s.nuke.y), s.nuke.t);
@@ -6437,7 +6512,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, AB, ground, abatirAereo, hurtCar, spawnAir };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, AB, ground, abatirAereo, hurtCar, spawnAir, A, AD, drawPlaneGiro };
 
   return {
     start,

@@ -277,6 +277,146 @@ export const PARAMS: Record<ModeloAvion, ParamsAvion> = {
     accRigidez: 17, accAmort: 2.5, accPerdida: 6, wCabeceo: 17, tiempoTonel: 0.27,
     helice: false, panza: 5,
   }),
+  // T-35 Pillán: the Chilean trainer. Slow, forgiving, stalls gently and
+  // keeps the elevator alive at a crawl: the easiest plane in the hangar.
+  pillan: derivar({
+    masa: 0.9, velCrucero: 90, velMax: 155, clCrucero: 0.24, cl0: 0.24, clAlfa: 7.6,
+    alfaPerdida: 0.28, cd0: 0.03, kInducido: 0.045, cargaMax: 8, cargaMin: -4,
+    tpwCrucero: 0.56, tpwMax: 1, inercia: 0.45, accMando: 50, mandoMinimo: 0.55,
+    accRigidez: 26, accAmort: 3.4, accPerdida: 6, wCabeceo: 19, tiempoTonel: 0.22,
+    helice: true, panza: 5,
+  }),
+  // A6M Zero: feather-light, huge wing, out-turns everything with a propeller;
+  // stiff controls at high speed (low g limit at the top end).
+  zero: derivar({
+    masa: 0.95, velCrucero: 112, velMax: 180, clCrucero: 0.22, cl0: 0.24, clAlfa: 7.6,
+    alfaPerdida: 0.29, cd0: 0.025, kInducido: 0.038, cargaMax: 9, cargaMin: -3.5,
+    tpwCrucero: 0.62, tpwMax: 1.12, inercia: 0.48, accMando: 52, mandoMinimo: 0.5,
+    accRigidez: 24, accAmort: 3, accPerdida: 8, wCabeceo: 21, tiempoTonel: 0.22,
+    helice: true, panza: 5,
+  }),
+  // Hurricane IID: sturdy and steady gun platform, heavier than the Spitfire.
+  hurricane: derivar({
+    masa: 1.35, velCrucero: 105, velMax: 175, clCrucero: 0.24, cl0: 0.22, clAlfa: 7,
+    alfaPerdida: 0.27, cd0: 0.028, kInducido: 0.042, cargaMax: 9, cargaMin: -3.5,
+    tpwCrucero: 0.56, tpwMax: 1, inercia: 0.75, accMando: 40, mandoMinimo: 0.42,
+    accRigidez: 21, accAmort: 3, accPerdida: 8, wCabeceo: 16, tiempoTonel: 0.28,
+    helice: true, panza: 5,
+  }),
+  // Bf 109: small, fast-climbing, with slats that let it hang on at high alpha.
+  bf109: derivar({
+    masa: 1.15, velCrucero: 122, velMax: 205, clCrucero: 0.2, cl0: 0.18, clAlfa: 6.8,
+    alfaPerdida: 0.31, cd0: 0.023, kInducido: 0.045, cargaMax: 9.5, cargaMin: -4,
+    tpwCrucero: 0.66, tpwMax: 1.2, inercia: 0.65, accMando: 43, mandoMinimo: 0.42,
+    accRigidez: 22, accAmort: 3, accPerdida: 7, wCabeceo: 17, tiempoTonel: 0.27,
+    helice: true, panza: 5,
+  }),
+  // P-38 Lightning: twin engines, twin booms: fast and a climber, but heavy in roll.
+  p38: derivar({
+    masa: 2.1, velCrucero: 125, velMax: 210, clCrucero: 0.22, cl0: 0.2, clAlfa: 6.8,
+    alfaPerdida: 0.27, cd0: 0.024, kInducido: 0.038, cargaMax: 8.5, cargaMin: -3,
+    tpwCrucero: 0.64, tpwMax: 1.14, inercia: 1.6, accMando: 30, mandoMinimo: 0.38,
+    accRigidez: 18, accAmort: 2.8, accPerdida: 7, wCabeceo: 14, tiempoTonel: 0.36,
+    helice: true, panza: 6,
+  }),
+  // Mosquito: the wooden wonder, fast for a twin, steady and long-legged.
+  mosquito: derivar({
+    masa: 2, velCrucero: 125, velMax: 205, clCrucero: 0.24, cl0: 0.2, clAlfa: 6.8,
+    alfaPerdida: 0.26, cd0: 0.022, kInducido: 0.038, cargaMax: 8, cargaMin: -3,
+    tpwCrucero: 0.6, tpwMax: 1.05, inercia: 1.5, accMando: 30, mandoMinimo: 0.36,
+    accRigidez: 18, accAmort: 2.8, accPerdida: 7, wCabeceo: 13.5, tiempoTonel: 0.36,
+    helice: true, panza: 6,
+  }),
+  // A-37 Dragonfly: a light twin-jet attack trainer: slow for a jet, turns tight, no afterburner.
+  a37: derivar({
+    masa: 1.4, velCrucero: 120, velMax: 195, clCrucero: 0.26, cl0: 0.22, clAlfa: 6.8,
+    alfaPerdida: 0.28, cd0: 0.026, kInducido: 0.04, cargaMax: 9, cargaMin: -3.5,
+    tpwCrucero: 0.58, tpwMax: 0.98, inercia: 0.9, accMando: 38, mandoMinimo: 0.42,
+    accRigidez: 19, accAmort: 2.8, accPerdida: 7, wCabeceo: 15, tiempoTonel: 0.26,
+    helice: false, panza: 5,
+  }),
+  // A-4 Skyhawk: small delta, quick roll, no afterburner, carries a lot for its size.
+  a4: derivar({
+    masa: 1.5, velCrucero: 145, velMax: 245, clCrucero: 0.17, cl0: 0.1, clAlfa: 5.6,
+    alfaPerdida: 0.32, cd0: 0.02, kInducido: 0.06, cargaMax: 9.5, cargaMin: -3.5,
+    tpwCrucero: 0.66, tpwMax: 1.12, inercia: 1, accMando: 38, mandoMinimo: 0.3,
+    accRigidez: 18, accAmort: 2.6, accPerdida: 6.5, wCabeceo: 16, tiempoTonel: 0.22,
+    helice: false, panza: 5,
+  }),
+  // F-5 Tiger II: light, nimble twin-jet, cheap to fly and quick to point.
+  f5: derivar({
+    masa: 1.25, velCrucero: 155, velMax: 265, clCrucero: 0.15, cl0: 0.07, clAlfa: 5.4,
+    alfaPerdida: 0.33, cd0: 0.018, kInducido: 0.062, cargaMax: 11, cargaMin: -3.5,
+    tpwCrucero: 0.7, tpwMax: 1.3, inercia: 0.9, accMando: 42, mandoMinimo: 0.32,
+    accRigidez: 18, accAmort: 2.5, accPerdida: 6.5, wCabeceo: 17.5, tiempoTonel: 0.22,
+    helice: false, panza: 5,
+  }),
+  // MiG-21: a dart: blistering in a straight line, bleeds energy in the turn.
+  mig21: derivar({
+    masa: 1.3, velCrucero: 165, velMax: 295, clCrucero: 0.14, cl0: 0.04, clAlfa: 4.8,
+    alfaPerdida: 0.3, cd0: 0.017, kInducido: 0.08, cargaMax: 10, cargaMin: -3,
+    tpwCrucero: 0.74, tpwMax: 1.45, inercia: 1, accMando: 36, mandoMinimo: 0.25,
+    accRigidez: 18, accAmort: 2.4, accPerdida: 7, wCabeceo: 15, tiempoTonel: 0.24,
+    helice: false, panza: 5,
+  }),
+  // AV-8B Harrier: vectored thrust. Huge thrust for its weight, barely stalls and
+  // keeps full nose authority at a hover-like crawl; not fast at the top end.
+  harrier: derivar({
+    masa: 1.7, velCrucero: 125, velMax: 225, clCrucero: 0.24, cl0: 0.3, clAlfa: 6.2,
+    alfaPerdida: 0.55, cd0: 0.024, kInducido: 0.05, cargaMax: 9, cargaMin: -4,
+    tpwCrucero: 0.85, tpwMax: 1.65, inercia: 1, accMando: 44, mandoMinimo: 0.75,
+    accRigidez: 18, accAmort: 3.2, accPerdida: 3.5, wCabeceo: 17, tiempoTonel: 0.3,
+    helice: false, panza: 6,
+  }),
+  // Mirage 2000: a pure delta, fly-by-wire: fast and pulls hard, but slows in long turns.
+  mirage: derivar({
+    masa: 1.5, velCrucero: 160, velMax: 290, clCrucero: 0.14, cl0: 0.05, clAlfa: 4.9,
+    alfaPerdida: 0.42, cd0: 0.017, kInducido: 0.07, cargaMax: 11.5, cargaMin: -3.5,
+    tpwCrucero: 0.72, tpwMax: 1.42, inercia: 1, accMando: 41, mandoMinimo: 0.32,
+    accRigidez: 17, accAmort: 2.5, accPerdida: 6, wCabeceo: 17, tiempoTonel: 0.23,
+    helice: false, panza: 5,
+  }),
+  // JAS 39 Gripen: small canard delta: agile and light, easy on the hands.
+  gripen: derivar({
+    masa: 1.35, velCrucero: 160, velMax: 285, clCrucero: 0.15, cl0: 0.07, clAlfa: 5.3,
+    alfaPerdida: 0.45, cd0: 0.017, kInducido: 0.06, cargaMax: 12, cargaMin: -3.5,
+    tpwCrucero: 0.74, tpwMax: 1.45, inercia: 0.9, accMando: 45, mandoMinimo: 0.4,
+    accRigidez: 17, accAmort: 2.5, accPerdida: 5.5, wCabeceo: 18.5, tiempoTonel: 0.21,
+    helice: false, panza: 5,
+  }),
+  // Rafale: twin-engine canard delta, very agile at low speed, strong all round.
+  rafale: derivar({
+    masa: 1.75, velCrucero: 162, velMax: 292, clCrucero: 0.15, cl0: 0.08, clAlfa: 5.4,
+    alfaPerdida: 0.48, cd0: 0.018, kInducido: 0.058, cargaMax: 12, cargaMin: -3.5,
+    tpwCrucero: 0.74, tpwMax: 1.48, inercia: 1.05, accMando: 44, mandoMinimo: 0.42,
+    accRigidez: 17, accAmort: 2.5, accPerdida: 5.5, wCabeceo: 18.5, tiempoTonel: 0.23,
+    helice: false, panza: 5,
+  }),
+  // Eurofighter Typhoon: the hot rod: brutal thrust, supercruise, quick canard delta.
+  typhoon: derivar({
+    masa: 1.7, velCrucero: 168, velMax: 305, clCrucero: 0.14, cl0: 0.07, clAlfa: 5.3,
+    alfaPerdida: 0.44, cd0: 0.017, kInducido: 0.06, cargaMax: 12, cargaMin: -3.5,
+    tpwCrucero: 0.78, tpwMax: 1.58, inercia: 1.05, accMando: 43, mandoMinimo: 0.38,
+    accRigidez: 17, accAmort: 2.5, accPerdida: 5.5, wCabeceo: 18, tiempoTonel: 0.23,
+    helice: false, panza: 5,
+  }),
+  // F-35A: stealthy and dense: strong engine, good alpha, heavier in the roll than an F-16.
+  f35: derivar({
+    masa: 1.95, velCrucero: 158, velMax: 280, clCrucero: 0.15, cl0: 0.07, clAlfa: 5.3,
+    alfaPerdida: 0.45, cd0: 0.019, kInducido: 0.06, cargaMax: 11, cargaMin: -3.5,
+    tpwCrucero: 0.72, tpwMax: 1.42, inercia: 1.15, accMando: 40, mandoMinimo: 0.4,
+    accRigidez: 17, accAmort: 2.6, accPerdida: 6, wCabeceo: 16.5, tiempoTonel: 0.27,
+    helice: false, panza: 5,
+  }),
+  // The cardboard box with a desk fan: all drag and no wing; it wobbles along
+  // somehow, stalls into a gentle tumble and forgives everything.
+  carton: derivar({
+    masa: 0.8, velCrucero: 80, velMax: 130, clCrucero: 0.32, cl0: 0.36, clAlfa: 6,
+    alfaPerdida: 0.5, cd0: 0.05, kInducido: 0.05, cargaMax: 8, cargaMin: -6,
+    tpwCrucero: 0.7, tpwMax: 1.15, inercia: 0.4, accMando: 50, mandoMinimo: 0.7,
+    accRigidez: 22, accAmort: 3.6, accPerdida: 3, wCabeceo: 19, tiempoTonel: 0.2,
+    helice: true, panza: 6,
+  }),
   // The saucer: whatever drives it, it out-climbs and out-turns everything
   // and barely stalls.
   ovni: derivar({

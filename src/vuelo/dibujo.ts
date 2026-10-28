@@ -2,6 +2,7 @@ import * as D from '../game/dulce';
 import { P } from '../game/dulce';
 import type { ModeloAvion, Piloto } from './fisica-tipos';
 import { anchoLetrero, escribir } from './fondo';
+import { LOOKS_EXTRA, PAINT_EXTRA } from './aviones-extra';
 
 /*
  * Sprites and scenery for the plane game, in the same "dulce" look as the
@@ -245,6 +246,8 @@ export const LOOKS: Record<ModeloAvion, PlaneLook> = {
     ink: '#262e3e', w: 40, h: 20, jet: [-20, 2], scarf: [5, -6], scarfC: ['#ffb03a', '#fff0a0'], rack: [-2, 4],
     parts: { cola: [-15, -5], ala: [-5, 3], motor: [-17, 2], cabina: [8, -4] },
   },
+  // The second batch: classics, Chilean favourites, modern jets and the box (aviones-extra.ts).
+  ...LOOKS_EXTRA,
 };
 
 /* ── Who's flying: any pilot can take any plane ─────────────────────────── */
@@ -1206,6 +1209,7 @@ const PAINT: Record<ModeloAvion, (g: Ctx, has: Has) => void> = {
   raptor: paintRaptor, sukhoi: paintSukhoi, b2: paintB2, ovni: paintOvni,
   tomcat: paintTomcat, a10: paintA10, spitfire: paintSpitfire,
   stuka: paintStuka, mustang: paintMustang, corsair: paintCorsair, f16: paintF16, mig29: paintMig29,
+  ...PAINT_EXTRA,
 };
 
 /** The plane's sprite with the given parts missing (cached per combination). */

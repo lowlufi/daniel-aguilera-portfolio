@@ -1,7 +1,8 @@
 import * as D from '../game/dulce';
 import { P } from '../game/dulce';
 import { LOOKS, R, drawPlane, miniHead, ovniGlow, ovniLuces, pilotoActual, spriteParaDibujar, type Parte } from './dibujo';
-import type { ModeloAvion, Piloto } from './fisica-tipos';
+import type { ModeloAvion, ModeloNuevo, Piloto } from './fisica-tipos';
+import { GIRO_EXTRA, GIRO_H_EXTRA, JET_D_EXTRA, MOTORES_EXTRA, TOP_HEAD_EXTRA } from './giro-extra';
 
 /*
  * Roll and hard-pull frames for every player plane. The cockpit always shows
@@ -27,7 +28,7 @@ import type { ModeloAvion, Piloto } from './fisica-tipos';
 type Ctx = CanvasRenderingContext2D;
 type Has = (p: Parte) => boolean;
 /** One banked view: k = 1..3, s = sin φ, c = cos φ. */
-type View = { k: 1 | 2 | 3; s: number; c: number };
+export type View = { k: 1 | 2 | 3; s: number; c: number };
 
 const VIEWS: Record<1 | 2 | 3, View> = {
   1: { k: 1, s: 0.5, c: Math.cos(Math.PI / 6) },
@@ -38,6 +39,7 @@ const VIEWS: Record<1 | 2 | 3, View> = {
 /** Banked sprites are taller than the side ones: the wings spread vertically. */
 const GIRO_H: Record<ModeloAvion, number> = { avioneta: 38, caza: 30, bombardero: 50, raptor: 32, sukhoi: 34, b2: 48, ovni: 36, tomcat: 34, a10: 46, spitfire: 38,
   stuka: 42, mustang: 36, corsair: 38, f16: 34, mig29: 36,
+  ...GIRO_H_EXTRA,
 };
 
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
@@ -46,7 +48,7 @@ const ri = Math.round;
 /* ── Small drawing helpers ───────────────────────────────────────────────── */
 
 /** A torn, scorched edge where a part used to be (same look as dibujo.ts). */
-function stub(g: Ctx, x: number, y: number, w: number, h: number) {
+export function stub(g: Ctx, x: number, y: number, w: number, h: number) {
   R(g, x, y, w, h, '#5a4a5a');
   for (let i = 0; i < h; i++) R(g, x + (i % 2 ? -1 : w), y + i, 1, 1, i % 3 ? '#3a2a3a' : '#ff9a3c');
   R(g, x + Math.floor(w / 2), y, 1, 1, P.gold);
@@ -63,7 +65,7 @@ function scorch(g: Ctx, n: number, seed: number, hy: number) {
 }
 
 /** Rows from y=ya to y=yb, x span going linearly from [a0,a1] to [b0,b1]. */
-function trap(g: Ctx, ya: number, yb: number, a0: number, a1: number, b0: number, b1: number, col: string) {
+export function trap(g: Ctx, ya: number, yb: number, a0: number, a1: number, b0: number, b1: number, col: string) {
   const n = Math.abs(yb - ya);
   const dir = yb >= ya ? 1 : -1;
   for (let i = 0; i <= n; i++) {
@@ -79,7 +81,7 @@ function trap(g: Ctx, ya: number, yb: number, a0: number, a1: number, b0: number
  * from the root at y0 towards dir (-1 up, +1 down). root/tip = [trailing x,
  * leading x]. Leading edge lit, trailing edge and aileron shaded, rounded tip.
  */
-function wing(
+export function wing(
   g: Ctx, y0: number, dir: 1 | -1, rows: number,
   root: [number, number], tip: [number, number],
   col: [string, string, string], tipC?: string,
@@ -108,20 +110,20 @@ function wing(
 }
 
 /** Fuselage of an elliptic section a (tall) × b (wide), seen rolled by φ. */
-function bodyH(v: View, a: number, b: number) {
+export function bodyH(v: View, a: number, b: number) {
   return Math.max(1, ri(Math.sqrt(a * a * v.c * v.c + b * b * v.s * v.s)));
 }
 
 /* ── Pilots ─────────────────────────────────────────────────────────────── */
 
 /** Side head for the 30° frame: the same cockpit head as the side sprite. */
-const sideHead = (g: Ctx, x: number, y: number) => miniHead(g, pilotoActual(), x, y);
+export const sideHead = (g: Ctx, x: number, y: number) => miniHead(g, pilotoActual(), x, y);
 
 /**
  * The pilot's head seen from above, facing +x; (x, y) is the head's centre.
  * `tilt` (0 or 1) lets the 60° frame show a sliver of the face's flank.
  */
-function topHead(g: Ctx, x: number, y: number, tilt: number, m: Piloto = pilotoActual()) {
+export function topHead(g: Ctx, x: number, y: number, tilt: number, m: Piloto = pilotoActual()) {
   if (m === 'naxo') {
     // Naxo: buzzed round head, the punk crest running front to back, ears to both
     // sides, the round dark lenses and the mustache in front.
@@ -427,7 +429,7 @@ function goldCanopyGiro(g: Ctx, v: View, x: number, hx: number) {
  * A fin canted outwards, standing on the fuselage at spanwise d (− far, + near)
  * and height hBase. base/top = [trailing x, leading x] at its root and tip.
  */
-function cantedFin(
+export function cantedFin(
   g: Ctx, v: View, d: number, hBase: number, h: number,
   base: [number, number], top: [number, number], col: string, colTop: string,
 ) {
@@ -853,7 +855,7 @@ function a10Giro(g: Ctx, v: View, has: Has) {
  * shrinking like an ellipse from [xc-back, xc+fwd] at the root to a round tip.
  * `camo` paints hard-edged blotches over the upper surface.
  */
-function ellWing(
+export function ellWing(
   g: Ctx, y0: number, dir: 1 | -1, rows: number, xc: number, back: number, fwd: number,
   col: [string, string, string], camo?: string,
 ) {
@@ -1418,6 +1420,7 @@ const GIRO: Record<ModeloAvion, (g: Ctx, v: View, has: Has) => void> = {
   raptor: raptorGiro, sukhoi: sukhoiGiro, b2: b2Giro, ovni: ovniGiro,
   tomcat: tomcatGiro, a10: a10Giro, spitfire: spitfireGiro,
   stuka: stukaGiro, mustang: mustangGiro, corsair: corsairGiro, f16: f16Giro, mig29: mig29Giro,
+  ...GIRO_EXTRA,
 };
 
 /** The banked sprite for frame k (1..3) with the given parts missing. */
@@ -1439,6 +1442,14 @@ function propsFor(m: ModeloAvion, v: View): [number, number, number][] {
   if (m === 'avioneta') return [[12, 0, 4]];
   if (m === 'spitfire') return [[15, 0, 5]];
   if (m === 'stuka' || m === 'mustang' || m === 'corsair') return [LOOKS[m].prop!];
+  // The second batch: twins show both props (the far one hidden at 30°), singles their own.
+  const tw = MOTORES_EXTRA[m as ModeloNuevo];
+  if (tw?.prop) {
+    const [px, r] = tw.prop;
+    const near: [number, number, number] = [px, ri(tw.e * v.c + tw.d * v.s), r];
+    return v.k === 1 ? [near] : [[px, ri(tw.e * v.c - tw.d * v.s), r], near];
+  }
+  if (m in GIRO_EXTRA && LOOKS[m].prop) return [LOOKS[m].prop!];
   if (m === 'bombardero') {
     const { d, e } = BOMB_ENG;
     const near: [number, number, number] = [10, ri(e * v.c + d * v.s), 3];
@@ -1449,7 +1460,7 @@ function propsFor(m: ModeloAvion, v: View): [number, number, number][] {
 }
 
 /** Jet flames [x, y] in banked frame k; twin-engine jets far apart show two. */
-const JET_D: Partial<Record<ModeloAvion, number>> = { sukhoi: 4, b2: 6, tomcat: 3, a10: A10_ENG.d, mig29: MIG_ENG.d };
+const JET_D: Partial<Record<ModeloAvion, number>> = { sukhoi: 4, b2: 6, tomcat: 3, a10: A10_ENG.d, mig29: MIG_ENG.d, ...JET_D_EXTRA };
 function jetsFor(m: ModeloAvion, v: View): [number, number][] {
   const L = LOOKS[m];
   if (!L.jet) return [];
@@ -1464,6 +1475,7 @@ const TOP_HEAD: Record<ModeloAvion, [number, number]> = {
   avioneta: [-1, 3], caza: [2, 3], bombardero: [5, 4], raptor: [4, 3], sukhoi: [6, 3], b2: [10, 4], ovni: [0, 4],
   tomcat: [9, 3], a10: [10, 4], spitfire: [0, 3],
   stuka: [3, 3], mustang: [-1, 3], corsair: [-3, 3], f16: [7, 3], mig29: [8, 3],
+  ...TOP_HEAD_EXTRA,
 };
 
 /** Where the scarf starts in banked frame k. */
@@ -1483,6 +1495,8 @@ function anchorAt(m: ModeloAvion, part: Parte, v: View): [number, number] {
   if (part === 'ala') return m === 'b2' ? [ax, ri(v.c) + ri(6 * v.s)] : [ax, ri(2 * v.c) + 2];
   if (part === 'motor' && m === 'bombardero') return [ax, ri(BOMB_ENG.e * v.c + BOMB_ENG.d * v.s)];
   if (part === 'motor' && m === 'sukhoi') return [ax, ri(2 * v.c) + ri(4 * v.s)];
+  const tw = MOTORES_EXTRA[m as ModeloNuevo];
+  if (part === 'motor' && tw) return [ax, ri(tw.e * v.c + tw.d * v.s)];
   if (part === 'motor' && m === 'mig29') return [ax, ri(MIG_ENG.e * v.c) + ri(MIG_ENG.d * v.s)];
   if (part === 'motor' && m === 'a10') return [ax, -ri(A10_ENG.e * v.c) + ri(A10_ENG.d * v.s)];
   if (part === 'motor' && m === 'b2') return [ax, -ri(4 * v.c) + ri(3 * v.s)];
