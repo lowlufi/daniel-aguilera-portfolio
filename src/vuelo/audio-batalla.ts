@@ -3011,6 +3011,7 @@ export function puenteListo(pan: number): void {
     for (let i = 0; i < 3; i++) unaVez(m, 'pieza-metal', 0.15, 1.5 + i * 0.1, t + i * 0.14, pan);
     unaVez(m, 'rechinido', 0.1, 1.1, t + 0.45, pan);
   });
+  vitoreo(pan);
 }
 
 /** Láser o rayo de la nave nodriza mientras dispara (llamar cada tick; se limita solo). */
@@ -3090,13 +3091,14 @@ export function metrallaEnemiga(pan: number, distancia: number, disparos = 1): v
 
 let ultimaRecalentada = -1;
 /** La metralla se recalentó: clonc + siseo (una vez por recalentón; se limita a 0.6 s). */
-export function recalentada(): void {
+export function recalentada(arma = ''): void {
   const m = salida();
   if (!m) return;
   const t = m.ctx.currentTime;
   if (t - ultimaRecalentada < 0.6) return;
   ultimaRecalentada = t;
   unaVez(m, 'siseo', 0.42 * cede(), rand(0.95, 1.05), t, 0, LIMITE + 4);
+  if (arma) recalentonTipo(m, t, arma);
 }
 
 let nitroV: Corta | null = null;
@@ -3298,7 +3300,7 @@ const cazasCerca = new Map<number, number>(); // id → última vez visto dentro
  * < 180 px (se rearma al alejarse a > 320 px); sin id, a < 260 px y como
  * mucho una cada 0.9 s.
  */
-export function pasadaCaza(dx: number, dy: number, velocidad: number, id?: number): void {
+export function pasadaCaza(dx: number, dy: number, velocidad: number, id?: number, helice = false): void {
   const m = salida();
   if (!m) return;
   const t = m.ctx.currentTime;
@@ -3317,7 +3319,8 @@ export function pasadaCaza(dx: number, dy: number, velocidad: number, id?: numbe
   if (vivos + 3 > LIMITE) return;
   ultimaCaza = t;
   const v = clamp(num(velocidad, 200), 60, 420);
-  const src = fuente(m, buf(m, 'caza'), true);
+  // Los de hélice rugen con su motor radial; los reactores, con turbina.
+  const src = fuente(m, helice ? bufMas(m, 'm-caza-prop') : buf(m, 'caza'), true);
   const g = ganancia(m, 0);
   const p = panner(m.ctx);
   voz(src, [g, p], m.explo, true);
@@ -4005,7 +4008,10 @@ const TONO_RECARGA = { misil: 1, bomba: 0.84, bengala: 1.19 } as const;
 /** Un arma volvió a estar lista: «chk ti-tin» corto, tono distinto por arma (máx. ~3/s por arma). */
 export function armaRecargada(tipo: 'misil' | 'bomba' | 'bengala'): void {
   const r = TONO_RECARGA[tipo] ?? 1;
-  evento('recargada-' + tipo, 0.33, (m, t) => unaVez(m, 'recargada', 0.2 * cede(), r, t, 0, LIMITE + 4));
+  evento('recargada-' + tipo, 0.33, (m, t) => {
+    unaVez(m, 'recargada', 0.2 * cede(), r, t, 0, LIMITE + 4);
+    recargaMecanica(m, t, tipo);
+  });
 }
 
 /** Doble toque de nitro mientras se recarga: «bonk» blando de negación (máx. ~2/s). */
@@ -4229,6 +4235,7 @@ function apagarContinuos(t: number, tc: number) {
   nitroV = null;
   if (rwr) apagar(rwr.v, rwr.g, t, tc);
   rwr = null;
+  apagarMas(t, tc);
   if (mz) {
     sujeta(mz.explo.gain, t);
     mz.explo.gain.setTargetAtTime(1, t, 0.05);
@@ -4282,6 +4289,7 @@ function reiniciar() {
   nitroV = null;
   if (rwr) liberar(rwr.v);
   rwr = null;
+  soltarMas();
   balas.length = balasEnemigas.length = chapuzones.length = 0;
   tirosVulcan.length = tirosCanon.length = tirosLaser.length = 0;
   hornosRacimo.clear();
@@ -4741,6 +4749,8 @@ function bufArs(m: Mezcla, n: NombreArs) {
 export function precalentarArsenal() {
   const m = salida(true);
   if (!m) return;
+  // Y después, la tercera tanda (más sonido): arranca cuando el arsenal ya va avanzado.
+  window.setTimeout(() => precalentarMas(), 1500);
   const pend = (Object.keys(HORNO_ARS) as NombreArs[]).filter((n) => ctxArs !== m.ctx || !hornosArs.has(n));
   let i = 0;
   const paso = () => {
@@ -4785,4 +4795,1279 @@ export function bombaArsenal(tipo: 'napalm' | 'pista' | 'humo' | 'mina' | 'plane
     if (vivos + 3 > LIMITE + 4) return;
     unaVezBuf(m, bufArs(m, `ars-${tipo}`), vol * enAire(), rand(0.96, 1.04), t, lado(pan), m.explo);
   });
+}
+
+/* ────────────────────────── más sonido: cada enemigo, arma y herramienta ────────────────────────── */
+/*
+ * Tercera tanda: lo que todavía sonaba genérico o mudo.
+ *
+ * - Enemigos con voz propia en bucle (jeep, camión, orugas del tanque,
+ *   lancha, barcos, rotor del helicóptero, zumbido del dron, moto, tren,
+ *   carrito de Margarita, trolebús, dirigible y nave nodriza), con doppler,
+ *   paneo y caída con la distancia. Como mucho MAX_FUENTES a la vez: suenan
+ *   las más fuertes (cerca × volumen propio); las demás se funden.
+ * - Detalles periódicos: ping de radar del SAM, bocinas de lanchas y
+ *   fragatas, quemador del globo, pasitos y chillidos de los ratones,
+ *   martillazos cuando arman un puente, pisotones del Ratonzilla.
+ * - Disparos enemigos por tipo (lanzamiento por vehículo, cañón del tanque,
+ *   cañón naval, ametralladora del helicóptero, cohetes, minas del globo,
+ *   fusil y bazuca de los ratones, mortero), la chancla de Margarita y las
+ *   metrallas de los cazas según su avión (hélice o reactor).
+ * - Herramientas del jugador: compuertas y carácter de cada bomba al
+ *   soltarla, impactos propios de la crio, EMP, termobárica y el rebote,
+ *   cada tipo de bengala, clics de vacío por arma, recargas mecánicas,
+ *   recalentón por familia de metralla, premios, cajas, combo, niveles de
+ *   nitro, tren de aterrizaje, rodaje, aerofrenos y agua al ras.
+ * - Ambiente por mapa (puerto y ciudad de Valparaíso, mar abierto) a baja altura.
+ *
+ * Mezcla: los enemigos y disparos van por el bus de explosiones (que se
+ * agacha con las alarmas de misil); los bucles además bajan con `ambiente()`
+ * y con el aire; lo del jugador baja con `cede()`. Todo con tope de nodos
+ * (LIMITE), intervalo mínimo por clave y volúmenes que caen con la
+ * distancia. Los hornos van a un caché propio que se precalienta después
+ * del arsenal (y espera mientras se juega).
+ */
+
+type NombreMas =
+  // bucles
+  | 'm-jeep' | 'm-camion' | 'm-orugas' | 'm-rotor' | 'm-dron' | 'm-lancha' | 'm-barco' | 'm-moto' | 'm-tren'
+  | 'm-carrito' | 'm-nodriza' | 'm-dirigible' | 'm-trole' | 'm-caza-prop' | 'm-rodar' | 'm-agua' | 'm-aerofreno'
+  | 'm-puerto' | 'm-oleaje' | 'm-ciudad'
+  // enemigos
+  | 'm-radar' | 'm-sam-lanza' | 'm-jeep-lanza' | 'm-camion-lanza' | 'm-canon-tanque' | 'm-canon-naval' | 'm-toot'
+  | 'm-quemador' | 'm-heli-ametralla' | 'm-cohete-chico' | 'm-mina-suelta' | 'm-rifle-raton' | 'm-bazuca' | 'm-mortero'
+  | 'm-pasos' | 'm-chillido' | 'm-vitoreo' | 'm-martillo' | 'm-chancla' | 'm-jefe-fase' | 'm-caza-303' | 'm-caza-canon' | 'm-pisoton'
+  // armas y herramientas
+  | 'm-compuerta' | 'm-racimo-suelta' | 'm-servo' | 'm-giro' | 'm-frio' | 'm-carga' | 'm-crio' | 'm-emp' | 'm-termo' | 'm-rebote'
+  | 'm-magnesio' | 'm-bengala-enemiga' | 'm-clic-misil' | 'm-clic-bomba' | 'm-recarga-misil' | 'm-recarga-bomba' | 'm-recarga-bengala'
+  | 'm-giro-baja' | 'm-clonc' | 'm-fritura' | 'm-llave' | 'm-caja' | 'm-combo' | 'm-nitro1' | 'm-nitro2' | 'm-nitro3'
+  | 'm-tren-aterrizaje' | 'm-aerofreno-abre' | 'm-claxon' | 'm-campanita';
+
+/** Pulso de motor de pistón: decae dentro de cada ciclo (fase 0…1). */
+const pulsoMotor = (fase: number, filo: number) => Math.exp(-fase * filo);
+
+/** Barrido senoidal (de f0 a f1 en `dur`, con ataque, caída y vibrato opcional). */
+function barrido(sr: number, a: Float32Array, t0: number, dur: number, f0: number, f1: number, amp: number, ataque = 0.01, vib = 0, vibF = 0) {
+  const i0 = Math.floor(t0 * sr);
+  const n = Math.min(a.length - i0, Math.floor(dur * sr));
+  let f = 0;
+  for (let k = 0; k < n; k++) {
+    const u = k / n;
+    const t = k / sr;
+    f += ((f0 + (f1 - f0) * u) * (1 + vib * Math.sin(TAU * vibF * t))) / sr;
+    const env = Math.min(1, t / ataque) * Math.min(1, (1 - u) * 6);
+    a[i0 + k] += Math.sin(TAU * f) * env * amp;
+  }
+}
+
+/** Nota «cuadrada» suave (bocinas, claxon, alarmas): armónicos impares hasta el 7.º. */
+function cuadrada(sr: number, a: Float32Array, t0: number, dur: number, f: number, amp: number) {
+  const i0 = Math.floor(t0 * sr);
+  const n = Math.min(a.length - i0, Math.floor(dur * sr));
+  for (let k = 0; k < n; k++) {
+    const t = k / sr;
+    const env = Math.min(1, t / 0.012) * Math.min(1, (dur - t) / 0.03);
+    let s = 0;
+    for (let h = 1; h <= 7; h += 2) s += Math.sin(TAU * f * h * t) / h;
+    a[i0 + k] += s * env * amp;
+  }
+}
+
+/** Golpes resonantes (eslabones, trinquetes): impulsos por resonadores de chapa. */
+function clancs(sr: number, a: Float32Array, tiempos: number[], res: number[], amp: number, q = 14) {
+  const bs = res.map((f) => new Bq(sr, 'bp', f, q));
+  const imp = new Float32Array(a.length);
+  for (const t0 of tiempos) {
+    const i = Math.floor(t0 * sr);
+    if (i >= 0 && i < imp.length) imp[i] += rand(0.6, 1);
+  }
+  for (let i = 0; i < a.length; i++) {
+    let y = 0;
+    for (const b of bs) y += b.run(imp[i]);
+    a[i] += y * amp;
+  }
+}
+
+/** Arma un bucle a partir de una pista ya calculada (con 0.15 s extra para el cruce). */
+const pistaBucle = (sr: number, seg: number) => new Float32Array(Math.floor(sr * seg) + Math.floor(sr * 0.15));
+
+const HORNO_MAS: Record<NombreMas, (sr: number) => Float32Array> = {
+  /* ── bucles (las frecuencias rítmicas caben enteras en el largo: sin costura) ── */
+  // Jeep: cuatro cilindros chicos, «brrrr» parejo.
+  'm-jeep': (sr) => {
+    const lp = new Bq(sr, 'lp', 650, 0.8);
+    return bucle(sr, 1, (_i, t) => {
+      const p = pulsoMotor((t * 32) % 1, 7) * (0.85 + 0.15 * Math.sin(TAU * 2 * t));
+      return lp.run(ruido() * p * 1.4) + Math.sin(TAU * 32 * t) * 0.35 * p + Math.sin(TAU * 64 * t) * 0.08;
+    });
+  },
+  // Camión: diésel lento con el «tac» de los inyectores.
+  'm-camion': (sr) => {
+    const lp = new Bq(sr, 'lp', 420, 0.9);
+    const hp = new Bq(sr, 'hp', 2200, 0.8);
+    return bucle(sr, 1, (_i, t) => {
+      const f = (t * 18) % 1;
+      const p = pulsoMotor(f, 5);
+      return lp.run(ruido() * p * 1.6) + Math.sin(TAU * 18 * t) * 0.4 * p + hp.run(ruido()) * Math.exp(-f * 40) * 0.5;
+    });
+  },
+  // Orugas: eslabones que golpean (7 por segundo, dobles, con resonancias de chapa) sobre un retumbe.
+  'm-orugas': (sr) => {
+    const a = pistaBucle(sr, 1);
+    const ts: number[] = [];
+    for (let k = 0; k < 9; k++) ts.push(k / 7 + rand(-0.004, 0.004), k / 7 + 0.035 + rand(-0.004, 0.004));
+    clancs(sr, a, ts, [980, 1650, 2700], 0.5);
+    const lp = new Bq(sr, 'lp', 140, 0.8);
+    for (let i = 0; i < a.length; i++) a[i] += lp.run(ruido()) * 1.6 * (0.8 + 0.2 * Math.sin(TAU * 7 * (i / sr)));
+    return bucle(sr, 1, (i) => a[i]);
+  },
+  // Rotor: 12 palmetazos por segundo, cada uno con su «tump» grave, y la turbina silbando.
+  'm-rotor': (sr) => {
+    const lp = new Bq(sr, 'lp', 900, 0.7);
+    return bucle(sr, 1, (_i, t) => {
+      const f = (t * 12) % 1;
+      return lp.run(ruido()) * Math.exp(-f * 11) * 1.3 + Math.sin(TAU * 62 * t) * Math.exp(-f * 7) * 0.7 + Math.sin(TAU * 1840 * t) * 0.03;
+    });
+  },
+  // Dron: cuatro hélices casi afinadas (el batido entre ellas es el zumbido de abejorro).
+  'm-dron': (sr) => {
+    const bp = new Bq(sr, 'bp', 1400, 1);
+    const fs = [190, 197, 203, 211];
+    return bucle(sr, 1, (_i, t) => {
+      let s = 0;
+      for (const f of fs) for (let h = 1; h <= 5; h++) s += Math.sin(TAU * f * h * t) / (h * 1.4);
+      return s * 0.18 + bp.run(ruido()) * 0.35;
+    });
+  },
+  // Lancha: fuera de borda de dos tiempos y el golpeteo del casco en el agua.
+  'm-lancha': (sr) => {
+    const hp = new Bq(sr, 'hp', 700, 0.8);
+    const lp = new Bq(sr, 'lp', 500, 0.7);
+    return bucle(sr, 1, (_i, t) => {
+      const p = pulsoMotor((t * 56) % 1, 4);
+      const golpeteo = 0.6 + 0.4 * Math.max(0, Math.sin(TAU * 3 * t));
+      return Math.tanh(hp.run(ruido() * p * 2) + Math.sin(TAU * 56 * t) * p * 0.6) * 0.8 + lp.run(ruido()) * golpeteo * 0.8;
+    });
+  },
+  // Barco grande: hélice que late bajo el casco y el agua que se abre.
+  'm-barco': (sr) => {
+    const lp = new Bq(sr, 'lp', 380, 0.7);
+    const sub = new Bq(sr, 'lp', 90, 0.9);
+    return bucle(sr, 2, (_i, t) => {
+      const p = pulsoMotor((t * 6) % 1, 3);
+      return sub.run(ruido()) * 2.4 * (0.5 + 0.5 * p) + Math.sin(TAU * 24 * t) * 0.4 + lp.run(ruido()) * (0.5 + 0.3 * Math.sin(TAU * 0.5 * t));
+    });
+  },
+  // Moto: dos tiempos chillón, «ring-ding-ding».
+  'm-moto': (sr) => {
+    const bp = new Bq(sr, 'bp', 1600, 1.2);
+    return bucle(sr, 1, (_i, t) => {
+      const p = pulsoMotor((t * 72) % 1, 5);
+      return Math.tanh((Math.sin(TAU * 72 * t) * 0.8 + bp.run(ruido()) * 1.6) * p * 2) * 0.8;
+    });
+  },
+  // Tren: resoplido de vapor (3 por segundo) y el «ta-tac» de las juntas de riel (1 por segundo).
+  'm-tren': (sr) => {
+    const a = pistaBucle(sr, 2);
+    const bp = new Bq(sr, 'bp', 700, 0.9);
+    const lp = new Bq(sr, 'lp', 160, 0.8);
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      a[i] = bp.run(ruido()) * Math.exp(-((t * 3) % 1) * 6) * 1.3 + lp.run(ruido()) * 1.2;
+    }
+    const ts: number[] = [];
+    for (let k = 0; k < 3; k++) ts.push(k + 0.1, k + 0.22);
+    clancs(sr, a, ts, [620, 1300], 0.7, 10);
+    return bucle(sr, 2, (i) => a[i]);
+  },
+  // Carrito de Margarita: ruedas que chirrían a cada vuelta y la lata que traquetea.
+  'm-carrito': (sr) => {
+    const a = pistaBucle(sr, 2);
+    for (let k = 0; k < 5; k++) barrido(sr, a, k * 0.5 + 0.05, 0.14, 1750, 2150, 0.25, 0.02, 0.02, 31);
+    chasquidos(sr, a, 0, a.length / sr, () => 22, { hp: 1800, amp: 0.8, largo: [0.001, 0.004] });
+    const lp = new Bq(sr, 'lp', 220, 0.8);
+    for (let i = 0; i < a.length; i++) a[i] += lp.run(ruido()) * 0.7;
+    return bucle(sr, 2, (i) => a[i]);
+  },
+  // Nave nodriza: acorde grave que respira y un brillo que titila arriba.
+  'm-nodriza': (sr) =>
+    bucle(sr, 3, (_i, t) => {
+      const resp = 0.75 + 0.25 * Math.sin((TAU * t) / 3);
+      const grave = Math.sin(TAU * 55 * t) + 0.7 * Math.sin(TAU * (250 / 3) * t) + 0.5 * Math.sin(TAU * 110 * t + Math.sin((TAU * t) / 1.5));
+      const brillo = Math.sin(TAU * 880 * t) * (0.5 + 0.5 * Math.sin(TAU * 2 * t)) * 0.06;
+      return grave * 0.3 * resp + brillo + ruido() * 0.01;
+    }),
+  // Dirigible: hélices lentas que baten el aire y un motor que ronronea.
+  'm-dirigible': (sr) => {
+    const lp = new Bq(sr, 'lp', 300, 0.8);
+    return bucle(sr, 2, (_i, t) => {
+      const f = (t * 15) % 1;
+      return lp.run(ruido()) * (0.5 + Math.exp(-f * 5)) * 1.2 + Math.sin(TAU * 40 * t) * 0.35 * (0.8 + 0.2 * Math.sin(TAU * t));
+    });
+  },
+  // Trolebús: zumbido eléctrico y el canto del motor de tracción.
+  'm-trole': (sr) => {
+    const lp = new Bq(sr, 'lp', 260, 0.8);
+    return bucle(sr, 1.5, (_i, t) => Math.sin(TAU * 400 * t) * 0.18 + Math.sin(TAU * 800 * t) * 0.06 + Math.sin(TAU * 100 * t) * 0.25 + lp.run(ruido()) * 0.6);
+  },
+  // Caza de hélice: motor radial áspero + zumbido de la hélice (para la pasada con doppler).
+  'm-caza-prop': (sr) => {
+    const lp = new Bq(sr, 'lp', 900, 0.7);
+    return bucle(sr, 1, (_i, t) => {
+      const p = pulsoMotor((t * 45) % 1, 4);
+      let saw = 0;
+      for (let h = 1; h <= 6; h++) saw += Math.sin(TAU * 90 * h * t) / h;
+      return Math.tanh(lp.run(ruido() * p * 2.2) + Math.sin(TAU * 45 * t) * p * 0.6) + saw * 0.12;
+    });
+  },
+  // Rodaje: neumáticos sobre la pista y las juntas del pavimento.
+  'm-rodar': (sr) => {
+    const lp = new Bq(sr, 'lp', 220, 0.8);
+    return bucle(sr, 1, (_i, t) => lp.run(ruido()) * 1.5 + Math.sin(TAU * 70 * t) * Math.exp(-((t * 4) % 1) * 25) * 0.6);
+  },
+  // Agua al ras: siseo de espuma con olitas que golpean el fuselaje.
+  'm-agua': (sr) => {
+    const bp = new Bq(sr, 'bp', 2400, 0.7);
+    const lp = new Bq(sr, 'lp', 600, 0.7);
+    return bucle(sr, 1, (_i, t) => bp.run(ruido()) * (0.7 + 0.3 * Math.sin(TAU * 5 * t)) + lp.run(ruido()) * (0.4 + 0.4 * Math.max(0, Math.sin(TAU * 3 * t))));
+  },
+  // Aerofrenos: el aire que golpea las placas, un temblor grave.
+  'm-aerofreno': (sr) => {
+    const lp = new Bq(sr, 'lp', 320, 0.8);
+    return bucle(sr, 1, (_i, t) => lp.run(ruido()) * (0.6 + 0.4 * Math.sin(TAU * 9 * t) * Math.sin(TAU * 2 * t)));
+  },
+  // Puerto: olas que lamen el muelle (dos marejadas por bucle).
+  'm-puerto': (sr) => {
+    const lp = new Bq(sr, 'lp', 700, 0.6);
+    const hp = new Bq(sr, 'hp', 2500, 0.7);
+    return bucle(sr, 6, (_i, t) => {
+      const ola = Math.pow(0.5 + 0.5 * Math.sin((TAU * t) / 3), 2);
+      return lp.run(ruido()) * (0.3 + ola) + hp.run(ruido()) * ola * ola * 0.25;
+    });
+  },
+  // Mar abierto: marejada lenta y honda.
+  'm-oleaje': (sr) => {
+    const lp = new Bq(sr, 'lp', 420, 0.6);
+    return bucle(sr, 6, (_i, t) => lp.run(ruido()) * (0.35 + Math.pow(0.5 + 0.5 * Math.sin((TAU * t) / 6 + 1), 1.5)));
+  },
+  // Ciudad: rumor lejano de tráfico (sin bocinas horneadas: esas van sueltas).
+  'm-ciudad': (sr) => {
+    const lp = new Bq(sr, 'lp', 180, 0.7);
+    const bp = new Bq(sr, 'bp', 900, 0.5);
+    return bucle(sr, 6, (_i, t) => lp.run(ruido()) * 1.2 + bp.run(ruido()) * 0.12 * (0.6 + 0.4 * Math.sin((TAU * t) / 2)) + Math.sin(TAU * 120 * t) * 0.03);
+  },
+
+  /* ── enemigos: sueltos ── */
+  // Radar del SAM: «bi-diip» que sube.
+  'm-radar': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.32));
+    barrido(sr, a, 0, 0.06, 1700, 2300, 0.6, 0.004);
+    barrido(sr, a, 0.1, 0.13, 1900, 2600, 0.6, 0.004);
+    return normaliza(a, 0.6);
+  },
+  // SAM: siseo hidráulico, el golpe del booster y un rugido largo.
+  'm-sam-lanza': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.4));
+    soplido(sr, a, 0, 0.12, 4000, 1.5, 0.5);
+    golpe(sr, a, 0.1, 150, 40, 0.07, 1, 1600);
+    soplido(sr, a, 0.12, 1.2, 700, 0.8, 2.2, 0.15);
+    return normaliza(a, 0.92);
+  },
+  // Jeep: cohetito liviano, «pof-fsss».
+  'm-jeep-lanza': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.55));
+    golpe(sr, a, 0, 330, 120, 0.015, 0.6, 3500);
+    soplido(sr, a, 0.01, 0.5, 2100, 1.2, 1.3, 0.2);
+    return normaliza(a, 0.8);
+  },
+  // Camión: el rack que suelta («clanc») y el cohete que sale.
+  'm-camion-lanza': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.85));
+    ping(sr, a, 0, 620, 0.03, 0.5);
+    golpe(sr, a, 0.02, 210, 60, 0.04, 0.9, 2200);
+    soplido(sr, a, 0.04, 0.75, 1100, 1, 1.6, 0.25);
+    return normaliza(a, 0.88);
+  },
+  // Cañón de tanque: estampido y el anillo metálico del tubo, con eco.
+  'm-canon-tanque': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.1));
+    golpe(sr, a, 0, 120, 34, 0.11, 1, 1500);
+    ping(sr, a, 0.005, 520, 0.12, 0.12);
+    ping(sr, a, 0.005, 1340, 0.06, 0.06);
+    const eco = Math.floor(sr * 0.22);
+    for (let i = a.length - 1; i >= eco; i--) a[i] += a[i - eco] * 0.25;
+    return normaliza(a, 0.95);
+  },
+  // Cañón naval: más hondo, con una cola que rueda sobre el agua.
+  'm-canon-naval': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.8));
+    golpe(sr, a, 0, 85, 26, 0.2, 1, 1000);
+    const lp = new Bq(sr, 'lp', 260, 0.7);
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      a[i] += lp.run(ruido()) * Math.min(1, t / 0.08) * Math.exp(-t / 0.5) * 0.9;
+    }
+    const eco = Math.floor(sr * 0.35);
+    for (let i = a.length - 1; i >= eco; i--) a[i] += a[i - eco] * 0.3;
+    return normaliza(a, 0.95);
+  },
+  // Lancha: «tuu-tuut» chico de bocina.
+  'm-toot': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.75));
+    for (const [t0, d] of [[0, 0.16], [0.24, 0.4]] as [number, number][]) {
+      cuadrada(sr, a, t0, d, 330, 0.4);
+      cuadrada(sr, a, t0, d, 392, 0.3);
+    }
+    const lp = new Bq(sr, 'lp', 1800, 0.7);
+    for (let i = 0; i < a.length; i++) a[i] = lp.run(a[i]);
+    return normaliza(a, 0.7);
+  },
+  // Quemador del globo: ¡FUUUSH! de gas que se enciende.
+  'm-quemador': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1));
+    soplido(sr, a, 0, 0.95, 850, 0.6, 1.4);
+    const lp = new Bq(sr, 'lp', 160, 0.8);
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      a[i] += lp.run(ruido()) * Math.min(1, t / 0.05) * Math.min(1, (1 - t) / 0.2) * 1.5 * (0.8 + 0.2 * Math.sin(TAU * 13 * t));
+    }
+    return normaliza(a, 0.8);
+  },
+  // Ametralladora del helicóptero: ráfaga corta de cuatro.
+  'm-heli-ametralla': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.36));
+    for (let k = 0; k < 4; k++) golpe(sr, a, k * 0.07, 340, 110, 0.012, rand(0.7, 1), 4200);
+    return normaliza(a, 0.85);
+  },
+  // Cohete sin guía (helicóptero, ratones): «fsssht».
+  'm-cohete-chico': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.55));
+    golpe(sr, a, 0, 260, 120, 0.01, 0.4, 3000);
+    soplido(sr, a, 0.005, 0.5, 1500, 1.1, 1.3, 0.35);
+    return normaliza(a, 0.8);
+  },
+  // Mina del globo: el gancho que suelta y un silbidito que baja.
+  'm-mina-suelta': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.65));
+    ping(sr, a, 0, 1200, 0.02, 0.6);
+    barrido(sr, a, 0.05, 0.55, 1500, 700, 0.25, 0.05);
+    return normaliza(a, 0.65);
+  },
+  // Fusil de ratón: «pic» chico y seco.
+  'm-rifle-raton': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.15));
+    const hp = new Bq(sr, 'hp', 2500, 0.8);
+    for (let i = 0; i < a.length; i++) a[i] += hp.run(ruido()) * Math.exp(-i / sr / 0.0025);
+    golpe(sr, a, 0, 480, 200, 0.01, 0.5, 5000);
+    ping(sr, a, 0.002, 1800, 0.012, 0.15);
+    return normaliza(a, 0.75);
+  },
+  // Bazuca: «tunk» del tubo y el cohete que se va.
+  'm-bazuca': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.75));
+    golpe(sr, a, 0, 190, 60, 0.04, 1, 1800);
+    soplido(sr, a, 0.02, 0.65, 950, 1, 1.5, 0.3);
+    return normaliza(a, 0.88);
+  },
+  // Mortero/obús de los ratones: «tunk» hueco.
+  'm-mortero': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.45));
+    golpe(sr, a, 0, 150, 60, 0.05, 1, 1100);
+    ping(sr, a, 0.003, 310, 0.06, 0.25);
+    return normaliza(a, 0.85);
+  },
+  // Pasitos de ratón: tres toques chicos.
+  'm-pasos': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.32));
+    const bp = new Bq(sr, 'bp', 1100, 1.2);
+    for (const t0 of [0, 0.09, 0.19]) {
+      const i0 = Math.floor((t0 + rand(0, 0.01)) * sr);
+      const amp = rand(0.6, 1);
+      for (let k = 0; i0 + k < a.length && k < 0.02 * sr; k++) a[i0 + k] += ruido() * Math.exp(-k / sr / 0.003) * amp;
+    }
+    for (let i = 0; i < a.length; i++) a[i] = bp.run(a[i]) * 2 + a[i] * 0.2;
+    return normaliza(a, 0.6);
+  },
+  // Chillido de huida (sintetizado: silbo agudo con trino, no una voz).
+  'm-chillido': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.36));
+    barrido(sr, a, 0, 0.15, 2300, 3300, 0.5, 0.008, 0.03, 34);
+    barrido(sr, a, 0.17, 0.16, 3100, 2400, 0.4, 0.008, 0.03, 30);
+    return normaliza(a, 0.5);
+  },
+  // Vitoreo: muchos chillidos chicos que suben y palmaditas.
+  'm-vitoreo': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.2));
+    for (let k = 0; k < 9; k++) {
+      const f0 = rand(1900, 2800);
+      barrido(sr, a, rand(0, 0.75), rand(0.12, 0.25), f0, f0 * rand(1.2, 1.45), 0.18, 0.01, 0.04, rand(25, 38));
+    }
+    chasquidos(sr, a, 0.05, 1.1, () => 30, { hp: 1500, amp: 0.6, largo: [0.001, 0.003] });
+    return normaliza(a, 0.5);
+  },
+  // Martillazo sobre una tabla.
+  'm-martillo': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.16));
+    golpe(sr, a, 0, 420, 210, 0.012, 0.8, 3200);
+    ping(sr, a, 0.001, 880, 0.02, 0.2);
+    return normaliza(a, 0.7);
+  },
+  // La chancla/tomate de Margarita: «fuuu» que corta el aire.
+  'm-chancla': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.36));
+    const bp = new Bq(sr, 'bp', 600, 1.4);
+    for (let i = 0; i < a.length; i++) {
+      const u = i / a.length;
+      if ((i & 63) === 0) bp.f(600 + 1600 * u);
+      a[i] = bp.run(ruido()) * Math.sin(Math.PI * u);
+    }
+    return normaliza(a, 0.6);
+  },
+  // Fase nueva de un jefe: quejido de casco y un klaxon de dos notas.
+  'm-jefe-fase': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.6));
+    friccion(sr, a, 0, 0.9, 55, 38, [300, 520, 810], 0.8);
+    for (const [t0, f] of [[0.55, 440], [0.8, 349], [1.05, 440], [1.3, 349]] as [number, number][]) cuadrada(sr, a, t0, 0.2, f, 0.22);
+    return normaliza(a, 0.85);
+  },
+  // Caza de hélice: ametralladoras de ala, ligeras y rápidas.
+  'm-caza-303': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.26));
+    for (let k = 0; k < 5; k++) golpe(sr, a, k * 0.045, 380, 150, 0.009, rand(0.6, 1), 5000);
+    return normaliza(a, 0.8);
+  },
+  // Caza a reacción: cañón de 20–30 mm, «bum-bum-bum» grueso.
+  'm-caza-canon': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.3));
+    for (let k = 0; k < 3; k++) golpe(sr, a, k * 0.065, 190, 60, 0.025, rand(0.8, 1), 2400);
+    return normaliza(a, 0.88);
+  },
+  // Pisotón del Ratonzilla: golpe sordo enorme con tierra que tiembla.
+  'm-pisoton': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.8));
+    golpe(sr, a, 0, 70, 28, 0.12, 1, 500);
+    chasquidos(sr, a, 0.02, 0.5, (t) => 60 * Math.exp(-t / 0.15), { hp: 900, amp: 0.4, largo: [0.002, 0.008] });
+    return normaliza(a, 0.92);
+  },
+
+  /* ── armas y herramientas del jugador ── */
+  // Compuerta de bombas: pestillo, siseo hidráulico y el gancho que suelta.
+  'm-compuerta': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.42));
+    ping(sr, a, 0, 720, 0.025, 0.4);
+    soplido(sr, a, 0.01, 0.16, 1300, 2, 0.5);
+    golpe(sr, a, 0.17, 170, 80, 0.03, 0.8, 2000);
+    ping(sr, a, 0.18, 1450, 0.015, 0.2);
+    return normaliza(a, 0.75);
+  },
+  // Racimo: las bombitas traquetean en el contenedor.
+  'm-racimo-suelta': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.4));
+    chasquidos(sr, a, 0, 0.35, (t) => 160 * Math.exp(-t / 0.2), { hp: 2000, amp: 1, largo: [0.001, 0.004] });
+    return normaliza(a, 0.6);
+  },
+  // Guiada: servo que zumba y dos bips de enganche.
+  'm-servo': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.5));
+    barrido(sr, a, 0, 0.22, 900, 1350, 0.35, 0.01, 0.06, 60);
+    ping(sr, a, 0.26, 2400, 0.03, 0.3);
+    ping(sr, a, 0.36, 2400, 0.03, 0.3);
+    return normaliza(a, 0.6);
+  },
+  // Rebote: el contragiro de la bomba, un zumbido que sube.
+  'm-giro': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.8));
+    const bp = new Bq(sr, 'bp', 600, 2);
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      if ((i & 63) === 0) bp.f(600 + 500 * t);
+      const am = 0.5 + 0.5 * Math.sin(TAU * (14 + 12 * t) * t);
+      a[i] = bp.run(ruido()) * am * Math.min(1, t / 0.1) * Math.min(1, (0.8 - t) / 0.2);
+    }
+    return normaliza(a, 0.6);
+  },
+  // Crio al soltar: vapor helado que silba.
+  'm-frio': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.7));
+    soplido(sr, a, 0, 0.65, 5200, 0.8, 1);
+    chasquidos(sr, a, 0.05, 0.6, () => 50, { hp: 5000, amp: 0.5, largo: [0.0005, 0.002] });
+    return normaliza(a, 0.55);
+  },
+  // Carga (plasma, EMP): zumbido que sube de tono.
+  'm-carga': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.6));
+    let f = 0;
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      f += (120 + 520 * (t / 0.6) ** 2) / sr;
+      const env = Math.min(1, t / 0.05) * Math.min(1, (0.6 - t) / 0.06);
+      a[i] = (Math.sin(TAU * f) + 0.4 * Math.sin(TAU * f * 2) + 0.2 * Math.sin(TAU * f * 3)) * env * 0.4;
+    }
+    return normaliza(a, 0.6);
+  },
+  // Crio al llegar: crujido de hielo que se cierra, con vidrios finos.
+  'm-crio': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.1));
+    golpe(sr, a, 0, 140, 70, 0.03, 0.6, 1500);
+    chasquidos(sr, a, 0, 0.9, (t) => 200 * Math.exp(-t / 0.3), { hp: 1800, amp: 1.2, largo: [0.0008, 0.004] });
+    for (let k = 0; k < 7; k++) ping(sr, a, rand(0.02, 0.7), rand(2200, 5200), rand(0.04, 0.12), 0.08);
+    return normaliza(a, 0.8);
+  },
+  // EMP: golpe, zumbido eléctrico de 60 Hz y un silbido que se apaga hacia abajo.
+  'm-emp': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.3));
+    golpe(sr, a, 0, 160, 50, 0.04, 0.7, 2000);
+    const bp = new Bq(sr, 'bp', 1200, 2);
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      a[i] += bp.run(Math.sign(Math.sin(TAU * 60 * t))) * Math.exp(-t / 0.35) * 0.8;
+    }
+    barrido(sr, a, 0.02, 1.1, 2200, 180, 0.3, 0.005);
+    return normaliza(a, 0.85);
+  },
+  // Termobárica: el aire que se chupa hacia adentro antes del segundo golpe.
+  'm-termo': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.6));
+    const lp = new Bq(sr, 'lp', 200, 0.8);
+    for (let i = 0; i < a.length; i++) {
+      const u = i / a.length;
+      if ((i & 63) === 0) lp.f(200 + 1600 * u * u);
+      a[i] = lp.run(ruido()) * u * u * Math.min(1, (1 - u) * 25);
+    }
+    return normaliza(a, 0.8);
+  },
+  // Rebote: golpe en el suelo y un «boing» de chapa.
+  'm-rebote': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.42));
+    golpe(sr, a, 0, 130, 60, 0.04, 0.9, 1400);
+    barrido(sr, a, 0.01, 0.38, 170, 260, 0.35, 0.004, 0.04, 18);
+    return normaliza(a, 0.8);
+  },
+  // Magnesio: chisporroteo de la bengala ardiendo.
+  'm-magnesio': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.9));
+    soplido(sr, a, 0, 0.85, 3600, 0.7, 0.6);
+    chasquidos(sr, a, 0, 0.85, () => 140, { hp: 2600, amp: 0.9, largo: [0.0006, 0.003] });
+    return normaliza(a, 0.6);
+  },
+  // Bengalas enemigas: «tup-tup» sordo, distinto del de las nuestras.
+  'm-bengala-enemiga': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.36));
+    golpe(sr, a, 0, 260, 120, 0.015, 0.8, 2500);
+    golpe(sr, a, 0.085, 240, 110, 0.015, 0.7, 2500);
+    soplido(sr, a, 0.02, 0.3, 3000, 0.8, 0.3);
+    return normaliza(a, 0.7);
+  },
+  // Sin misiles: doble clic de riel vacío y un bip grave de error.
+  'm-clic-misil': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.32));
+    ping(sr, a, 0, 2100, 0.008, 0.5);
+    ping(sr, a, 0.06, 1900, 0.008, 0.5);
+    cuadrada(sr, a, 0.13, 0.15, 220, 0.25);
+    return normaliza(a, 0.6);
+  },
+  // Sin bombas: pestillo pesado que no suelta nada.
+  'm-clic-bomba': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.25));
+    golpe(sr, a, 0, 220, 110, 0.012, 0.8, 4000);
+    ping(sr, a, 0.004, 520, 0.03, 0.3);
+    return normaliza(a, 0.65);
+  },
+  // Misil recargado: el riel que desliza y el seguro que traba.
+  'm-recarga-misil': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.55));
+    friccion(sr, a, 0, 0.3, 240, 420, [1200, 2300], 0.25);
+    golpe(sr, a, 0.32, 260, 120, 0.012, 0.6, 4000);
+    ping(sr, a, 0.33, 1800, 0.02, 0.25);
+    return normaliza(a, 0.6);
+  },
+  // Bomba recargada: trinquete del montacargas y el «tonc» al calzar.
+  'm-recarga-bomba': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.65));
+    const ts: number[] = [];
+    for (let k = 0, t = 0; k < 6; k++, t += 0.075 - k * 0.006) ts.push(t);
+    clancs(sr, a, ts, [1500, 2600], 0.6, 12);
+    golpe(sr, a, 0.42, 150, 70, 0.04, 0.8, 1500);
+    return normaliza(a, 0.65);
+  },
+  // Bengalas recargadas: tres cartuchos que entran.
+  'm-recarga-bengala': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.42));
+    for (const t0 of [0, 0.1, 0.2]) {
+      ping(sr, a, t0, 2600, 0.012, 0.35);
+      golpe(sr, a, t0, 340, 200, 0.006, 0.3, 5000);
+    }
+    return normaliza(a, 0.55);
+  },
+  // Recalentón de rotativa (vulcan, GAU-8, minigun): el giro que se cae.
+  'm-giro-baja': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1));
+    let f = 0, g = 0;
+    for (let i = 0; i < a.length; i++) {
+      const t = i / sr;
+      const fr = 300 + 1100 * Math.exp(-t / 0.3);
+      f += fr / sr;
+      g += fr / 6 / sr;
+      a[i] = Math.sin(TAU * f) * (0.6 + 0.4 * Math.sin(TAU * g)) * Math.exp(-t / 0.45) * 0.5;
+    }
+    return normaliza(a, 0.55);
+  },
+  // Recalentón de cañón (30 mm, Hispano, pom-pom, revólver): cerrojo que se traba.
+  'm-clonc': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.5));
+    golpe(sr, a, 0, 200, 90, 0.025, 0.9, 3000);
+    ping(sr, a, 0.004, 420, 0.08, 0.25);
+    ping(sr, a, 0.004, 1240, 0.05, 0.12);
+    return normaliza(a, 0.7);
+  },
+  // Recalentón del láser: chisporroteo eléctrico que baja.
+  'm-fritura': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.8));
+    const bp = new Bq(sr, 'bp', 3000, 1.2);
+    let puerta = 1;
+    for (let i = 0; i < a.length; i++) {
+      if ((i & 255) === 0) puerta = Math.random() < 0.6 ? 1 : 0.15;
+      a[i] = bp.run(ruido()) * puerta * Math.exp(-i / sr / 0.35);
+    }
+    barrido(sr, a, 0, 0.7, 1200, 380, 0.25, 0.005);
+    return normaliza(a, 0.6);
+  },
+  // Llave de reparación: trinquete rápido.
+  'm-llave': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.5));
+    clancs(sr, a, [0, 0.055, 0.11, 0.165, 0.22, 0.36], [2200, 3400], 0.5, 16);
+    return normaliza(a, 0.55);
+  },
+  // Caja de madera: golpe hueco.
+  'm-caja': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.3));
+    golpe(sr, a, 0, 190, 90, 0.03, 0.9, 1200);
+    ping(sr, a, 0.002, 640, 0.03, 0.2);
+    return normaliza(a, 0.7);
+  },
+  // Combo: «ding» de quinta (el tono sube con el combo).
+  'm-combo': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.55));
+    ping(sr, a, 0, 1046.5, 0.12, 0.4);
+    ping(sr, a, 0.06, 1568, 0.16, 0.35);
+    return normaliza(a, 0.55);
+  },
+  // Súper nitro: el turbo que silba al cargar.
+  'm-nitro1': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.9));
+    barrido(sr, a, 0, 0.85, 600, 2600, 0.3, 0.02);
+    soplido(sr, a, 0, 0.85, 1500, 0.7, 0.8);
+    return normaliza(a, 0.7);
+  },
+  // Híper: postcombustión que revienta y crepita.
+  'm-nitro2': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1));
+    golpe(sr, a, 0, 110, 40, 0.08, 1, 1400);
+    soplido(sr, a, 0.02, 0.95, 500, 0.7, 1.6, 0.25);
+    chasquidos(sr, a, 0.05, 0.95, (t) => 90 * Math.exp(-t / 0.5), { hp: 1500, amp: 1, largo: [0.001, 0.006] });
+    return normaliza(a, 0.85);
+  },
+  // Mega: estampido sónico, un alarido que trepa y chispas por todos lados.
+  'm-nitro3': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.4));
+    const hp = new Bq(sr, 'hp', 1200, 0.7);
+    for (let i = 0; i < 0.03 * sr; i++) a[i] += hp.run(ruido()) * Math.exp(-i / sr / 0.006) * 1.5;
+    golpe(sr, a, 0, 90, 30, 0.1, 1, 1200);
+    barrido(sr, a, 0.05, 1.2, 800, 3400, 0.3, 0.05, 0.03, 9);
+    for (let k = 0; k < 10; k++) ping(sr, a, rand(0.1, 1.2), rand(2500, 5000), rand(0.02, 0.06), 0.12);
+    return normaliza(a, 0.9);
+  },
+  // Tren de aterrizaje: hidráulica que zumba y dos golpes al trabar.
+  'm-tren-aterrizaje': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.95));
+    barrido(sr, a, 0, 0.6, 480, 720, 0.18, 0.05, 0.02, 40);
+    soplido(sr, a, 0, 0.6, 2400, 1.5, 0.3);
+    golpe(sr, a, 0.62, 190, 80, 0.025, 0.8, 2400);
+    golpe(sr, a, 0.74, 170, 70, 0.025, 0.6, 2400);
+    return normaliza(a, 0.7);
+  },
+  // Aerofrenos: placas que se abren al viento.
+  'm-aerofreno-abre': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.45));
+    golpe(sr, a, 0, 180, 90, 0.02, 0.6, 2000);
+    soplido(sr, a, 0.01, 0.4, 700, 0.7, 1);
+    return normaliza(a, 0.65);
+  },
+  // Bocina de auto lejana: «bip-biip».
+  'm-claxon': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 0.55));
+    for (const [t0, d] of [[0, 0.12], [0.18, 0.3]] as [number, number][]) {
+      cuadrada(sr, a, t0, d, 415, 0.3);
+      cuadrada(sr, a, t0, d, 523, 0.25);
+    }
+    const lp = new Bq(sr, 'lp', 1500, 0.7);
+    for (let i = 0; i < a.length; i++) a[i] = lp.run(a[i]);
+    return normaliza(a, 0.6);
+  },
+  // Campanita de boya / jarcias del puerto.
+  'm-campanita': (sr) => {
+    const a = new Float32Array(Math.floor(sr * 1.3));
+    ping(sr, a, 0, 1320, 0.35, 0.4);
+    ping(sr, a, 0.45, 1320 * 1.002, 0.3, 0.25);
+    return normaliza(a, 0.5);
+  },
+};
+
+let ctxMas: BaseAudioContext | null = null;
+const hornosMas = new Map<NombreMas, AudioBuffer>();
+function bufMas(m: { ctx: BaseAudioContext }, n: NombreMas) {
+  if (ctxMas !== m.ctx) {
+    ctxMas = m.ctx;
+    hornosMas.clear();
+  }
+  let b = hornosMas.get(n);
+  if (!b) {
+    const d = HORNO_MAS[n](m.ctx.sampleRate);
+    b = m.ctx.createBuffer(1, d.length, m.ctx.sampleRate);
+    b.getChannelData(0).set(d);
+    hornosMas.set(n, b);
+  }
+  return b;
+}
+
+let horneandoMas = false;
+/**
+ * Hornea de a poco esta tanda (uno cada 40 ms, en los menús; espera
+ * mientras se juega). Primero los bucles de enemigos, que suenan apenas
+ * empieza una ola.
+ */
+export function precalentarMas() {
+  const m = salida(true);
+  if (!m || horneandoMas) return;
+  const pend = (Object.keys(HORNO_MAS) as NombreMas[]).filter((n) => ctxMas !== m.ctx || !hornosMas.has(n));
+  if (!pend.length) return;
+  horneandoMas = true;
+  const paso = () => {
+    if (salida(true) !== m) {
+      horneandoMas = false;
+      return;
+    }
+    if (hornoPausa) {
+      window.setTimeout(paso, 500);
+      return;
+    }
+    const n = pend.shift();
+    if (n && !(ctxMas === m.ctx && hornosMas.has(n))) bufMas(m, n);
+    if (pend.length) window.setTimeout(paso, 40);
+    else horneandoMas = false;
+  };
+  window.setTimeout(paso, 40);
+}
+
+/** Volumen por distancia: 1 encima, ½ a `ref` px, ⅓ a 2·ref… */
+const lejania = (d: number, ref = 300) => 1 / (1 + Math.max(0, num(d, ref)) / ref);
+/** Lo lejano llega un poquito tarde (como mucho 0.15 s). */
+const demora = (d: number) => Math.min(0.15, Math.max(0, num(d, 0)) / 2000);
+const panDe = (dx: number) => clamp(num(dx) / 320, -1, 1) * 0.85;
+
+/** Un efecto suelto de esta tanda (respeta el tope de nodos). */
+function unaMas(m: Mezcla, n: NombreMas, vol: number, rate: number, t: number, pan = 0, destino: AudioNode = m.explo, tope = LIMITE + 2) {
+  if (!(vol >= 0.008) || vivos + 3 > tope) return null;
+  return unaVezBuf(m, bufMas(m, n), vol, rate, t, lado(pan), destino);
+}
+
+/** Voz con tope propio: si ya hay `max` en la lista, la más vieja se corta en ~25 ms. */
+function cortaMas(m: Mezcla, lista: Corta[], max: number, n: NombreMas, vol: number, rate: number, t: number, pan: number) {
+  for (let i = lista.length - 1; i >= 0; i--) if (!lista[i].v.viva) lista.splice(i, 1);
+  if (!(vol >= 0.008)) return;
+  if (lista.length >= max) {
+    const x = lista.shift()!;
+    apagar(x.v, x.g, t, 0.004);
+  }
+  const r = unaMas(m, n, vol, rate, t, pan);
+  if (r) lista.push(r);
+}
+
+/* ── fuentes en bucle: enemigos y vehículos ── */
+
+export type FuenteSonora = {
+  id: number;
+  /** VehiculoTipo, TipoAereo, TipoGrande, 'raton' (infantería), 'dirigible' o 'nodriza'. */
+  tipo: string;
+  /** Posición relativa al avión, px (y hacia arriba). */
+  dx: number;
+  dy: number;
+  /** Ratones: su EstadoInf ('corre', 'cubre'…). Vehículos: 'puente' mientras arman un puente. */
+  estado?: string;
+  /** Ratón que huye. */
+  huye?: boolean;
+};
+
+type ConfFuente = { n: NombreMas; vol: number; rate: number; alcance: number };
+const FUENTE: Record<string, ConfFuente> = {
+  jeep: { n: 'm-jeep', vol: 0.13, rate: 1, alcance: 520 },
+  camion: { n: 'm-camion', vol: 0.15, rate: 1, alcance: 560 },
+  tanque: { n: 'm-orugas', vol: 0.15, rate: 1, alcance: 560 },
+  sam: { n: 'm-camion', vol: 0.12, rate: 0.9, alcance: 520 },
+  micro: { n: 'm-camion', vol: 0.11, rate: 1.15, alcance: 480 },
+  portuario: { n: 'm-camion', vol: 0.12, rate: 0.82, alcance: 500 },
+  trolebus: { n: 'm-trole', vol: 0.09, rate: 1, alcance: 460 },
+  bici: { n: 'm-carrito', vol: 0.05, rate: 1.7, alcance: 260 },
+  margarita: { n: 'm-carrito', vol: 0.17, rate: 1, alcance: 620 },
+  lancha: { n: 'm-lancha', vol: 0.13, rate: 1, alcance: 560 },
+  fragata: { n: 'm-barco', vol: 0.16, rate: 1.1, alcance: 750 },
+  portaaviones: { n: 'm-barco', vol: 0.2, rate: 0.75, alcance: 900 },
+  helicoptero: { n: 'm-rotor', vol: 0.2, rate: 1, alcance: 750 },
+  dron: { n: 'm-dron', vol: 0.09, rate: 1, alcance: 420 },
+  moto: { n: 'm-moto', vol: 0.12, rate: 1, alcance: 520 },
+  tren: { n: 'm-tren', vol: 0.18, rate: 1, alcance: 750 },
+  dirigible: { n: 'm-dirigible', vol: 0.2, rate: 1, alcance: 1000 },
+  nodriza: { n: 'm-nodriza', vol: 0.18, rate: 1, alcance: 1200 },
+};
+
+type VozFuente = { k: string; v: Voz; src: AudioBufferSourceNode; g: GainNode; p: Pan; r: number; tr: number; vr: number; base: number; libre: number };
+const vocesFuente: VozFuente[] = [];
+const MAX_FUENTES = 4;
+/** Próximo detalle periódico por clave (tiempo del contexto). */
+const proximos = new Map<string, number>();
+const huyendo = new Set<number>();
+
+/** ¿Toca el detalle periódico `clave`? (cada `cada` s, al azar; el primero cae antes). */
+function toca(clave: string, t: number, cada: [number, number]) {
+  const p = proximos.get(clave);
+  if (p === undefined) {
+    proximos.set(clave, t + rand(cada[0] * 0.3, cada[1]));
+    return false;
+  }
+  if (t < p) return false;
+  proximos.set(clave, t + rand(cada[0], cada[1]));
+  return true;
+}
+
+/**
+ * Todo lo que suena por sí solo alrededor del avión (llamar cada tick con
+ * las fuentes cercanas). Mantiene los MAX_FUENTES bucles más fuertes, con
+ * doppler y paneo, y dispara los detalles periódicos de cada tipo.
+ */
+export function entorno(lista: FuenteSonora[]): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const amb = ambiente() * (0.35 + 0.65 * aire);
+  // Los bucles: las fuentes que más se oirían.
+  const cands: { k: string; f: FuenteSonora; c: ConfFuente; r: number; fuerza: number }[] = [];
+  for (const f of lista) {
+    const c = FUENTE[f.tipo];
+    if (!c) continue;
+    const r = Math.hypot(num(f.dx), num(f.dy));
+    if (r > c.alcance) continue;
+    const prox = 1 - r / c.alcance;
+    cands.push({ k: `${f.tipo}:${f.id}`, f, c, r, fuerza: c.vol * prox * prox });
+  }
+  cands.sort((a, b) => b.fuerza - a.fuerza);
+  const elegidas = cands.slice(0, MAX_FUENTES);
+  const claves = new Set(elegidas.map((e) => e.k));
+  for (let i = vocesFuente.length - 1; i >= 0; i--) {
+    const o = vocesFuente[i];
+    if (!claves.has(o.k) && o.libre < 0) {
+      o.libre = t;
+      hacia(o.g.gain, 0, t, 0.2);
+    }
+    if (o.libre >= 0 && t - o.libre > 1.2) {
+      apagar(o.v, o.g, t);
+      vocesFuente.splice(i, 1);
+    }
+  }
+  for (const e of elegidas) {
+    let o = vocesFuente.find((q) => q.k === e.k);
+    if (!o) {
+      if (vocesFuente.length >= MAX_FUENTES + 2 || vivos + 3 > LIMITE) continue;
+      const src = fuente(m, bufMas(m, e.c.n), true);
+      const g = ganancia(m, 0);
+      const p = panner(m.ctx);
+      const v = voz(src, [g, p], m.explo, false);
+      // Dos del mismo tipo nunca al unísono.
+      const base = e.c.rate * rand(0.94, 1.06);
+      src.playbackRate.value = base;
+      src.start(t, rand(0, 1));
+      o = { k: e.k, v, src, g, p, r: e.r, tr: t, vr: 0, base, libre: -1 };
+      vocesFuente.push(o);
+    }
+    o.libre = -1;
+    const dt = t - o.tr;
+    if (dt > 0.02) {
+      o.vr += (clamp((e.r - o.r) / dt, -500, 500) - o.vr) * 0.4;
+      o.r = e.r;
+      o.tr = t;
+    }
+    const dop = clamp(C_JUEGO / (C_JUEGO + o.vr), 0.7, 1.45);
+    hacia(o.src.playbackRate, o.base * dop, t, 0.1);
+    const prox = 1 - e.r / e.c.alcance;
+    hacia(o.g.gain, e.c.vol * prox * prox * amb, t, 0.12);
+    panea(o.p, panDe(e.f.dx), t, 0.1);
+  }
+
+  // Los detalles periódicos.
+  const tranquilo = alarma < 0.5;
+  let raton: FuenteSonora | null = null;
+  let rRaton = 1e9;
+  for (const f of lista) {
+    const r = Math.hypot(num(f.dx), num(f.dy));
+    const pan = panDe(f.dx);
+    const k = `${f.tipo}:${f.id}`;
+    if (f.tipo === 'raton') {
+      if (f.estado === 'corre' && r < rRaton) {
+        raton = f;
+        rRaton = r;
+      }
+      // Empieza a huir: un chillido.
+      if (f.huye && !huyendo.has(f.id)) {
+        huyendo.add(f.id);
+        if (r < 420) evento('m-chillido', 0.45, (mm, tt) => unaMas(mm, 'm-chillido', 0.16 * lejania(r, 200) * amb, rand(0.85, 1.2), tt, pan));
+      } else if (!f.huye) huyendo.delete(f.id);
+      continue;
+    }
+    if (f.estado === 'puente' && r < 600 && toca(k + ':puente', t, [0.22, 0.42]))
+      evento('m-martillo', 0.12, (mm, tt) => unaMas(mm, 'm-martillo', 0.2 * lejania(r, 220) * amb, rand(0.85, 1.15), tt, pan));
+    if (f.tipo === 'sam' && r < 800 && tranquilo && toca(k + ':radar', t, [2, 2.8]))
+      evento('m-radar', 0.8, (mm, tt) => unaMas(mm, 'm-radar', 0.1 * lejania(r, 300), rand(0.98, 1.02), tt, pan));
+    else if (f.tipo === 'lancha' && r < 650 && tranquilo && toca(k + ':toot', t, [10, 18]))
+      evento('m-toot', 5, (mm, tt) => unaMas(mm, 'm-toot', 0.16 * lejania(r, 260) * amb, rand(0.95, 1.05), tt, pan));
+    else if (f.tipo === 'fragata' && r < 900 && tranquilo && toca(k + ':bocina', t, [22, 36]))
+      evento('m-bocina-fragata', 12, (mm, tt) => unaVez(mm, 'bocina', 0.12 * lejania(r, 400) * amb, 1.3, tt, pan || 0.001, LIMITE, mm.explo));
+    else if (f.tipo === 'globo' && r < 700 && toca(k + ':quemador', t, [3, 6.5]))
+      evento('m-quemador', 0.6, (mm, tt) => unaMas(mm, 'm-quemador', 0.2 * lejania(r, 250) * amb, rand(0.9, 1.1), tt, pan));
+    else if (f.tipo === 'ratonzilla' && r < 900 && toca(k + ':pisa', t, [0.75, 0.95]))
+      evento('m-pisoton', 0.5, (mm, tt) => unaMas(mm, 'm-pisoton', 0.3 * lejania(r, 350), rand(0.9, 1.05), tt, pan));
+  }
+  // Pasitos del ratón más cercano que corre (solo se oyen con el avión bajo).
+  if (raton && rRaton < 300) {
+    const r = rRaton, pan = panDe(raton.dx);
+    evento('m-pasos', 0.34, (mm, tt) => unaMas(mm, 'm-pasos', 0.14 * lejania(r, 120) * amb, rand(0.85, 1.2), tt, pan));
+  }
+  if (proximos.size > 400) proximos.clear();
+  if (huyendo.size > 200) huyendo.clear();
+}
+
+/* ── jefes ── */
+
+const faseJefe = new Map<string, number>();
+/** Fase de un jefe (llamar cada tick mientras hay jefe): al subir de fase, quejido de casco + klaxon. */
+export function jefeFase(tipo: string, fase: number): void {
+  const antes = faseJefe.get(tipo) ?? 1;
+  faseJefe.set(tipo, fase);
+  if (fase <= antes) return;
+  const rate = tipo === 'nodriza' ? 0.8 : tipo === 'zepelin' ? 0.9 : 1;
+  evento('m-jefe-fase', 2, (m, t) => unaMas(m, 'm-jefe-fase', (0.24 + 0.04 * fase) * cede(), rate, t, 0, m.bus, LIMITE + 6));
+}
+
+/** La chancla, el tomate o el macetero de Margarita salen volando. */
+export function lanzaMargarita(pan: number): void {
+  evento('m-chancla', 0.25, (m, t) => unaMas(m, 'm-chancla', 0.22, rand(0.85, 1.2), t, pan));
+}
+
+/** Los ratones terminaron el puente: vitorean. */
+export function vitoreo(pan: number): void {
+  evento('m-vitoreo', 2, (m, t) => unaMas(m, 'm-vitoreo', 0.14 * ambiente(), rand(0.92, 1.1), t + 0.5, pan));
+}
+
+/* ── disparos enemigos por tipo ── */
+
+/** Un vehículo enemigo lanza un misil (se suma al lanzamiento grabado; máx. uno cada 0.15 s). */
+export function lanzaVehiculo(kind: string, pan: number, distancia: number): void {
+  evento('m-lanza-veh', 0.15, (m, t) => {
+    const l = lejania(distancia, 350) * enAire();
+    const t0 = t + demora(distancia);
+    if (kind === 'sam') {
+      unaMas(m, 'm-radar', 0.12 * l, 1.15, t0, pan);
+      unaMas(m, 'm-sam-lanza', 0.3 * l, rand(0.95, 1.05), t0 + 0.06, pan);
+    } else if (kind === 'fragata') unaMas(m, 'm-sam-lanza', 0.3 * l, rand(1.05, 1.12), t0, pan);
+    else if (kind === 'jeep' || kind === 'lancha') unaMas(m, 'm-jeep-lanza', 0.24 * l, rand(0.92, 1.08) * (kind === 'lancha' ? 0.9 : 1), t0, pan);
+    else unaMas(m, 'm-camion-lanza', 0.26 * l, rand(0.92, 1.05) * (kind === 'tanque' ? 0.85 : 1), t0, pan);
+  });
+}
+
+/** Un vehículo dispara su cañón antiaéreo (tanque, fragata…; máx. uno cada 0.12 s). */
+export function canonVehiculo(kind: string, pan: number, distancia: number): void {
+  evento('m-canon-veh', 0.12, (m, t) => {
+    const l = lejania(distancia, 350) * enAire();
+    const naval = kind === 'fragata' || kind === 'portaaviones' || kind === 'lancha';
+    unaMas(m, naval ? 'm-canon-naval' : 'm-canon-tanque', 0.3 * l, rand(0.94, 1.06) * (kind === 'tanque' || naval ? 1 : 1.3), t + demora(distancia), pan);
+  });
+}
+
+const tirosAereos: Corta[] = [];
+/** Disparo de un enemigo aéreo: helicóptero (balín o cohete), dron, globo (mina). */
+export function disparoAereo(tipo: string, proyectil: string, pan: number, distancia: number): void {
+  if (tipo === 'ovni') return; // el platillo ya tiene su rayo
+  const n: NombreMas = proyectil === 'mina' ? 'm-mina-suelta' : proyectil === 'cohete' ? 'm-cohete-chico' : tipo === 'helicoptero' ? 'm-heli-ametralla' : 'm-rifle-raton';
+  const vol = n === 'm-mina-suelta' ? 0.2 : n === 'm-cohete-chico' ? 0.24 : n === 'm-heli-ametralla' ? 0.22 : 0.16;
+  evento('m-aereo-' + n, n === 'm-heli-ametralla' ? 0.28 : 0.1, (m, t) =>
+    cortaMas(m, tirosAereos, 3, n, vol * lejania(distancia, 300) * enAire(), rand(0.92, 1.08) * (tipo === 'dron' ? 1.3 : 1), t + demora(distancia), pan));
+}
+
+const tirosRaton: Corta[] = [];
+/** Disparo de la infantería o artillería de ratones: fusil, bazuca, obús. */
+export function disparoRaton(clase: 'proyectil' | 'obus', tipo: string, pan: number, distancia: number): void {
+  const n: NombreMas = clase === 'obus' ? 'm-mortero' : tipo === 'cohete' ? 'm-bazuca' : 'm-rifle-raton';
+  const vol = n === 'm-rifle-raton' ? 0.15 : 0.26;
+  evento('m-raton-' + n, n === 'm-rifle-raton' ? 0.09 : 0.2, (m, t) =>
+    cortaMas(m, tirosRaton, 3, n, vol * lejania(distancia, 280) * enAire(), rand(0.9, 1.12), t + demora(distancia), pan));
+}
+
+const balasCaza: Corta[] = [];
+/** Ráfaga de un caza enemigo según su avión: ametralladoras de ala (hélice) o cañón (reactor). */
+export function metrallaCaza(helice: boolean, pan: number, distancia: number): void {
+  evento('m-caza-gun', 0.1, (m, t) => {
+    const d = Math.max(0, num(distancia, 300));
+    const vol = (helice ? 0.2 : 0.24) * lejania(d, 300) * (0.4 + 0.6 * aire);
+    cortaMas(m, balasCaza, 2, helice ? 'm-caza-303' : 'm-caza-canon', vol, rand(0.92, 1.06), t + demora(d), pan);
+  });
+}
+
+/** Bengalas que suelta un enemigo (cazas, Margarita): «tup-tup» sordo. */
+export function bengalaEnemiga(pan: number, distancia: number): void {
+  evento('m-bengala-enemiga', 0.3, (m, t) => unaMas(m, 'm-bengala-enemiga', 0.24 * lejania(distancia, 300) * enAire(), rand(0.92, 1.08), t + demora(distancia), pan));
+}
+
+/* ── armas y herramientas del jugador ── */
+
+/** Carácter de cada carga al soltarla: [sonido, volumen, tono]. */
+const CAPA_BOMBA: Partial<Record<string, [NombreMas, number, number]>> = {
+  racimo: ['m-racimo-suelta', 0.16, 1],
+  dardos: ['m-racimo-suelta', 0.14, 1.4],
+  pinata: ['m-racimo-suelta', 0.12, 0.8],
+  guiada: ['m-servo', 0.16, 1],
+  planeadora: ['m-servo', 0.14, 0.85],
+  rebote: ['m-giro', 0.18, 1],
+  crio: ['m-frio', 0.16, 1],
+  plasma: ['m-carga', 0.16, 1],
+  emp: ['m-carga', 0.16, 1.35],
+  fosforo: ['m-magnesio', 0.1, 0.8],
+  napalm: ['m-quemador', 0.08, 1.4],
+  mina: ['m-mina-suelta', 0.14, 0.9],
+};
+/** Se sueltan bombas: compuertas + el carácter de la carga (máx. una vez cada 0.2 s). */
+export function sueltaBomba(tipo: string): void {
+  evento('m-suelta', 0.2, (m, t) => {
+    const c = cede();
+    const pesada = tipo === 'termobarica' || tipo === 'sismica' || tipo === 'planeadora';
+    unaMas(m, 'm-compuerta', 0.2 * c, rand(0.95, 1.05) * (pesada ? 0.8 : 1), t, 0, m.bus);
+    const x = CAPA_BOMBA[tipo];
+    if (x) unaMas(m, x[0], x[1] * c, x[2] * rand(0.97, 1.03), t + 0.12, 0, m.bus);
+  });
+}
+
+/** Impactos propios de cargas que sonaban prestadas o mudas: crio, EMP, termobárica. */
+export function bombaImpacto(tipo: 'crio' | 'emp' | 'termobarica', pan: number): void {
+  evento('m-impacto-' + tipo, 0.2, (m, t) => {
+    if (tipo === 'crio') unaMas(m, 'm-crio', 0.32 * enAire(), rand(0.95, 1.05), t, pan);
+    else if (tipo === 'emp') unaMas(m, 'm-emp', 0.34 * enAire(), rand(0.95, 1.05), t, pan);
+    // El aire que vuelve: la succión justo antes del segundo estallido (a los 0.28 s).
+    else unaMas(m, 'm-termo', 0.3 * enAire(), 1, t + 0.02, pan);
+  });
+}
+
+/** La bomba de rebote toca el suelo y salta. */
+export function reboteBomba(pan: number): void {
+  evento('m-rebote', 0.12, (m, t) => unaMas(m, 'm-rebote', 0.26 * enAire(), rand(0.95, 1.1), t, pan));
+}
+
+/** Cada bengala de la salva según su tipo (i = número en la salva): suena al abrir y a media salva. */
+export function bengalaTipo(tipo: string, pan: number, i: number): void {
+  if (i !== 0 && i !== 4) return;
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const k = (i ? 0.65 : 1) * cede();
+  const p = lado(pan) || 0.001;
+  if (tipo === 'chaff') unaVez(m, 'chaff', 0.24 * k, i ? 1.15 : 1, t, p, LIMITE + 2, m.explo);
+  else if (tipo === 'trampa') unaVez(m, 'trampa', 0.24 * k, i ? 1.1 : 1, t, p, LIMITE + 2, m.explo);
+  else if (tipo === 'holograma') unaVez(m, 'holograma', 0.22 * k, i ? 1.25 : 1, t, p, LIMITE + 2, m.explo);
+  else unaMas(m, 'm-magnesio', 0.14 * k, rand(0.92, 1.1), t, pan);
+}
+
+/** Sin munición según el arma: riel vacío (misil) o pestillo (bomba). Va con el «tic» de siempre. */
+export function sinMunicionTipo(tipo: 'misil' | 'bomba', pan = 0): void {
+  evento('m-sin-' + tipo, 0.3, (m, t) => unaMas(m, tipo === 'misil' ? 'm-clic-misil' : 'm-clic-bomba', 0.18 * cede(), rand(0.97, 1.03), t, lado(pan) * 0.5, m.bus));
+}
+
+/** Capa mecánica de la recarga de cada arma (la llama armaRecargada). */
+function recargaMecanica(m: Mezcla, t: number, tipo: 'misil' | 'bomba' | 'bengala') {
+  const n: NombreMas = tipo === 'misil' ? 'm-recarga-misil' : tipo === 'bomba' ? 'm-recarga-bomba' : 'm-recarga-bengala';
+  unaMas(m, n, 0.13 * cede(), rand(0.97, 1.03), t + 0.02, 0, m.bus);
+}
+
+/** Capa del recalentón por familia de metralla (la llama recalentada). */
+function recalentonTipo(m: Mezcla, t: number, arma: string) {
+  const rotativa = arma === 'vulcan' || arma === 'gau8' || arma === 'minigun';
+  const canon = arma === 'canon30' || arma === 'hispano' || arma === 'pompom' || arma === 'revolver';
+  const n: NombreMas | null = rotativa ? 'm-giro-baja' : canon ? 'm-clonc' : arma === 'laser' ? 'm-fritura' : null;
+  if (n) unaMas(m, n, 0.22 * cede(), rand(0.95, 1.05) * (arma === 'gau8' ? 0.8 : arma === 'minigun' ? 1.2 : 1), t, 0, m.bus, LIMITE + 4);
+}
+
+/** Premio recogido: el arma que se suma (misil, bomba, bengala), la llave de reparar o la caja. */
+export function premio(kind: string): void {
+  const n: NombreMas | null =
+    kind === 'misil' ? 'm-recarga-misil' : kind === 'bomba' ? 'm-recarga-bomba' : kind === 'bengala' ? 'm-recarga-bengala'
+    : kind === 'reparar' ? 'm-llave' : kind === 'caja' ? 'm-caja' : null;
+  if (!n) return;
+  evento('m-premio', 0.15, (m, t) => {
+    unaMas(m, n, 0.2 * cede(), kind === 'caja' ? 1.3 : 1.12, t + 0.05, 0, m.bus, LIMITE + 4);
+    if (kind === 'caja') unaMas(m, 'm-llave', 0.14 * cede(), 1.1, t + 0.2, 0, m.bus, LIMITE + 4);
+  });
+}
+
+/** Una caja con paracaídas toca el suelo. */
+export function cajaAterriza(pan: number, distancia: number): void {
+  evento('m-caja', 0.2, (m, t) => unaMas(m, 'm-caja', 0.2 * lejania(distancia, 250), rand(0.9, 1.05), t, pan));
+}
+
+/** Combo de derribos: «ding» que sube un tono por eslabón; en 3, 5 y 8+ suma la octava. */
+export function combo(n: number): void {
+  const k = Math.floor(num(n));
+  if (k < 2) return;
+  evento('m-combo', 0.08, (m, t) => {
+    const r = Math.pow(2, (Math.min(k - 2, 8) * 2) / 12);
+    unaMas(m, 'm-combo', 0.14 * cede(), r, t, 0, m.bus, LIMITE + 4);
+    if (k === 3 || k === 5 || k >= 8) unaMas(m, 'm-combo', 0.1 * cede(), r * 2, t + 0.08, 0, m.bus, LIMITE + 4);
+  });
+}
+
+/** Nivel de nitro alcanzado (1 súper, 2 híper, 3 mega): cada uno más salvaje que el anterior. */
+export function nitroNivel(nivel: number): void {
+  evento('m-nitro-nivel', 0.3, (m, t) => {
+    const c = cede();
+    if (nivel >= 1) unaMas(m, 'm-nitro1', (0.16 + 0.04 * nivel) * c, 0.9 + 0.15 * nivel, t, 0, m.bus, LIMITE + 6);
+    if (nivel >= 2) unaMas(m, 'm-nitro2', 0.22 * c, nivel >= 3 ? 1.12 : 1, t + 0.03, 0, m.bus, LIMITE + 6);
+    if (nivel >= 3) {
+      unaMas(m, 'm-nitro3', 0.26 * c, 1, t, 0, m.bus, LIMITE + 6);
+      unaMas(m, 'm-nitro3', 0.12 * c, 1.5, t + 0.12, 0.6, m.bus, LIMITE + 6);
+    }
+  });
+}
+
+/* ── cabina: rodaje, tren, aerofrenos y agua ── */
+
+type LoopMas = { v: Voz; src: AudioBufferSourceNode; g: GainNode; quieto: number };
+/** Como `loop`, para esta tanda: con volumen 0 se funde y a los 1.5 s se libera. */
+function loopMas(m: Mezcla, actual: LoopMas | null, n: NombreMas, vol: number): LoopMas | null {
+  const t = m.ctx.currentTime;
+  if (!(vol >= 0.003)) {
+    if (!actual) return null;
+    if (actual.quieto < 0) {
+      actual.quieto = t;
+      hacia(actual.g.gain, 0, t, 0.1);
+    } else if (t - actual.quieto > 1.5) {
+      apagar(actual.v, actual.g, t);
+      return null;
+    }
+    return actual;
+  }
+  if (!actual) {
+    if (vivos + 3 > LIMITE) return null;
+    const src = fuente(m, bufMas(m, n), true);
+    const g = ganancia(m, 0);
+    const v = voz(src, [g], m.bus, false);
+    src.start(t, Math.random());
+    actual = { v, src, g, quieto: -1 };
+  }
+  actual.quieto = -1;
+  hacia(actual.g.gain, vol, t, 0.12);
+  return actual;
+}
+
+let rodarL: LoopMas | null = null;
+let aguaL: LoopMas | null = null;
+let frenoL: LoopMas | null = null;
+let despegueAntes = '';
+let frenoAntes = false;
+
+/**
+ * Cabina (llamar cada tick): `despegue` como en el motor ('' | 'subiendo' |
+ * 'pista'), velocidad en px/s, `frenando` 0…1 (aerofrenos afuera), `agua`
+ * 0…1 (rozando el mar) y `suelo` (ruedas en tierra).
+ */
+export function cabina(despegue: string, velocidad: number, frenando: number, agua: number, suelo: boolean): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const v = clamp(num(velocidad) / 160, 0, 1.5);
+  // Rodaje por la pista (o carreteando en tierra).
+  const rueda = (despegue === 'pista' || suelo) && velocidad > 4 ? 0.06 + 0.16 * Math.min(1, v) : 0;
+  rodarL = loopMas(m, rodarL, 'm-rodar', rueda);
+  if (rodarL && rueda) hacia(rodarL.src.playbackRate, 0.7 + 0.6 * Math.min(1, v), t, 0.15);
+  // El avión deja la pista: el tren sube y traba.
+  if (despegueAntes === 'pista' && despegue === '') unaMas(m, 'm-tren-aterrizaje', 0.2 * cede(), 1, t + 0.5, 0, m.bus, LIMITE + 4);
+  despegueAntes = despegue;
+  // Aerofrenos: clonc al abrir (y al cerrar, más suave), temblor mientras están afuera.
+  const f = clamp(num(frenando), 0, 1);
+  const abierto = f > 0.15 && !despegue;
+  if (abierto !== frenoAntes) evento('m-freno', 0.4, (mm, tt) => unaMas(mm, 'm-aerofreno-abre', (abierto ? 0.16 : 0.1) * cede() * aire, abierto ? 1 : 1.3, tt, 0, mm.bus, LIMITE + 4));
+  frenoAntes = abierto;
+  frenoL = loopMas(m, frenoL, 'm-aerofreno', abierto ? 0.12 * f * Math.min(1, v) * aire * ambiente() : 0);
+  // Agua al ras: espuma que sisea.
+  const k = clamp(num(agua), 0, 1);
+  aguaL = loopMas(m, aguaL, 'm-agua', k > 0 ? (0.05 + 0.17 * k) * ambiente() : 0);
+  if (aguaL && k > 0) hacia(aguaL.src.playbackRate, 0.8 + 0.4 * Math.min(1, v), t, 0.15);
+}
+
+/* ── ambiente por mapa (a baja altura) ── */
+
+let marL: LoopMas | null = null;
+let ciudadL: LoopMas | null = null;
+let marNombre: NombreMas | null = null;
+
+/** Cama de ambiente del mapa: puerto y ciudad en Valparaíso, marejada en el océano y la tormenta. */
+export function ambienteMapa(mapa: string, alt: number): void {
+  const m = salida();
+  if (!m) return;
+  const t = m.ctx.currentTime;
+  const bajo = clamp(1 - (num(alt) - 150) / 550, 0, 1) * pesos.campo;
+  const amb = ambiente();
+  const n: NombreMas | null = mapa === 'valparaiso' ? 'm-puerto' : mapa === 'oceano' || mapa === 'tormenta' ? 'm-oleaje' : null;
+  if (marL && n !== marNombre) {
+    apagar(marL.v, marL.g, t, 0.3);
+    marL = null;
+  }
+  marNombre = n;
+  marL = n ? loopMas(m, marL, n, (n === 'm-puerto' ? 0.08 : mapa === 'tormenta' ? 0.07 : 0.09) * bajo * amb) : null;
+  ciudadL = loopMas(m, ciudadL, 'm-ciudad', mapa === 'valparaiso' ? 0.06 * bajo * amb : 0);
+  if (bajo < 0.2 || alarma > 0.3 || duck > 0.3) return;
+  // Detalles sueltos, raros y al azar (nunca la misma cadencia).
+  if (mapa === 'valparaiso') {
+    if (toca('mapa:gaviota', t, [7, 15])) unaVez(m, 'gaviota', rand(0.05, 0.09) * bajo, rand(0.92, 1.12), t, rand(-0.8, 0.8), LIMITE_AMB);
+    if (toca('mapa:claxon', t, [10, 22])) unaMas(m, 'm-claxon', rand(0.03, 0.06) * bajo, rand(0.92, 1.1), t, rand(-0.9, 0.9), m.bus, LIMITE_AMB);
+    if (toca('mapa:campana', t, [14, 26])) unaMas(m, 'm-campanita', rand(0.03, 0.05) * bajo, rand(0.95, 1.08), t, rand(-0.7, 0.7), m.bus, LIMITE_AMB);
+    if (toca('mapa:barco', t, [40, 70])) unaVez(m, 'bocina', 0.06 * bajo, 0.82, t, rand(-0.6, 0.6) || 0.001, LIMITE_AMB);
+  } else if (mapa === 'oceano') {
+    if (toca('mapa:gaviota', t, [10, 20])) unaVez(m, 'gaviota', rand(0.04, 0.07) * bajo, rand(0.92, 1.12), t, rand(-0.8, 0.8), LIMITE_AMB);
+  }
+}
+
+/** Para apagarContinuos() (pausa, salir): funde todo lo continuo de esta tanda. */
+function apagarMas(t: number, tc: number) {
+  for (const o of vocesFuente) apagar(o.v, o.g, t, tc);
+  vocesFuente.length = 0;
+  for (const l of [rodarL, aguaL, frenoL, marL, ciudadL]) if (l) apagar(l.v, l.g, t, tc);
+  rodarL = aguaL = frenoL = marL = ciudadL = null;
+  marNombre = null;
+  despegueAntes = '';
+  frenoAntes = false;
+}
+
+/** Para reiniciar() (contexto nuevo): suelta todo de una. */
+function soltarMas() {
+  for (const o of vocesFuente) liberar(o.v);
+  vocesFuente.length = 0;
+  for (const l of [rodarL, aguaL, frenoL, marL, ciudadL]) if (l) liberar(l.v);
+  rodarL = aguaL = frenoL = marL = ciudadL = null;
+  marNombre = null;
+  tirosAereos.length = tirosRaton.length = balasCaza.length = 0;
+  proximos.clear();
+  huyendo.clear();
+  faseJefe.clear();
+  despegueAntes = '';
+  frenoAntes = false;
+}
+
+/** Solo para pruebas: los nombres de esta tanda y su buffer horneado en `ctx`. */
+export const __nombresMas = () => Object.keys(HORNO_MAS);
+export function __hornearMas(ctx: BaseAudioContext, n: string): AudioBuffer {
+  return bufMas({ ctx }, n as NombreMas);
 }
