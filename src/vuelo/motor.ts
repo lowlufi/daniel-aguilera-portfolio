@@ -4133,21 +4133,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       }
     }
-    // Enemy missiles that run into each other both go off — but not fresh out of the
-    // launcher: a salvo leaves side by side and must not blow itself up.
-    const foes = s.shots.filter((sh): sh is Extract<Shot, { enemy: true }> => sh.enemy && sh.m.t >= 0.9).map((sh) => sh.m);
-    for (const [i, j] of MS.choques(foes)) {
-      for (const m of [foes[i], foes[j]]) {
-        if (m.t >= 0 && MS.golpear(m)) {
-          m.t = -1;
-          blast(m.x, m.y, MS.MISILES[m.tipo].energia * 0.6, 'nadie', 0);
-        }
-      }
-      if (s.mode === 'play') {
-        s.score += 150;
-        pop(foes[i].x, foes[i].y + 12, '¡Choque! +150', P.gold);
-      }
-    }
+    // Enemy missiles never collide with each other: they fly through, all after the plane.
     s.shots.push(...born);
     // Trails of missiles that are gone stay behind and fade.
     for (const sh of s.shots) {
