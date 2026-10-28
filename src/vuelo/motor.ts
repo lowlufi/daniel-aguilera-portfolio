@@ -3647,7 +3647,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       disparar: t ? 'La metralla dispara sola · toca 🚀 Misil para lanzar uno' : 'Espacio: misil · H: metralla',
       fijar: 'Mantén la nariz 1 s sobre un enemigo: se fija y el misil lo persigue',
       bengala: t ? '¡Misil! Toca ✨ Bengalas o gira fuerte' : '¡Misil! L suelta bengalas, o gira fuerte',
-      nitro: t ? 'Mantén Gas: nitro · 3, 5 o 7 toques rápidos y mantén: super, hiper o mega (según el avión)' : 'Mantén E: nitro · 3, 5 o 7 toques rápidos y mantén: super, hiper o mega (según el avión)',
+      nitro: t ? 'Mantén Gas: nitro · sigue tocando rápido: super, hiper y mega (según el avión); si paras, frena' : 'Mantén E: nitro · sigue tocando E rápido: super, hiper y mega (según el avión); si paras, frena',
     }[k];
   }
   /** Picks the hint that fits the moment, if the player hasn't learned it yet. */
@@ -3916,7 +3916,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
       // Holding the throttle burns the nitro; letting go stops it. It heats up like the gun:
       // full heat locks it out (the plain throttle still works) until it cools.
-      const quiereNitro = input.gas > 0 && s.mode === 'play' && !s.despegue && !s.congelado && s.transT <= 0 && !s.attract;
+      // Held throttle, or a super tier kept alive by tapping (each tap within ~0.45 s of the last).
+      const tecleando = s.nitroNivel > 0 && performance.now() - ultimoToque < 450;
+      const quiereNitro = (input.gas > 0 || tecleando) && s.mode === 'play' && !s.despegue && !s.congelado && s.transT <= 0 && !s.attract;
       if (quiereNitro && !s.nitroQuemado) {
         if (s.nitroT <= 0) encenderNitro();
         s.nitroT = NITRO_SOSTEN;
@@ -3935,7 +3937,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       } else {
         // Letting go of the nitro brakes on its own: back down to cruise in a second or so.
         if (s.nitroT > 0 && !s.attract) s.frenoAutoT = 1.6;
-        if (!input.gas || input.gas <= 0) {
+        if (!tecleando && (!input.gas || input.gas <= 0)) {
           s.nitroSuper = false;
           s.nitroNivel = 0;
         }
