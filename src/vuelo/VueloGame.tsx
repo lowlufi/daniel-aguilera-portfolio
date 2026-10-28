@@ -735,6 +735,8 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       // The audio just woke up: bake the battle sounds now, during the intro and menus,
       // so nothing is left to synthesize when the pilot boards the plane.
       window.setTimeout(() => AB.precalentar(), 700);
+      // The enemy and vehicle loops come first in this batch: they sound as soon as the plane takes off.
+      window.setTimeout(() => AB.precalentarMas(), 1100);
       window.setTimeout(() => AB.precalentarArsenal(), 2500);
       setIntroStep(1);
     } else if (introStep < 3) setIntroStep(3);
