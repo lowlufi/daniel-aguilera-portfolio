@@ -24,9 +24,11 @@ const hash = (x: number, s = 0) => {
   return (h ^ (h >>> 16)) >>> 0;
 };
 
-// Water from the surface down, and the same bands lit by a sun ray.
-const AGUA = ['#9ee2ff', '#74ccf8', '#5ab4ee', '#4a9ce2', '#3e86d4', '#3672c4'];
-const RAYO = ['#c4f0ff', '#9adcfc', '#7ec6f4', '#6cb0ea', '#5c9ade', '#5084d2'];
+// Water from the surface down: clear aqua at the top deepening to blue (no
+// muddy greys), and the turquoise of the shallows off the island's beach.
+const AGUA = ['#a6f0f4', '#7ee0ee', '#5ccae6', '#46b2de', '#3a98d2', '#3280c2'];
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const BAJIO = ['#c4f8ec', '#a0f0e2', '#7ee4dc', '#62d2d8', '#4cbcd4', '#3ea4cc'];
 // Sand above water, and sand seen through the water (deeper = bluer).
 const ARENA_BAJO = ['#dcd4a0', '#bccaae', '#a0bec0', '#8ab0cc'];
 
@@ -70,14 +72,19 @@ export function aguaStrip(length: number, heightAt: (x: number) => number, pantr
     const sand = Math.max(bed(x), Math.round(land ? hs[x] : Math.min(NIVEL_MAR - 1, slope[x])));
     const ySand = rowOf(sand);
     // Water: bands of blue getting deeper, with slanted light rays.
+    // Near the island the water is shallow and turquoise, the sand showing
+    // through; it deepens to open blue over a few hundred px (dithered seam).
+    // The light shafts and caustics are animated on top (dibujarOlas).
+    const bajio = Math.max(0, 1 - (x - orillaX) / 360);
     if (!land)
       for (let y = sea; y < ySand; y++) {
         const d = y - sea;
         const band = Math.min(5, Math.floor(d / 6));
         const edge = d % 6 === 0 && band > 0 && (x + y) % 2 === 0;
         const b = edge ? band - 1 : band;
-        const ray = (x + d * 0.6) % 52 < 7 - d * 0.15 && d > 1 && (x + y) % 3 !== 0;
-        R(g, x, y, 1, 1, (ray ? RAYO : AGUA)[b]);
+        // Ordered (Bayer 4×4) dither for the seam: a clean pixel-art gradient, no salt-and-pepper.
+        const turq = bajio > 0 && (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16 < bajio * 1.4 - 0.2;
+        R(g, x, y, 1, 1, (turq ? BAJIO : AGUA)[b]);
       }
     // Sand: dry on the island, then through the water and down to the seabed.
     for (let y = ySand; y < c.height; y++) {
@@ -243,8 +250,8 @@ const CREST_P = 28;
 
 /** Wave colours per ambiente: [body, curl, ink, glint]. Night water never glows cyan. */
 const OLAS: Record<'dia' | 'tarde' | 'noche', [string, string, string, string]> = {
-  dia: ['#9ee2ff', '#ffffff', INK, '#bdf0ff'],
-  tarde: ['#b8c8ea', '#fff4e8', '#5a6aa8', '#ffe8c8'],
+  dia: ['#a6f0f4', '#ffffff', INK, '#d8fcff'],
+  tarde: ['#c0d0ec', '#fff4e8', '#5a6aa8', '#ffe8c8'],
   noche: ['#4a5a98', '#a8b0d8', '#2a3270', '#7080b8'],
 };
 
@@ -252,35 +259,167 @@ const OLAS: Record<'dia' | 'tarde' | 'noche', [string, string, string, string]> 
 const VELO_AGUA: Record<'dia' | 'tarde' | 'noche', [string, number, string, number] | null> = {
   dia: null,
   tarde: ['#f08a6a', 0.3, '#ffd2a0', 0.35],
-  noche: ['#1a1650', 0.42, '#6a5aa8', 0.25],
+  noche: ['#16205a', 0.42, '#6a6ab8', 0.25],
 };
 
+/* Per-hour colours of the animated layers: [light shafts & caustics, swell sheen, swell trough, glitter path]. */
+const LUZ_AGUA: Record<'dia' | 'tarde' | 'noche', [string, string, string, string]> = {
+  dia: ['#f0feff', '#d4fafc', '#3ea8d8', '#ffffff'],
+  tarde: ['#fff0d0', '#ffe4cc', '#8a6aa8', '#ffc880'],
+  noche: ['#b0c0f4', '#8a98d8', '#1e2a68', '#e8ecff'],
+};
+
+/** Tiles for the moving water, painted once per hour. */
+type Tiles = { rayos: HTMLCanvasElement; caustica: HTMLCanvasElement; bandas: HTMLCanvasElement[] };
+const tiles: Partial<Record<'dia' | 'tarde' | 'noche', Tiles>> = {};
+const TW = 256;
+const HAGUA = NIVEL_MAR + DIRT;
+function tilesDe(a: 'dia' | 'tarde' | 'noche'): Tiles {
+  const hecho = tiles[a];
+  if (hecho) return hecho;
+  const [luz, brillo, valle] = LUZ_AGUA[a];
+  // Light shafts slanting down from the surface, soft (dithered) edges, fading with depth.
+  const rayos = document.createElement('canvas');
+  rayos.width = TW;
+  rayos.height = HAGUA;
+  const gr = rayos.getContext('2d')!;
+  gr.fillStyle = luz;
+  for (let y = 0; y < HAGUA; y++)
+    for (let x = 0; x < TW; x++) {
+      const p = (x + y * 0.55) % 64;
+      const ancho = 9 - y * 0.18;
+      const borde = p < 2 || p > ancho - 2;
+      if (p < ancho && (!borde || (x + y) % 2 === 0) && hash(x, y + 999) % 100 > y * 2.2) gr.fillRect(x, y, 1, 1);
+    }
+  // Caustics: the dancing net of light just under the surface.
+  const caustica = document.createElement('canvas');
+  caustica.width = TW;
+  caustica.height = 12;
+  const gc = caustica.getContext('2d')!;
+  gc.fillStyle = luz;
+  for (let y = 0; y < 12; y++)
+    for (let x = 0; x < TW; x++) {
+      const v = Math.sin((x / TW) * Math.PI * 2 * 9 + Math.sin(y * 0.8) * 1.6) + Math.sin((x / TW) * Math.PI * 2 * 4 - y * 0.55);
+      if (Math.abs(v) < 0.16 && (y < 6 || (x + y) % 2 === 0)) gc.fillRect(x, y, 1, 1);
+    }
+  // Three swell bands (sheen near the top, troughs below, far flecks deeper), each its own parallax speed.
+  const bandas = [0, 1, 2].map((n) => {
+    const c = document.createElement('canvas');
+    c.width = TW;
+    c.height = 3;
+    const g2 = c.getContext('2d')!;
+    for (let x = 0; x < TW; x++) {
+      const ph = (x / TW) * Math.PI * 2;
+      if (n === 0) {
+        // A long rolling sheen line that rises and dips.
+        const yy = Math.round(1 + Math.sin(ph * 5) * 0.9 + Math.sin(ph * 11) * 0.4);
+        if (Math.sin(ph * 5 + 1) > -0.35) {
+          g2.fillStyle = brillo;
+          g2.fillRect(x, Math.max(0, Math.min(2, yy)), 1, 1);
+        }
+      } else if (n === 1) {
+        const yy = Math.round(1 + Math.sin(ph * 3 + 2) * 1.1);
+        if (Math.sin(ph * 7) > 0.1) {
+          g2.fillStyle = valle;
+          g2.fillRect(x, Math.max(0, Math.min(2, yy)), 1, 1);
+        }
+      } else if (hash(x, 5) % 9 === 0) {
+        g2.fillStyle = brillo;
+        g2.fillRect(x, hash(x, 6) % 3, 1 + (hash(x, 7) % 3), 1);
+      }
+    }
+    return c;
+  });
+  return (tiles[a] = { rayos, caustica, bandas });
+}
+
+/** Lays a tile across [x0, vw) scrolled by `off` px. */
+function franja(g: Ctx, c: HTMLCanvasElement, x0: number, vw: number, y: number, off: number) {
+  const w = c.width;
+  for (let x = x0 - mod(Math.round(off), w); x < vw; x += w) if (x + w > x0) g.drawImage(c, x, y);
+}
+
 /**
- * Wave crests and foam along the sea surface (screen row `ySuperficie`),
- * scrolling with the camera and rolling slowly left. Skips the island.
+ * The living sea surface (screen row `ySuperficie`), scrolling with the camera:
+ * light shafts and caustics dancing in the clear water, fish shadows, the
+ * hour's veil, three swell bands rolling at their own speeds (parallax), wave
+ * crests that curl and whiten, glints, the sun's or moon's glitter path, kelp,
+ * gulls resting on the swell and a breaker curling onto the island's beach.
+ * Motion is slow and periodic (0.2–0.5 Hz, about a calm breath) on purpose.
+ * `picado` 0…1 makes it dark and choppy (the storm); `astroX` is the sun's or
+ * moon's screen x as a fraction of the width.
  */
-export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: number, t: number, quieto: boolean, ambiente: 'dia' | 'tarde' | 'noche' = 'dia') {
+export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: number, t: number, quieto: boolean, ambiente: 'dia' | 'tarde' | 'noche' = 'dia', picado = 0, astroX?: number) {
   const tt = quieto ? 0 : t;
   const [cuerpo, rizo, tinta, brillo] = OLAS[ambiente];
   const y = Math.round(ySuperficie);
-  const roll = tt * 7;
+  const roll = tt * (7 + picado * 9);
+  const x0 = Math.max(0, Math.round(orillaX - camX));
+  const T = tilesDe(ambiente);
+  const luz = LUZ_AGUA[ambiente];
+
+  // Under the surface: shafts of light and caustics, breathing in and out (~0.2 Hz).
+  if (x0 < vw) {
+    g.save();
+    g.beginPath();
+    g.rect(x0, y + 1, vw - x0, HAGUA);
+    g.clip();
+    const resp = 0.5 + 0.5 * Math.sin(tt * 1.3);
+    const kL = (ambiente === 'noche' ? 0.5 : 1) * (1 - picado * 0.8);
+    g.globalAlpha = (0.1 + 0.12 * resp) * kL;
+    franja(g, T.rayos, x0, vw, y + 1, camX * 0.9 - tt * 3);
+    g.globalAlpha = (0.32 + 0.18 * Math.sin(tt * 2.1)) * kL;
+    franja(g, T.caustica, x0, vw, y + 2, camX - tt * 5);
+    g.globalAlpha = (0.22 + 0.14 * Math.sin(tt * 1.7 + 2)) * kL;
+    franja(g, T.caustica, x0, vw, y + 4, camX + 97 + tt * 4);
+    // Fish shadows: a few little schools drifting under the surface.
+    g.globalAlpha = 0.28;
+    g.fillStyle = tinta;
+    const f0 = Math.floor((camX - 260) / 520), f1 = Math.ceil((camX + vw + 60) / 520);
+    for (let i = f0; i <= f1; i++) {
+      const h = hash(i, 41);
+      if (h % 3 === 0) continue;
+      const dir = h & 1 ? 1 : -1;
+      const bx = i * 520 + (h % 300) + dir * ((tt * 6) % 200) - camX;
+      const by = y + 8 + (h % 12);
+      for (let k = 0; k < 4 + (h % 3); k++) {
+        const fx = Math.round(bx + (hash(i, k) % 18) + Math.sin(tt * 1.5 + k) * 1.5);
+        const fy = Math.round(by + (hash(k, i) % 7));
+        if (fx > x0) g.fillRect(fx, fy, 3, 1);
+      }
+    }
+    g.globalAlpha = 1;
+    g.restore();
+  }
+
   // The water body is painted once in daylight colours: a veil warms it at
   // dusk and darkens it at night, from the surface down to the seabed.
   const velo = VELO_AGUA[ambiente];
-  if (velo) {
-    const x0 = Math.max(0, Math.round(orillaX - camX));
-    if (x0 < vw) {
-      g.globalAlpha = velo[1];
-      g.fillStyle = velo[0];
-      g.fillRect(x0, y, vw - x0, NIVEL_MAR + DIRT + 1);
-      if (velo[2]) {
-        g.globalAlpha = velo[3];
-        g.fillStyle = velo[2];
-        g.fillRect(x0, y, vw - x0, 4);
-      }
-      g.globalAlpha = 1;
+  if ((velo || picado > 0) && x0 < vw) {
+    g.globalAlpha = velo ? velo[1] + picado * 0.2 : picado * 0.4;
+    g.fillStyle = velo ? velo[0] : '#16205a';
+    g.fillRect(x0, y, vw - x0, NIVEL_MAR + DIRT + 1);
+    if (velo && velo[2]) {
+      g.globalAlpha = velo[3];
+      g.fillStyle = velo[2];
+      g.fillRect(x0, y, vw - x0, 4);
     }
+    g.globalAlpha = 1;
   }
+
+  // Swell bands: the near sheen rolls one way, the troughs below the other, far flecks barely move.
+  if (x0 < vw) {
+    const bob = Math.round(Math.sin(tt * 1.9) * 0.6);
+    g.globalAlpha = 0.85;
+    franja(g, T.bandas[0], x0, vw, y + 1 + bob, camX + tt * 6 * (1 + picado));
+    g.globalAlpha = 0.35 + picado * 0.3;
+    franja(g, T.bandas[1], x0, vw, y + 4, camX * 0.95 - tt * 3);
+    g.globalAlpha = 0.5;
+    franja(g, T.bandas[2], x0, vw, y + 8, camX * 0.9 + tt * 1.5);
+    g.globalAlpha = 1;
+  }
+
+  // Wave crests: rounded humps with a white curl; the big ones break into a little whitecap.
   const i0 = Math.floor((camX + roll - 20) / CREST_P);
   const i1 = Math.ceil((camX + roll + vw + 20) / CREST_P);
   for (let i = i0; i <= i1; i++) {
@@ -288,10 +427,10 @@ export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: numbe
     const wx = i * CREST_P + (h % 9) - roll;
     if (wx < orillaX + 8) continue;
     const x = Math.round(wx - camX);
-    const big = h % 3 === 0;
-    const bob = Math.round(Math.sin(tt * 2.2 + i * 1.7) * 0.6 + 0.4);
-    const top = y - (big ? 3 : 2) + bob;
-    // A rounded hump with a white curl on top and an ink line on its back.
+    const big = h % 3 === 0 || (picado > 0.4 && h % 3 === 1);
+    // A slow swell lifts and lowers each crest (~0.35 Hz), out of step with its neighbours.
+    const bob = Math.round(Math.sin(tt * 2.2 + i * 1.7) * (0.6 + picado) + 0.4);
+    const top = y - (big ? 3 : 2) - Math.round(picado * 2) + bob;
     const w = big ? 7 : 5;
     R(g, x - w, y - 1 + bob, w * 2 + 1, 1 - bob + 1, cuerpo);
     R(g, x - w + 2, top + 1, w * 2 - 3, y - top - 1, cuerpo);
@@ -300,9 +439,17 @@ export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: numbe
     R(g, x + 2, top, w - 4, 1, tinta);
     R(g, x + w - 2, top + 1, 2, 1, tinta);
     R(g, x + w, y - 1 + bob, 1, 1, tinta);
-    if (big) R(g, x - w + 4, top - 1, 2, 1, rizo);
+    if (big) {
+      R(g, x - w + 4, top - 1, 2, 1, rizo);
+      // Whitecap: foam spilling down the front, in and out with the swell.
+      const ph = mod(tt * 0.45 + (h % 10) / 10, 1);
+      if (ph < 0.5) {
+        g.fillStyle = rizo;
+        for (let k = 0; k < 4; k++) if ((hash(i, k + Math.floor(ph * 8)) & 3) !== 0) g.fillRect(x - w + 1 - k, top + 1 + (k >> 1), 1, 1);
+      }
+    }
   }
-  // Glints just under the surface, drifting the other way.
+  // Glints just under the surface, drifting the other way, twinkling.
   g.fillStyle = brillo;
   const j0 = Math.floor((camX - tt * 4) / 23);
   for (let j = j0; j <= j0 + Math.ceil(vw / 23) + 1; j++) {
@@ -312,9 +459,82 @@ export function dibujarOlas(g: Ctx, camX: number, ySuperficie: number, vw: numbe
     if (!quieto && Math.floor(tt * 2 + (h % 7)) % 4 === 0) continue;
     g.fillRect(Math.round(wx - camX), y + 3 + (h % 5), 2 + (h % 3), 1);
   }
-  // Foam lapping on the island's shore.
+  // The sun's (or moon's) glitter path: sparkles on the water under it, thinning with depth.
+  {
+    const ax = Math.round(vw * (astroX ?? (ambiente === 'tarde' ? 0.7 : 0.8)));
+    const q = Math.floor(tt * 5);
+    g.fillStyle = luz[3];
+    for (let k = 0; k < 44; k++) {
+      const h = hash(k, q + (k & 3) * 7);
+      const fila = (h % 7) * ((h >>> 4) & 1);
+      const ancho = 34 - fila * 4;
+      const gx = ax + ((h >>> 8) % (ancho * 2)) - ancho;
+      if (gx < x0 + 2 || gx > vw) continue;
+      g.globalAlpha = (ambiente === 'dia' ? 0.8 : 0.95) * (1 - fila / 8) * (1 - picado * 0.7);
+      g.fillRect(gx, y + 1 + fila, fila < 2 ? 4 : 2, 1);
+    }
+    g.globalAlpha = 1;
+  }
+  // Kelp floating in mats, bobbing.
+  {
+    const noche = ambiente === 'noche';
+    const k0 = Math.floor((camX - 300) / 430), k1 = Math.ceil((camX + vw + 30) / 430);
+    for (let i = k0; i <= k1; i++) {
+      const h = hash(i, 53);
+      if (h % 2) continue;
+      const kx = i * 430 + (h % 260);
+      if (kx < orillaX + 30) continue;
+      const X = Math.round(kx - camX);
+      const b = Math.round(Math.sin(tt * 1.6 + i) * 0.6);
+      R(g, X - 5, y + b, 11, 1, noche ? '#2a4a3a' : '#4a8a3a');
+      R(g, X - 3, y - 1 + b, 3, 1, noche ? '#3a5a4a' : '#6aaa4a');
+      R(g, X + 2, y - 1 + b, 2, 1, noche ? '#3a5a4a' : '#8ac25a');
+      R(g, X - 6, y + 1 + b, 2, 1, noche ? '#2a4a3a' : '#3a7a3a');
+    }
+  }
+  // Gulls resting on the swell (heads tucked at night), riding up and down.
+  if (picado < 0.5) {
+    const s0 = Math.floor((camX - 420) / 610), s1 = Math.ceil((camX + vw + 20) / 610);
+    const cuerpoG = ambiente === 'noche' ? '#a8b0d0' : ambiente === 'tarde' ? '#fff0e8' : '#ffffff';
+    const alaG = ambiente === 'noche' ? '#6a7098' : '#9aa6c8';
+    for (let i = s0; i <= s1; i++) {
+      const h = hash(i, 67);
+      if (h % 3 === 0) continue;
+      const gx = i * 610 + (h % 400);
+      if (gx < orillaX + 40) continue;
+      const X = Math.round(gx - camX + Math.sin(tt * 0.3 + i) * 3);
+      const b = Math.round(Math.sin(tt * 1.9 + i * 2) * 0.8);
+      const d = h & 4 ? 1 : -1;
+      R(g, X - 3, y - 3 + b, 6, 3, cuerpoG);
+      R(g, X - 2, y - 3 + b, 4, 1, alaG);
+      if (ambiente === 'noche') R(g, X + d * 2 - 1, y - 4 + b, 2, 1, cuerpoG);
+      else {
+        R(g, X + d * 3 - (d > 0 ? 0 : 1), y - 5 + b, 2, 2, cuerpoG);
+        R(g, X + d * 5 - (d > 0 ? 0 : 1), y - 4 + b, 1, 1, '#ffb43a');
+      }
+      R(g, X - 4, y + b, 9, 1, rizo);
+    }
+  }
+  // The island's beach: a breaker rolls in, curls, crashes into foam and runs up the sand (~0.3 Hz).
   const sx = Math.round(orillaX - camX);
-  if (orillaX > 0 && sx > -10 && sx < vw + 10) {
+  if (orillaX > 0 && sx > -10 && sx < vw + 90) {
+    const ph = mod(tt * 0.3, 1);
+    if (ph < 0.7) {
+      const u = ph / 0.7;
+      const bx = Math.round(sx + 70 * (1 - u));
+      const hgt = Math.round(1 + 4 * Math.sin(u * Math.PI * 0.9));
+      R(g, bx - 6, y - hgt, 10, hgt, cuerpo);
+      R(g, bx - 6, y - hgt, 6, 1, rizo);
+      R(g, bx - 7, y - hgt + 1, 2, 1, rizo);
+      if (u > 0.6) R(g, bx - 9, y - hgt + 2, 2, 2, rizo);
+      if (hgt > 1) R(g, bx + 3, y - hgt + 1, 1, hgt - 1, tinta);
+    } else {
+      // Crashed: foam spreading up the beach and sliding back.
+      const u = (ph - 0.7) / 0.3;
+      const run = Math.round(Math.sin(u * Math.PI) * 6);
+      g.fillStyle = rizo;
+      for (let k = 0; k < 12; k++) if ((hash(k, Math.floor(u * 6)) & 3) !== 0) g.fillRect(sx - run + k * 2 - 3, y - 1 - (k % 2), 2, 1);
+    }
     const k = Math.round(Math.sin(tt * 2.5) * 2);
     R(g, sx - 3 + k, y - 1, 6, 1, rizo);
     R(g, sx + 1 + k, y - 2, 3, 1, brillo);
