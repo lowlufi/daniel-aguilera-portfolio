@@ -2577,6 +2577,7 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   c.height = top + DIRT;
   const g = c.getContext('2d')!;
   const rowOf = (alt: number) => top - alt;
+  VENTANAS_SA.length = 0;
   for (let x = 0; x < length; x++) {
     const h = Math.round(heightAt(x));
     const y0 = rowOf(h);
@@ -2645,7 +2646,7 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   if (libre(268)) vaca(g, 268, surfY(268));
   // Llolleo: totora reeds, little lagoons and white herons.
   for (let x = 410; x < 1100; x += 8 + (hash(x, 3) % 18)) {
-    if (!libre(x) || (x > 615 && x < 760)) continue;
+    if (!libre(x) || (x > 615 && x < 760) || (x > 840 && x < 1086)) continue;
     const k = hash(x, 4) % 10;
     if (k < 6) totoraCerca(g, x, surfY(x), x);
     else if (k < 8) charco(g, x, surfY(x));
@@ -2659,12 +2660,27 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
     cartel(g, 690, surfY(700), 'OJOS DE MAR', '#3d85c6');
   }
 
+  // Llolleo: its old railway station with a freight wagon waiting, and the
+  // Parque Tricao's lagoon with black-necked swans.
+  if (libre(850)) estacionLlolleo(g, 846, surfY(870));
+  if (libre(1040)) {
+    laguna(g, 1046, surfY(1046));
+    cisne(g, 1036, surfY(1046) + 1, false);
+    cisne(g, 1058, surfY(1046) + 2, true);
+    cartel(g, 1010, surfY(1010), 'PARQUE TRICAO', '#5a9a6a');
+  }
+  if (libre(1110)) cartel(g, 1104, surfY(1104), 'COLECTIVOS', '#e8a030');
+  if (libre(372)) cartel(g, 360, surfY(360), 'SAN JUAN', '#5a9a6a');
+
   // Barrancas: concrete stairs with railings, a corner store and lamp posts.
   for (const x of [1160, 1290, 1630]) if (libre(x)) {
     escalinata(g, x, surfY(x));
     casasPareadas(g, x + 16, surfY(x) - 15, surfY, hash(x, 11));
   }
   if (libre(1420)) almacen(g, 1420, surfY(1440));
+  // A newspaper kiosk and the «completos» cart by the stairs.
+  if (libre(1232)) kiosco(g, 1234, surfY(1240));
+  if (libre(1362)) carrito(g, 1358, surfY(1370), 'COMPLETOS', '#ffd27f');
   if (libre(1200)) cartel(g, 1196, surfY(1196), 'JUANASPE', '#c0605a');
   if (libre(1490)) casaNelo(g, 1486, surfY(1510));
   // Beside Ñelo's house: three tall poplars and the neighbourhood's luchador, flexing.
@@ -2684,8 +2700,10 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   if (libre(2200)) fritura(g, 2180, surfY(2200));
   if (libre(2120)) carrito(g, 2110, surfY(2120), 'EMPANADAS', '#f2cc8f');
   if (libre(2330)) arcoLetrero(g, 2310, surfY(2330), 'PASEO BELLAMAR');
+  // A fisherman in bronze on his pedestal, looking out to sea, by the promenade.
+  if (libre(2280)) estatuaPescador(g, 2280, surfY(2280));
   if (libre(2560)) {
-    cartel(g, 2556, surfY(2556), 'CALETA', '#3d85c6');
+    cartel(g, 2556, surfY(2556), 'CALETA PUERTECITO', '#3d85c6');
     bote(g, 2580, surfY(2590));
   }
   for (const x of [2380, 2410]) if (libre(x)) loboMarino(g, x, surfY(x), x === 2410);
@@ -2708,6 +2726,7 @@ export function groundStrip(length: number, heightAt: (x: number) => number, pan
   if (libre(3420)) cartel(g, 3420, surfY(3420), 'PLAYA CHICA', '#3d85c6');
   if (libre(3050)) carrito(g, 3044, surfY(3050), 'HELADOS', '#8fd3c8');
   if (libre(3200)) carritoSangre(g, 3192, surfY(3200));
+  if (libre(3260)) carrito(g, 3248, surfY(3260), 'MOTE CON HUESILLO', '#f6b38e');
 
   paintPantry(g, pantry.x0, rowOf(Math.round(heightAt(pantry.x0 + 30))) + 1);
   return { canvas: c, top };
@@ -2971,6 +2990,9 @@ function quitasol(g: Ctx, x: number, y: number, seed: number) {
   R(g, x + 3, y - 1, 10, 1, ['#9ec5e8', '#f6b38e'][seed % 2]);
 }
 
+/** Glass of the upper windows of San Antonio's houses: [strip x, strip row] pairs, for vida.ts. */
+export const VENTANAS_SA: number[] = [];
+
 /** Paired two-storey houses on a stone terrace at the top of a stair; `y` is the terrace top. */
 function casasPareadas(g: Ctx, x: number, y: number, surfY: (x: number) => number, seed: number) {
   for (let i = 0; i < 46; i++) {
@@ -2989,6 +3011,8 @@ function casasPareadas(g: Ctx, x: number, y: number, surfY: (x: number) => numbe
     for (const [wx, wy] of [[3, 17], [13, 17], [3, 8], [13, 8]] as const) {
       R(g, x + dx + wx, y - wy, 5, 5, P.white);
       R(g, x + dx + wx + 1, y - wy + 1, 3, 3, P.gl1);
+      // Upper windows: where the neighbours lean out (vida.ts).
+      if (wy === 17) VENTANAS_SA.push(x + dx + wx + 1, y - wy + 2);
     }
     R(g, x + dx + 9, y - 6, 4, 6, P.k1);
   }
@@ -3073,6 +3097,86 @@ function estacion(g: Ctx, x: number, y: number) {
   R(g, x + 44, y - 9, 12, 2, P.k1);
   R(g, x + 45, y - 7, 1, 3, P.k0);
   R(g, x + 54, y - 7, 1, 3, P.k0);
+}
+
+/** A black-necked swan (cisne de cuello negro) floating: white body, black neck, red knob. */
+function cisne(g: Ctx, x: number, y: number, flip: boolean) {
+  const d = flip ? -1 : 1;
+  D.oval(g, x, y - 2, 4, 2, '#c8c4d4');
+  D.oval(g, x, y - 2, 3, 1, P.white);
+  R(g, x - d * 4, y - 4, 2, 1, P.white);
+  R(g, x + d * 3, y - 8, 1, 6, '#2a2838');
+  R(g, x + d * 3 + (flip ? -1 : 0), y - 9, 2, 2, '#2a2838');
+  R(g, x + d * 5 - (flip ? 1 : 0), y - 8, 1, 1, '#e8404a');
+  R(g, x + d * 5 + (flip ? -2 : 1), y - 8, 1, 1, '#c8c4d4');
+}
+
+/** Llolleo's little station: a platform, a gabled shelter, its sign and a freight wagon. */
+function estacionLlolleo(g: Ctx, x: number, y: number) {
+  // Rails and sleepers.
+  for (let i = 0; i < 72; i += 4) R(g, x + i, y - 1, 2, 1, P.k0);
+  R(g, x, y - 2, 72, 1, '#7a7490');
+  // A freight wagon (covered, rust-red) on the rails.
+  R(g, x + 2, y - 16, 34, 13, '#5a3a3a');
+  R(g, x + 3, y - 15, 32, 11, '#b0584a');
+  for (let i = 6; i < 34; i += 6) R(g, x + i, y - 15, 1, 11, '#8a4038');
+  R(g, x + 14, y - 13, 8, 8, '#8a4038');
+  R(g, x + 3, y - 17, 32, 1, '#7a7490');
+  for (const wx of [8, 30]) {
+    D.disc(g, x + wx, y - 3, 2, '#2a2838');
+    R(g, x + wx, y - 3, 1, 1, '#8a8aa0');
+  }
+  // Platform and shelter.
+  R(g, x + 40, y - 5, 32, 5, '#a8a0b4');
+  R(g, x + 40, y - 5, 32, 1, '#d8d4e4');
+  for (const px of [42, 69]) R(g, x + px, y - 22, 2, 17, P.k0);
+  for (let i = 0; i < 5; i++) R(g, x + 39 + i, y - 23 - i, 35 - i * 2, 1, i % 2 ? '#e86a5c' : '#b04a4a');
+  const w = anchoLetrero('LLOLLEO');
+  R(g, x + 56 - Math.ceil(w / 2) - 3, y - 19, w + 6, 9, P.k0);
+  R(g, x + 56 - Math.ceil(w / 2) - 2, y - 18, w + 4, 7, P.cream);
+  escribir(g, 'LLOLLEO', x + 56 - Math.ceil(w / 2), y - 17, '#3a5ab0');
+  R(g, x + 48, y - 9, 12, 2, P.k1);
+  R(g, x + 49, y - 7, 1, 2, P.k0);
+  R(g, x + 58, y - 7, 1, 2, P.k0);
+}
+
+/** A newspaper kiosk: a green booth, papers hung on a line, the vendor's window. */
+function kiosco(g: Ctx, x: number, y: number) {
+  R(g, x - 1, y - 19, 20, 19, '#2a4a3a');
+  R(g, x, y - 18, 18, 18, '#3a8a5a');
+  R(g, x - 2, y - 21, 22, 3, '#2a4a3a');
+  R(g, x - 1, y - 20, 20, 1, '#5aaa7a');
+  R(g, x + 3, y - 14, 12, 6, '#2a2838');
+  R(g, x + 4, y - 13, 10, 4, P.gl1);
+  // Papers and magazines pegged on the front.
+  for (let i = 0; i < 4; i++) {
+    R(g, x + 1 + i * 4, y - 7, 3, 4, i % 2 ? P.white : '#ffd27f');
+    R(g, x + 1 + i * 4, y - 6, 3, 1, '#8a8494');
+  }
+  const w = anchoLetrero('KIOSCO');
+  R(g, x + 9 - Math.ceil(w / 2) - 2, y - 29, w + 4, 8, '#2a4a3a');
+  escribir(g, 'KIOSCO', x + 9 - Math.ceil(w / 2), y - 28, P.white);
+}
+
+/** A bronze fisherman on a stone pedestal, net over the shoulder, looking out to sea. */
+function estatuaPescador(g: Ctx, x: number, y: number) {
+  R(g, x - 6, y - 10, 13, 10, '#8a8494');
+  R(g, x - 5, y - 9, 11, 9, '#b8b0c4');
+  R(g, x - 7, y - 11, 15, 2, '#8a8494');
+  const br = '#5a7a6a';
+  const brL = '#7aa08a';
+  R(g, x - 2, y - 17, 2, 6, br);
+  R(g, x + 1, y - 17, 2, 6, br);
+  R(g, x - 3, y - 25, 6, 8, br);
+  R(g, x - 2, y - 24, 2, 6, brL);
+  D.disc(g, x, y - 28, 2, br);
+  R(g, x - 3, y - 31, 6, 1, br);
+  R(g, x - 1, y - 32, 3, 1, br);
+  // An arm shading the eyes, the other holding the net.
+  R(g, x + 3, y - 27, 3, 1, br);
+  R(g, x + 3, y - 29, 1, 2, br);
+  R(g, x - 5, y - 24, 2, 7, br);
+  for (let i = 0; i < 4; i++) R(g, x - 7 + (i % 2), y - 21 + i * 2, 3, 1, brL);
 }
 
 /** A wider lagoon set into the grass, rimmed with reeds. */

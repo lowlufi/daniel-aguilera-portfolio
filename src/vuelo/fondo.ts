@@ -40,6 +40,8 @@ export type OpcionesFondo = {
   tormenta?: boolean;
   /** Storm map only: how far the storm has cleared, 0 = full storm … 1 = clear moonlit night. */
   despeje?: number;
+  /** The player's plane on screen, for its shadow and glory on the sea of clouds. */
+  avion?: { x: number; y: number };
 };
 
 type Ctx = CanvasRenderingContext2D;
@@ -582,52 +584,285 @@ function capaCieloAlto(a: Ambiente) {
   return { cv: b.canvas(), top: css(colorAt(ALTO_HI)) };
 }
 
-/** Mar de nubes visto desde arriba: una fila lejana y otra cercana de lomos esponjosos. */
-function capaMar(a: Ambiente) {
-  const W = 960;
-  const fila = (seed: number, H: number, base: number, r0: number, r1: number, k: number, periodo: number) => {
-    const p = palNube(a, k);
-    const b = new Buf(W, H);
-    const r = rng(seed);
-    const S = pack(p.sombra);
-    const C = pack(p.cuerpo);
-    const L = pack(p.luz);
-    const M = pack(lerp(p.cuerpo, p.sombra, 0.5));
-    const bolas: [number, number, number][] = [];
-    for (let x = 0; x < W - r0; ) {
-      const rr = r0 + Math.floor(r() * (r1 - r0));
-      bolas.push([x, base - Math.round(rr * (0.25 + r() * 0.55)), rr]);
-      x += Math.max(4, Math.round(rr * (1 + r() * 0.7)));
-    }
-    for (const [x, y, rr] of bolas) b.disc(x, y, rr, S);
-    b.rect(0, base, W, H - base, S);
-    for (const [x, y, rr] of bolas) b.disc(x - 1, y - 1, rr - 1, C);
-    b.rect(0, base + 2, W, H - base - 2, C);
-    // Lomos de más cerca, en filas: un pliegue de sombra bajo cada uno.
-    for (let fy = base + 6, j = 0; fy < H + 8; fy += periodo / 2, j++) {
-      const rr = Math.round(r0 * 0.6);
-      const paso = Math.round(W / Math.round(W / (rr * 2.6)));
-      for (let x = (j % 2) * Math.round(paso / 2); x < W + paso; x += paso) {
-        const dy = (x * 7) % 3;
-        const yy = fy + dy;
-        b.oval(x, yy, rr + 1, Math.max(1, Math.round(rr * 0.42)), M);
-        b.oval(x - 1, yy - 1, rr, Math.max(1, Math.round(rr * 0.42)), C);
-        b.rect(x - Math.round(rr * 0.5), yy - Math.round(rr * 0.42), Math.max(1, Math.round(rr * 0.5)), 1, L);
-      }
-    }
-    for (const [x, y, rr] of bolas) if (rr > 5) b.disc(x - rr * 0.35 - 1, y - rr * 0.4 - 1, Math.max(1, Math.round(rr * 0.38)), L);
-    // Solo el borde de arriba lleva contorno (el resto está lleno).
-    b.outline(pack(p.tinta));
-    return b.canvas();
-  };
-  const PER = 24;
-  return {
-    lejos: fila(93, 34, 18, 5, 11, 0.38, PER),
-    cerca: fila(91, 30 + PER * 2, 30, 10, 21, 0.1, PER),
-    base: 30,
-    periodo: PER,
-  };
+/*
+ * Mar de nubes visto desde arriba, en cuatro capas de cúmulos con perspectiva:
+ * `lejos` (lomitos diminutos fundidos con la bruma del horizonte, que se
+ * desvanece tramada hacia el cielo, sin línea dura), `medio`, `cerca` y `fondo`
+ * (lomos grandes que se repiten hacia abajo sin costura). Cada lomo va
+ * iluminado desde arriba (luz arriba a la izquierda, sombra abajo a la
+ * derecha); hay claros por los que se ve el suelo muy abajo (con luces de
+ * ciudad de noche) y sombras de nubes más altas. Every layer is transparent
+ * above its first row of puffs and solid below, so each nearer layer laps over
+ * the one behind with its own scalloped edge.
+ */
+type ColMar = { luz: string; cuerpo: string; medio: string; sombra: string; sombra2: string; borde: string; suelo: [string, string]; luces: string | null; bruma: string };
+const COL_MAR: Record<Ambiente, ColMar> = {
+  dia: { luz: '#ffffff', cuerpo: '#f0f6ff', medio: '#dae6fa', sombra: '#bccff0', sombra2: '#9db4e2', borde: '#ffffff', suelo: ['#6f9fb4', '#5f8fa6'], luces: null, bruma: '#d6eafa' },
+  tarde: { luz: '#fff0dc', cuerpo: '#ffd6d2', medio: '#f2b6c6', sombra: '#c898c6', sombra2: '#9e78b2', borde: '#ffe2a0', suelo: ['#7e6292', '#6e5486'], luces: '#ffe08a', bruma: '#ffc8b4' },
+  noche: { luz: '#9890d8', cuerpo: '#6c64b2', medio: '#5a52a0', sombra: '#4a4290', sombra2: '#383278', borde: '#c0bcf0', suelo: ['#1e1a48', '#17143c'], luces: '#ffd870', bruma: '#40367a' },
+};
+const MAR_W = 960;
+type CapaMar = { cv: Cv; primera: number; ultima: number };
+type MarNubes = { lejos: CapaMar; medio: CapaMar; cerca: CapaMar; fondo: Cv; inicio: CapaMar; periodo: number; gloria: Cv; sombraAvion: Cv };
+
+type TonoMar = { L: number; C: number; M: number; S: number; S2: number; B: number; G0: number; G1: number; Lz: number };
+function tonoMar(a: Ambiente, k: number): TonoMar {
+  const c = COL_MAR[a];
+  const br = hex(c.bruma);
+  const f = (h: string) => pack(lerp(hex(h), br, k));
+  return { L: f(c.luz), C: f(c.cuerpo), M: f(c.medio), S: f(c.sombra), S2: f(c.sombra2), B: f(c.borde), G0: f(c.suelo[0]), G1: f(c.suelo[1]), Lz: c.luces ? P(c.luces) : 0 };
 }
+
+/** Billows along x: 0 in a valley of the cloud sea … 1 on a big mound. Repeats every MAR_W. */
+function oleaje(x: number, seed: number) {
+  const u = (x / MAR_W) * Math.PI * 2;
+  const v = 0.5 + 0.32 * Math.sin(u * 3 + seed) + 0.18 * Math.sin(u * 7 + seed * 1.7);
+  return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/** One puff seen from above: shadow under it, a mid band, the lit body and a highlight. */
+function lomo(b: Buf, T: TonoMar, x: number, y: number, r: number, ry: number, rim: boolean) {
+  b.oval(x + 1, y + 2, r, ry, T.S);
+  b.oval(x, y + 1, r, ry, T.M);
+  b.oval(x - 1, y, Math.max(1, r - 1), Math.max(1, ry - 1), T.C);
+  if (r >= 5) b.oval(x - Math.round(r * 0.3), y - Math.round(ry * 0.35), Math.max(1, Math.round(r * 0.5)), Math.max(1, Math.round(ry * 0.38)), T.L);
+  // At dusk the sun gilds the tops.
+  if (rim && r >= 4) b.rect(x - Math.round(r * 0.55), y - ry, Math.max(1, Math.round(r * 0.7)), 1, T.B);
+}
+
+/** A gap in the clouds: the ground far below (hazy, with city lights at night). */
+function claro(b: Buf, T: TonoMar, x: number, y: number, rx: number, ry: number, r: () => number) {
+  for (let dy = -ry; dy <= ry; dy++) {
+    const w = Math.round(rx * Math.sqrt(Math.max(0, 1 - (dy * dy) / (ry * ry + ry * 0.6))));
+    for (let dx = -w; dx <= w; dx++) {
+      const xx = x + dx;
+      const yy = y + dy;
+      b.px(xx, yy, tramado(xx, yy, 0.5) ? T.G0 : T.G1);
+    }
+  }
+  // Fields, roads or a river glinting far below; city lights after dark.
+  for (let i = 0; i < rx; i++) {
+    const xx = x + Math.round((r() - 0.5) * rx * 1.6);
+    const yy = y + Math.round((r() - 0.5) * ry * 1.2);
+    if (T.Lz && r() < 0.5) b.px(xx, yy, T.Lz);
+    else if (r() < 0.25) b.px(xx, yy, T.S2);
+  }
+  // The far wall of the gap, in shadow.
+  for (let dx = -rx + 1; dx <= rx - 1; dx++) {
+    const yt = Math.round(y - ry * Math.sqrt(Math.max(0, 1 - (dx * dx) / (rx * rx))));
+    b.px(x + dx, yt, T.S2);
+    if (Math.abs(dx) < rx * 0.6) b.px(x + dx, yt + 1, T.S);
+  }
+}
+
+/** Shadows of higher clouds: patches stepped one tone darker, with dithered edges. */
+function sombrasNubes(b: Buf, T: TonoMar, n: number, r: () => number, y0: number, y1: number) {
+  const map = new Map<number, number>([[T.L, T.C], [T.C, T.M], [T.M, T.S], [T.S, T.S2], [T.B, T.C]]);
+  for (let i = 0; i < n; i++) {
+    const cx = Math.round(r() * b.w);
+    const cy = Math.round(y0 + r() * (y1 - y0));
+    const rx = Math.round(30 + r() * 60);
+    const ry = Math.max(3, Math.round(rx * 0.22));
+    for (let dy = -ry; dy <= ry; dy++)
+      for (let dx = -rx; dx <= rx; dx++) {
+        const q = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+        if (q > 1) continue;
+        const xx = cx + dx;
+        const yy = cy + dy;
+        if (!tramado(xx, yy, Math.min(1, (1 - q) * 2.2) * 0.85)) continue;
+        const o = map.get(b.at(xx, yy));
+        if (o) b.px(xx, yy, o);
+      }
+  }
+}
+
+/**
+ * A layer of rows of puffs: from `rA` to `rB` in radius (perspective), haze
+ * from `kA` to `kB`. `filas` rows, `cabeza` px of headroom above the first.
+ */
+type Lomo = [number, number, number, number, number, TonoMar];
+type Claro = [number, number, number, number, number, TonoMar];
+/**
+ * Opens the gaps once all the rows are painted, then repaints the puffs of the
+ * nearer rows that overlap each gap, so its near edge is a soft cloudy lip.
+ */
+function abrirClaros(b: Buf, lomos: Lomo[], claros: Claro[], rim: boolean, r: () => number) {
+  for (const [cx, cy, rx, ry, fila, T] of claros) {
+    claro(b, T, cx, cy, rx, ry, r);
+    for (const [x, y, lx, ly, j, TL] of lomos) {
+      if (j <= fila) continue;
+      const dx = Math.min(Math.abs(x - cx), MAR_W - Math.abs(x - cx));
+      if (dx > rx + lx + 2 || Math.abs(y - cy) > ry + ly + 3) continue;
+      lomo(b, TL, x, y, lx, ly, rim);
+    }
+  }
+}
+
+function capaLomos(a: Ambiente, seed: number, filas: number, rA: number, rB: number, kA: number, kB: number, cabeza: number, pClaro: number, sombras: number): CapaMar {
+  const ys: number[] = [];
+  const rs: number[] = [];
+  let y = cabeza;
+  for (let j = 0; j < filas; j++) {
+    const u = filas > 1 ? j / (filas - 1) : 0;
+    const rr = Math.round(rA + (rB - rA) * u);
+    ys.push(y);
+    rs.push(rr);
+    y += Math.max(2, Math.round(rr * 0.55));
+  }
+  const H = y + Math.round(rB * 0.6) + 2;
+  const b = new Buf(MAR_W, H);
+  const r = rng(seed);
+  const lomos: Lomo[] = [];
+  const claros: Claro[] = [];
+  for (let j = 0; j < filas; j++) {
+    const u = filas > 1 ? j / (filas - 1) : 0;
+    const T = tonoMar(a, kA + (kB - kA) * u);
+    const rr = rs[j];
+    const ry = Math.max(1, Math.round(rr * 0.55));
+    // Solid underneath this row (the puffs of the row cover its top edge).
+    b.rect(0, ys[j] + 1, MAR_W, H - ys[j] - 1, T.M);
+    const paso = Math.max(3, Math.round(rr * 1.35));
+    const n = Math.round(MAR_W / paso);
+    const p2 = MAR_W / n;
+    const fase = r() * p2;
+    for (let i = 0; i < n; i++) {
+      const x = Math.round(fase + i * p2 + (r() - 0.5) * p2 * 0.5);
+      const f = oleaje(x, seed);
+      const yy = ys[j] + Math.round((r() - 0.5) * ry * 0.6 + (1 - f) * ry * 0.7);
+      const rx = Math.max(1, Math.round(rr * (0.55 + r() * 0.3) * (0.6 + 0.65 * f)));
+      lomo(b, T, x, yy, rx, Math.max(1, Math.round(rx * 0.55)), a === 'tarde');
+      lomos.push([x, yy, rx, Math.max(1, Math.round(rx * 0.55)), j, T]);
+    }
+    if (pClaro && j >= 1 && j < filas - 1 && r() < pClaro) {
+      const rx = Math.round(rr * (2.4 + r() * 2));
+      claros.push([Math.round(r() * MAR_W), ys[j] + ry + 1, rx, Math.max(3, Math.round(rx * 0.3)), j, T]);
+    }
+  }
+  abrirClaros(b, lomos, claros, a === 'tarde', r);
+  if (sombras) sombrasNubes(b, tonoMar(a, (kA + kB) / 2), sombras, r, ys[0] + 4, H);
+  return { cv: b.canvas(), primera: ys[0], ultima: ys[filas - 1] };
+}
+
+/** The horizon row: tiny puffs melting into a haze that dithers away into the sky. */
+function capaMarLejos(a: Ambiente): CapaMar {
+  const c = capaLomos(a, 93, 5, 2, 5, 0.6, 0.45, 16, 0, 0);
+  const g = c.cv.getContext('2d')!;
+  const img = g.getImageData(0, 0, c.cv.width, c.cv.height);
+  const d = new Uint32Array(img.data.buffer);
+  // Haze between the cloud tops and the sky: the bruma blended halfway to the high sky's colour.
+  const br = pack(lerp(hex(COL_MAR[a].bruma), hex(CIELO_ALTO[a][1][1]), 0.45));
+  const br2 = pack(lerp(hex(COL_MAR[a].bruma), hex(CIELO_ALTO[a][1][1]), 0.75));
+  for (let y = 0; y < 18; y++)
+    for (let x = 0; x < c.cv.width; x++) {
+      const i = y * c.cv.width + x;
+      if (d[i]) continue;
+      if (tramado(x, y, (y / 18) * 0.6)) d[i] = y > 9 ? br : br2;
+    }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+/** The big near puffs, as a tile that repeats downwards without a seam (or, `conCabeza`, its scalloped first rows). */
+function capaMarFondo(a: Ambiente, conCabeza: boolean): { cv: Cv; periodo: number; primera: number; ultima: number } {
+  const rr = 28;
+  const ry = 15;
+  const dy = 16;
+  const n = 4;
+  const PER = n * dy;
+  const cab = conCabeza ? ry + 3 : 0;
+  const H = PER + cab;
+  const b = new Buf(MAR_W, H);
+  const T = tonoMar(a, 0.03);
+  const filas: [number, number, number][][] = [];
+  for (let j = 0; j < n; j++) {
+    const r = rng(700 + j);
+    const fila: [number, number, number][] = [];
+    const paso = Math.round(rr * 1.4);
+    const k = Math.round(MAR_W / paso);
+    const p2 = MAR_W / k;
+    const fase = r() * p2;
+    for (let i = 0; i < k; i++) {
+      const x = Math.round(fase + i * p2 + (r() - 0.5) * p2 * 0.5);
+      const f = oleaje(x, 11 + j);
+      fila.push([x, Math.round((r() - 0.5) * ry * 0.6 + (1 - f) * ry * 0.6), Math.round(rr * (0.6 + r() * 0.3) * (0.65 + 0.55 * f))]);
+    }
+    filas.push(fila);
+  }
+  const lomos: Lomo[] = [];
+  const claros: Claro[] = [];
+  for (let j = conCabeza ? 0 : -2; j < n + 2; j++) {
+    const f = filas[((j % n) + n) % n];
+    const y0 = cab + j * dy;
+    b.rect(0, y0 + 1, MAR_W, Math.max(0, H - y0 - 1), T.M);
+    for (const [x, oy, rx] of f) {
+      lomo(b, T, x, y0 + oy, rx, Math.round(rx * 0.55), a === 'tarde');
+      lomos.push([x, y0 + oy, rx, Math.round(rx * 0.55), j, T]);
+    }
+    // One gap per tile, always in the same row (so the tile still repeats).
+    if (((j % n) + n) % n === 2) claros.push([300, y0 + ry + 1, 60, 14, j, T]);
+  }
+  abrirClaros(b, lomos, claros, a === 'tarde', rng(777));
+  sombrasNubes(b, T, 3, rng(790), cab, H);
+  return { cv: b.canvas(), periodo: PER, primera: cab, ultima: cab + (n - 1) * dy };
+}
+
+/** The glory: rainbow rings around the plane's shadow on the cloud tops (a «Brocken spectre»). */
+function gloria(): Cv {
+  const R = 26;
+  const b = new Buf(R * 2 + 1, R * 2 + 1);
+  const anillos: [number, number, number][] = (
+    [
+      [6, '#ffffff', 0.55], [8, '#fff4d0', 0.45], [10, '#ff9a9a', 0.5], [12, '#ffd27f', 0.45], [14, '#a8f0a0', 0.4],
+      [16, '#9ad0ff', 0.4], [18, '#c8a8ff', 0.35], [21, '#ff9ab8', 0.22], [23, '#a8f0c8', 0.18], [25, '#a8c8ff', 0.14],
+    ] as [number, string, number][]
+  ).map(([r, c, k]) => [r, P(c), k]);
+  const blanco = P('#ffffff');
+  for (let y = 0; y <= R * 2; y++)
+    for (let x = 0; x <= R * 2; x++) {
+      const d = Math.hypot(x - R, (y - R) * 1.6);
+      for (const [rr, c, k] of anillos)
+        if (Math.abs(d - rr) < 1.1 && tramado(x, y, k * 1.6)) {
+          b.d[y * b.w + x] = c;
+          break;
+        }
+      if (d < 5 && tramado(x, y, 0.4)) b.d[y * b.w + x] = blanco;
+    }
+  return b.canvas();
+}
+/** The plane's shadow on the cloud tops, a soft dark blot. */
+function sombraAvion(): Cv {
+  const b = new Buf(15, 5);
+  const c = P('#5a5a9a');
+  for (let y = 0; y < 5; y++) for (let x = 0; x < 15; x++) if (((x - 7) * (x - 7)) / 49 + ((y - 2) * (y - 2)) / 4 <= 1 && tramado(x, y, 0.7)) b.d[y * 15 + x] = c;
+  return b.canvas();
+}
+
+/**
+ * A nacreous (mother-of-pearl) cloud: a thin lens of iridescent bands, pink,
+ * gold, green and blue, fraying into dither at its tips.
+ */
+function nubeNacarada(a: Ambiente, w: number, seed: number): Cv {
+  const H = 14;
+  const b = new Buf(w, H);
+  const r = rng(seed);
+  const tonos = (a === 'noche' ? ['#8a7ac8', '#7a8ac8', '#6a9ab8', '#9a8ad0'] : ['#ffc8e0', '#ffe8b0', '#c8f4d0', '#b8dcff', '#e0c8ff']).map(P);
+  const fase = r() * 6;
+  for (let x = 0; x < w; x++) {
+    const u = x / (w - 1);
+    // Lens profile: thick in the middle, a hair at the tips, a little wavy.
+    const alto = Math.max(0, Math.sin(u * Math.PI)) * (H * 0.42) * (0.8 + 0.2 * Math.sin(u * 9 + fase));
+    const yc = H / 2 + Math.sin(u * 5 + fase) * 1.2;
+    for (let y = Math.floor(yc - alto); y <= Math.ceil(yc + alto); y++) {
+      const v = (y - (yc - alto)) / Math.max(1, 2 * alto);
+      const borde = Math.min(1, Math.min(u, 1 - u) * 6) * (1 - Math.abs(v - 0.5) * 1.2);
+      if (!tramado(x, y, Math.max(0, borde))) continue;
+      b.px(x, y, tonos[Math.min(tonos.length - 1, Math.floor((v + u * 0.6) * tonos.length) % tonos.length)]);
+    }
+  }
+  return b.canvas();
+}
+/** Nacreous clouds: [world x, sky altitude, drift]. */
+const NACARADAS: [number, number, number][] = [[200, 1500, 0.6], [520, 1380, 0.5], [900, 1620, 0.4], [1250, 1460, 0.7], [1500, 1440, 0.8], [1850, 1560, 0.45], [2100, 1700, 0.5], [2400, 1400, 0.65]];
 
 /** Cirro alto, largo y deshilachado. */
 function capaCirrosAltos(a: Ambiente) {
@@ -1522,8 +1757,9 @@ type Capas = {
 /** Capas de gran altura que dependen del ambiente. */
 type Alto = {
   cielo: { cv: Cv; top: string };
-  mar: ReturnType<typeof capaMar> & { fondo: string };
+  mar: MarNubes;
   cirros: Cv[];
+  nacar: Cv[];
   tierraBuf?: Buf;
   tierra: { cv: Cv; fondo: string };
 };
@@ -1584,8 +1820,21 @@ const TIERRA_PASO = 38;
 
 const tareasAlto = (a: Ambiente): Tarea<Alto>[] => [
   (c) => (c.cielo = capaCieloAlto(a)),
-  (c) => (c.mar = { ...capaMar(a), fondo: css(palNube(a, 0.1).cuerpo) }),
+  // The sea of clouds, a layer per task (a few ms each).
+  (c) => (c.mar = { lejos: capaMarLejos(a) } as MarNubes),
+  (c) => (c.mar!.medio = capaLomos(a, 94, 6, 5, 11, 0.4, 0.24, 12, 0.5, 2)),
+  (c) => (c.mar!.cerca = capaLomos(a, 95, 6, 13, 24, 0.22, 0.07, 26, 0.6, 3)),
+  (c) => {
+    const f = capaMarFondo(a, false);
+    const i = capaMarFondo(a, true);
+    c.mar!.fondo = f.cv;
+    c.mar!.periodo = f.periodo;
+    c.mar!.inicio = { cv: i.cv, primera: i.primera, ultima: i.ultima };
+    c.mar!.gloria = gloria();
+    c.mar!.sombraAvion = sombraAvion();
+  },
   (c) => (c.cirros = capaCirrosAltos(a)),
+  (c) => (c.nacar = [190, 120, 150].map((w, i) => nubeNacarada(a, w, 900 + i))),
   // Painted in bands of rows, a few ms each.
   ...Array.from({ length: Math.ceil(TIERRA_H / TIERRA_PASO) }, (_, i): Tarea<Alto> => (c) => {
     if (i === 0) c.tierraBuf = new Buf(TIERRA_W, TIERRA_H);
@@ -1663,6 +1912,11 @@ const LETRAS: Record<string, string[]> = {
   M: ['#...#', '##.##', '#.#.#', '#...#', '#...#'],
   N: ['#..#', '##.#', '#.##', '#..#', '#..#'],
   O: ['.#.', '#.#', '#.#', '#.#', '.#.'],
+  Q: ['.#.', '#.#', '#.#', '##.', '.##'],
+  W: ['#...#', '#...#', '#.#.#', '##.##', '#...#'],
+  X: ['#.#', '#.#', '.#.', '#.#', '#.#'],
+  '!': ['#', '#', '#', '.', '#'],
+  '¡': ['#', '.', '#', '#', '#'],
   P: ['##.', '#.#', '##.', '#..', '#..'],
   R: ['##.', '#.#', '##.', '#.#', '#.#'],
   S: ['.##', '#..', '.#.', '..#', '##.'],
@@ -4383,6 +4637,24 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
     }
   }
 
+  // Nubes nacaradas (madreperla) en la estratósfera: de tarde brillan, de día apenas.
+  if (H) {
+    const kNac = ss(1250, 1450, altMid) * (1 - ss(1850, 2050, altMid)) * (a === 'tarde' ? 1 : a === 'dia' ? 0.6 : 0.3) * (1 - kT);
+    if (kNac > 0.02) {
+      g.globalAlpha = kNac;
+      for (let i = 0; i < NACARADAS.length; i++) {
+        const [X, el, v] = NACARADAS[i];
+        const s = H.nacar[i % H.nacar.length];
+        const y = Math.round(vh * 0.4 + (cy - el) * 0.35);
+        if (y > vh || y + s.height < 0) continue;
+        const x = mod(X - camX * 0.04 - t * v, NUBE_W) - 170;
+        if (x > vw) continue;
+        g.drawImage(s, Math.round(x), y);
+      }
+      g.globalAlpha = 1;
+    }
+  }
+
   // La Tierra: un arco con atmósfera, abajo, desde la estratósfera.
   if (H) {
     const top = vh * 0.68 + (1 - ss(1150, 1750, cy)) * vh * 0.6 + ss(1900, 2900, cy) * vh * 0.12;
@@ -4412,19 +4684,44 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
   vidaAlta(g, OE, VI, t, altMid, true);
 
   // Mar de nubes: sube a tapar el campo y se hunde al llegar a la estratósfera.
+  // Four layers with parallax (far rows slower), each lapping over the one
+  // behind; the near ones breathe up and down a pixel, slowly, out of step.
   if (H) {
     const m = H.mar;
     const top = Math.round(vh * 0.6 + (1 - ss(200, 750, cy)) * vh * 0.45 + ss(1250, 1800, cy) * vh * 0.55);
     if (top < vh) {
-      tira(g, m.lejos, camX * 0.04 + t, top + m.lejos.height, vw);
-      const yc = top + 14;
-      const cc = m.cerca;
-      tira(g, cc, camX * 0.09 + t * 2.2, yc + cc.height, vw);
-      // Debajo, la textura de lomos se repite hacia abajo.
-      const sy = cc.height - m.periodo;
-      const off = -mod(Math.round(camX * 0.09 + t * 2.2), cc.width);
-      for (let y = yc + cc.height; y < vh; y += m.periodo)
-        for (let x = off; x < vw; x += cc.width) g.drawImage(cc, 0, sy, cc.width, m.periodo, x, y, cc.width, m.periodo);
+      const resp = o.quieto ? 0 : Math.round(Math.sin(t * 0.35));
+      const resp2 = o.quieto ? 0 : Math.round(Math.sin(t * 0.27 + 2));
+      const capa = (c: CapaMar, y0: number, off: number) => tira(g, c.cv, off, y0 + c.cv.height, vw);
+      // Each layer's first row sits a little under the previous layer's last row.
+      const yL = top - m.lejos.primera;
+      capa(m.lejos, yL, camX * 0.03 + t * 0.6);
+      const yM = yL + m.lejos.ultima + 2 - m.medio.primera;
+      capa(m.medio, yM, camX * 0.05 + t * 1.2);
+      const yC = yM + m.medio.ultima + 3 - m.cerca.primera + resp2;
+      capa(m.cerca, yC, camX * 0.08 + t * 2);
+      const yI = yC + m.cerca.ultima + 4 - m.inicio.primera + resp;
+      const offF = camX * 0.11 + t * 2.8;
+      if (yI < vh) {
+        capa(m.inicio, yI, offF);
+        // Below, the big puffs repeat downwards without a seam.
+        const W = m.fondo.width;
+        const x0 = -mod(Math.round(offF), W);
+        for (let y = yI + m.inicio.cv.height; y < vh; y += m.periodo) for (let x = x0; x < vw; x += W) g.drawImage(m.fondo, x, y);
+      }
+      // The glory: the plane's shadow on the cloud tops, haloed by rainbow rings (sun behind us).
+      const kG = (a === 'dia' ? 0.85 : a === 'tarde' ? 0.7 : 0.25) * (1 - kT);
+      if (o.avion && kG > 0.05 && o.avion.y < top - 8) {
+        const yG = Math.round(top + 18 + Math.min(vh * 0.35, (top - o.avion.y) * 0.45));
+        if (yG < vh - 6) {
+          const xG = Math.round(o.avion.x);
+          const gl = m.gloria;
+          g.globalAlpha = kG * Math.max(0, 1 - (top - o.avion.y) / 420);
+          g.drawImage(gl, xG - (gl.width >> 1), yG - (gl.height >> 1));
+          g.drawImage(m.sombraAvion, xG - 7, yG - 2);
+          g.globalAlpha = 1;
+        }
+      }
     }
   }
 

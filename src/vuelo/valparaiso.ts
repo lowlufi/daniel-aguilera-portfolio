@@ -149,6 +149,8 @@ let polanco: [number, number, number] = [1046, 100, 150];
 const ROPAS: [number, number, number][] = [];
 let perro: [number, number] = [0, 0];
 const FAROLES: number[] = [];
+/** Glass of the houses' upper windows: [strip x, strip row] pairs, for the neighbours of vida.ts. */
+export const VENTANAS_VALPO: number[] = [];
 
 /* ── The strip ───────────────────────────────────────────────────────────── */
 
@@ -192,6 +194,7 @@ function casa(g: Ctx, x: number, y: number, w: number, h: number, s: number, fil
       R(g, wx, wy, 5, 6, marco);
       R(g, wx + 1, wy + 1, 3, 4, (s + i + row) % 5 === 0 ? P.p2 : P.gl1);
       R(g, wx + 1, wy + 1, 1, 1, P.gl2);
+      if (row === 0 && fila === 0 && (s + i) % 3 === 0 && VENTANAS_VALPO.length < 1200) VENTANAS_VALPO.push(wx + 1, wy + 2);
       // Geraniums in a pot on some sills.
       if ((s >>> (11 + i)) % 4 === 0) {
         R(g, wx, wy + 6, 5, 1, '#c0603a');
@@ -608,6 +611,67 @@ function matitaDuna(g: Ctx, x: number, y: number, s: number) {
   } else {
     for (const [dx, h] of [[-1, 3], [0, 5], [1, 4], [3, 2]] as const) R(g, x + dx, y - h, 1, h, '#a8885a');
   }
+}
+
+/** Palacio Baburizza: cream walls, dark timber bay windows, a pointed corner turret. */
+function baburizza(g: Ctx, x: number, y: number) {
+  const W = 34;
+  R(g, x - 1, y - 30, W + 2, 30, NOCHE);
+  R(g, x, y - 29, W, 29, '#f2e2c4');
+  R(g, x, y - 29, W, 2, '#d8c4a0');
+  // Timber bands and bay windows.
+  for (const yy of [y - 20, y - 10]) R(g, x, yy, W, 1, '#7a5a3a');
+  for (let i = 0; i < 3; i++) {
+    const wx = x + 4 + i * 10;
+    for (const yy of [y - 26, y - 16]) {
+      R(g, wx - 1, yy - 1, 7, 7, '#7a5a3a');
+      R(g, wx, yy, 5, 5, P.gl1);
+      R(g, wx + 2, yy, 1, 5, '#7a5a3a');
+      R(g, wx, yy, 1, 1, P.gl2);
+    }
+  }
+  R(g, x + 14, y - 7, 6, 7, '#5a3a2a');
+  // Mansard roof and the turret with its spire.
+  for (let i = 0; i < 4; i++) R(g, x - 1 + i, y - 31 - i, W + 2 - i * 2, 1, i % 2 ? '#6a6a8a' : '#4a4a6a');
+  R(g, x + W - 8, y - 42, 9, 12, NOCHE);
+  R(g, x + W - 7, y - 41, 7, 11, '#f2e2c4');
+  R(g, x + W - 6, y - 39, 5, 4, P.gl1);
+  for (let i = 0; i < 6; i++) R(g, x + W - 8 + i, y - 43 - i * 2, 9 - i * 2, 2, i % 2 ? '#6a6a8a' : '#4a4a6a');
+  R(g, x + W - 4, y - 56, 1, 3, NOCHE);
+}
+
+/** A sea lion sprawled on the planks. */
+function loboMuelle(g: Ctx, x: number, y: number, flip: boolean) {
+  const d = flip ? -1 : 1;
+  D.oval(g, x, y - 3, 8, 3, '#4a3428');
+  D.oval(g, x, y - 3, 7, 2, '#7a5a48');
+  D.disc(g, x + d * 8, y - 6, 3, '#4a3428');
+  D.disc(g, x + d * 8, y - 6, 2, '#9a7a62');
+  R(g, x + d * 10, y - 6, 1, 1, P.eye);
+  R(g, x - d * 9, y - 2, 3, 2, '#4a3428');
+  R(g, x + d * 3, y - 1, 3, 1, '#4a3428');
+}
+
+/** The empanada stall at Concón: a wooden hut, a striped awning, its sign. */
+function puestoEmpanadas(g: Ctx, x: number, y: number) {
+  R(g, x - 1, y - 16, 26, 16, '#6a4a2a');
+  R(g, x, y - 15, 24, 15, '#d8a860');
+  for (let i = 0; i < 24; i += 4) R(g, x + i, y - 15, 1, 15, '#c09048');
+  R(g, x + 3, y - 10, 18, 4, '#5a3a1a');
+  for (let i = 0; i < 4; i++) D.oval(g, x + 6 + i * 4, y - 9, 1, 1, '#f0b860');
+  for (let i = 0; i < 28; i++) R(g, x - 2 + i, y - 19 + (i % 4 === 0 ? 1 : 0), 1, 3, (i >> 2) % 2 ? '#e86a5c' : P.white);
+  const w = anchoLetrero('EMPANADAS') + 6;
+  R(g, x + 12 - (w >> 1) - 1, y - 30, w + 2, 10, '#6a4a2a');
+  R(g, x + 12 - (w >> 1), y - 29, w, 8, '#fff4e0');
+  escribir(g, 'EMPANADAS', x + 12 - (w >> 1) + 3, y - 28, '#c05a3a');
+}
+
+/** A surfboard stuck upright in the sand. */
+function tablaSurf(g: Ctx, x: number, y: number, c: string) {
+  R(g, x - 1, y - 13, 3, 12, NOCHE);
+  R(g, x, y - 14, 1, 1, NOCHE);
+  R(g, x, y - 12, 1, 11, c);
+  R(g, x, y - 8, 1, 1, P.white);
 }
 
 /** A wooden sign on a post. */
@@ -1305,6 +1369,7 @@ export function valpoStrip(length: number, heightAt: (x: number) => number, pant
   const hs = alturas;
   ROPAS.length = 0;
   FAROLES.length = 0;
+  VENTANAS_VALPO.length = 0;
 
   // The pier: planks over the water and its piles; the seabed at the bottom.
   for (let x = 0; x < Math.min(length, PUERTO + 1); x++) {
@@ -1522,7 +1587,12 @@ export function valpoStrip(length: number, heightAt: (x: number) => number, pant
   if (1300 < length) bomberos(g, 1266, rowOf(Math.min(hs[1266], hs[1310])) + 1);
   if (900 < length) relojTorre(g, 866, rowOf(Math.min(hs[866], hs[882])) + 1);
   if (2240 < length) picada(g, 2186, rowOf(Math.min(hs[2186], hs[2230])) + 1);
-  if (1620 < length) letreroCalle(g, 1604, rowOf(hs[1604]) + 1, 'CERRO ALEGRE');
+  if (1620 < length) letreroCalle(g, 1562, rowOf(hs[1562]) + 1, 'CERRO ALEGRE');
+  // Palacio Baburizza on Cerro Alegre (by the top of Ascensor El Peral): art nouveau, a corner turret.
+  if (1680 < length) {
+    baburizza(g, 1622, rowOf(Math.min(hs[1622], hs[1656])) + 1);
+    placa(g, 1612, rowOf(hs[1630]) + 12, 'PALACIO BABURIZZA');
+  }
   // A small plaque on a wall just under the street.
   if (1720 < length) placa(g, 1690, rowOf(hs[1700]) + 12, 'UNESCO 2003');
   if (900 < length) placa(g, 846, rowOf(hs[860]) + 12, 'RELOJ TURRI');
@@ -1531,6 +1601,9 @@ export function valpoStrip(length: number, heightAt: (x: number) => number, pant
   // monument to the heroes of Iquique, and an old port bar.
   if (400 < length) {
     letreroCalle(g, 96, rowOf(hs[96]) + 1, 'MUELLE PRAT');
+    // Sea lions sprawled on the pier's planks, as they are at Muelle Prat.
+    loboMuelle(g, 114, rowOf(hs[114]) + 1, false);
+    loboMuelle(g, 142, rowOf(hs[142]) + 1, true);
     edificioArmada(g, 236, rowOf(Math.min(hs[236], hs[282])) + 1);
     monumentoIquique(g, 292, rowOf(Math.min(hs[292], hs[310])) + 1);
     barPuerto(g, 318, rowOf(Math.min(hs[318], hs[352])) + 1);
@@ -1618,7 +1691,11 @@ export function valpoStrip(length: number, heightAt: (x: number) => number, pant
     palmera(g, RENACA - 4, rowOf(hs[RENACA - 4]) + 1, 22, -1);
     // Concón: sparse scrub on the dunes, the sign on the first crest and a boarder walking up.
     for (let x = DUNAS + 6; x < length - 4; x += 12 + (hash(x, 81) % 12)) matitaDuna(g, x, rowOf(hs[x]) + 1, hash(x, 82));
-    letreroMadera(g, DUNAS + 10, rowOf(hs[DUNAS + 10]) + 1, 'DUNAS DE CONCÓN');
+    letreroMadera(g, DUNAS + 8, rowOf(hs[DUNAS + 8]) + 1, 'CONCÓN');
+    // Concón's famous shellfish empanadas, sold from a little stall on the way up.
+    puestoEmpanadas(g, DUNAS + 46, rowOf(Math.max(hs[DUNAS + 46], hs[DUNAS + 70])) + 1);
+    // Reñaca: surfboards stuck in the sand, waiting for the next set.
+    for (const [dx, c] of [[20, '#ffd27f'], [23, '#8fd3c8'], [37, '#e86a5c']] as const) tablaSurf(g, RENACA + dx, rowOf(hs[RENACA + dx]) + 1, c);
     {
       const x = DUNAS + 4;
       const y = rowOf(hs[x]) + 1;
