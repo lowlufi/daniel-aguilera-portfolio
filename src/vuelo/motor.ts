@@ -650,6 +650,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     mapaActual = m;
     s.mapa = m;
     resetHeights();
+    // Blood from the last map lay on its hills: on a new terrain it would hang in mid-air.
+    GR.limpiar(s.sangre);
     if (m === 'oceano') {
       // A new voyage starts off San Antonio again.
       s.enValpo = false;
