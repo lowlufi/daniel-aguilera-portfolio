@@ -755,29 +755,69 @@ function cabezaRaton(g: Ctx, arriba: boolean) {
   A.R(g, 2, 0, 1, 1, '#ffb0c8');
 }
 
+/*
+ * Re-tinted airframes, cached. The recolour needs a CPU readback
+ * (getImageData → loop → putImageData), which used to run for every fighter
+ * every frame. The drawing only depends on the roll frame (7), the propeller /
+ * scarf / flame phase and the throttle, so it's baked per (model, frame,
+ * palette, phase 0–3, throttle 0–2) once and then just blitted: the animation
+ * still cycles (4 phases at 20 fps) and the cache fills within a few seconds.
+ */
+const SPR_CAZA = new Map<string, HTMLCanvasElement>();
+function spriteCaza(m: ModeloAvion, f: number, jefa: boolean, fase: number, gas: number): HTMLCanvasElement {
+  const key = `${m}|${f}|${jefa ? 1 : 0}|${fase}|${gas}`;
+  let c = SPR_CAZA.get(key);
+  if (c) return c;
+  if (SPR_CAZA.size > 700) SPR_CAZA.clear();
+  const mk = mascara(m, f);
+  const w = trabajo();
+  w.clearRect(0, 0, OW, OH);
+  // The phase picks prop blade / flame flicker / scarf wave like a live `t` would.
+  A.conFuenteSprite(copiaCPU, () => drawPlaneGiro(w, m, OX, OY, 0, ALABEO_FRAME[f], 1, fase * 0.025, gas / 2, false, []));
+  const img = w.getImageData(0, 0, OW, OH);
+  recolorear(img.data, jefa ? ROJA : LILA, mk, false);
+  c = document.createElement('canvas');
+  c.width = OW;
+  c.height = OH;
+  const q = c.getContext('2d')!;
+  q.putImageData(img, 0, 0);
+  q.save();
+  q.translate(mk.cx, mk.cy);
+  if (f > 3) q.scale(1, -1);
+  (jefa ? cabezaMargarita : cabezaRaton)(q, f >= 2 && f <= 4);
+  q.restore();
+  SPR_CAZA.set(key, c);
+  return c;
+}
+
+/** White hit silhouette of a cached airframe (composited, no readback). */
+const BLANCAS = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+function siluetaBlanca(src: HTMLCanvasElement): HTMLCanvasElement {
+  let c = BLANCAS.get(src);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = src.width;
+    c.height = src.height;
+    const q = c.getContext('2d')!;
+    q.drawImage(src, 0, 0);
+    q.globalCompositeOperation = 'source-in';
+    q.fillStyle = '#ffffff';
+    q.fillRect(0, 0, c.width, c.height);
+    BLANCAS.set(src, c);
+  }
+  return c;
+}
+
 /** Draws the fighter at screen (x, y): rolled through the giro frames, re-tinted, with its own pilot. */
 export function dibujar(g: Ctx, c: Caza, x: number, y: number, t: number): void {
   const a = c.a;
   const f = framePara(a.alabeo, a.carga);
-  const mk = mascara(c.modelo, f);
-  const w = trabajo();
-  w.clearRect(0, 0, OW, OH);
-  A.conFuenteSprite(copiaCPU, () => drawPlaneGiro(w, c.modelo, OX, OY, 0, a.alabeo, a.carga, t, a.gas, false, []));
-  const img = w.getImageData(0, 0, OW, OH);
-  recolorear(img.data, c.jefa ? ROJA : LILA, mk, c.flash > 0);
-  w.putImageData(img, 0, 0);
-  if (c.flash <= 0) {
-    w.save();
-    w.translate(mk.cx, mk.cy);
-    if (f > 3) w.scale(1, -1);
-    (c.jefa ? cabezaMargarita : cabezaRaton)(w, f >= 2 && f <= 4);
-    w.restore();
-  }
+  const img = spriteCaza(c.modelo, f, !!c.jefa, Math.floor(fin(t) * 20) & 3, Math.round(clamp(fin(a.gas), 0, 1) * 2));
   const L = A.LOOKS[c.modelo];
   g.save();
   g.translate(Math.round(x), Math.round(y));
   g.rotate(Math.round(-a.rumbo / 0.02) * 0.02);
-  g.drawImage(w.canvas, -OX, -OY);
+  g.drawImage(c.flash > 0 ? siluetaBlanca(img) : img, -OX, -OY);
   // Afterburner flicker over the (re-tinted) jet flame.
   if (L.jet) {
     const len = 2 + Math.round(fin(a.gas) * 4) + (Math.floor(t * 30) % 2) * 2;

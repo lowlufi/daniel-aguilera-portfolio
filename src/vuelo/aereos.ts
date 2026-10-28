@@ -1170,16 +1170,32 @@ function blanco(src: HTMLCanvasElement) {
   return c;
 }
 
-/** Spinning blade seen edge-on: its visible length cycles. */
+const ASPA_K = [1, 0.6, 0.2, 0.6];
+/**
+ * Spinning blade seen edge-on: its visible length cycles over 4 frames, over
+ * a faint blur disc (the swept area, a row thick, flickering a row up and
+ * down so it reads as a spinning disc and not a stick) with glints at the tips.
+ */
 function aspa(g: Ctx, cx: number, cy: number, largo: number, t: number, vel: number) {
   const f = Math.floor(t * vel) % 4;
-  const L = Math.round(largo * [1, 0.6, 0.2, 0.6][f]);
-  g.globalAlpha = 0.35;
+  const L = Math.round(largo * ASPA_K[f]);
+  const a0 = g.globalAlpha;
+  g.globalAlpha = a0 * 0.35;
   R(g, cx - largo, cy, largo * 2 + 1, 1, P.white);
-  g.globalAlpha = 1;
+  if (largo > 4) {
+    g.globalAlpha = a0 * 0.18;
+    R(g, cx - largo + 2, cy + (f & 1 ? -1 : 1), largo * 2 - 3, 1, P.white);
+  }
+  g.globalAlpha = a0;
   R(g, cx - L, cy, L * 2 + 1, 1, VINK);
   if (L > 2) R(g, cx - L + 1, cy, L * 2 - 1, 1, P.metal);
+  // Tip glints catch the light once a turn.
+  if (f === 0 && largo > 4) {
+    R(g, cx - largo - 1, cy, 1, 1, P.white);
+    R(g, cx + largo + 1, cy, 1, 1, P.white);
+  }
   R(g, cx - 1, cy - 1, 3, 2, P.metal0);
+  R(g, cx - 1, cy - 1, 1, 1, P.metal);
 }
 
 /**
@@ -1228,6 +1244,22 @@ export function dibujar(g: Ctx, a: Aereo, sx: number, sy: number, t: number, fla
     const f = Math.floor((t + a.semilla) * 30) % 2;
     R(g, -18, -10 + f, 1, 4 - f * 2, VINK);
     R(g, -19 - (1 - f), -8, 3 - f * 2 + 2, 1, P.metal);
+    // Anti-collision beacon on the fin: a red double blink (aviation-style), with a halo.
+    const fb = (t * 0.8 + a.semilla) % 1;
+    if (!flash && (fb < 0.05 || (fb > 0.11 && fb < 0.16))) {
+      g.globalAlpha = 0.4;
+      R(g, -18, -10, 3, 3, P.red);
+      g.globalAlpha = 1;
+      R(g, -17, -9, 1, 1, P.white);
+    }
+    // Turbine exhaust: a heat puff drifting back off the engine.
+    for (let i = 0; i < 2; i++) {
+      const ph = (t * 1.8 + i * 0.5 + a.semilla) % 1;
+      if (ph > 0.6) continue;
+      g.globalAlpha = ph < 0.3 ? 0.45 : 0.22;
+      R(g, Math.round(-5 - ph * 8), Math.round(-6 - ph * 3), ph < 0.25 ? 1 : 2, 1, '#d4cce4');
+    }
+    g.globalAlpha = 1;
     // About to fire: the gun blinks.
     if (avisando && Math.floor(t * 14) % 2 === 0) {
       R(g, 9, -6, 4, 4, P.white);
@@ -1239,15 +1271,28 @@ export function dibujar(g: Ctx, a: Aereo, sx: number, sy: number, t: number, fla
     aspa(g, -5, -7, 3, t * 1.3 + a.semilla, 50);
     aspa(g, 4, -7, 3, t * 1.3 + a.semilla + 0.37, 50);
     if (a.fase === 1 && Math.floor(t * 12) % 2 === 0) R(g, -8, -1, 2, 2, P.gold);
+    // A tiny status LED on the pod: slow green pulse while cruising.
+    else if (!flash && a.fase !== 1 && Math.floor(t * 2 + a.semilla * 4) % 3 === 0) R(g, -3, 1, 1, 1, '#7af0c8');
     if (avisando && Math.floor(t * 16) % 2 === 0) {
       R(g, 6, -1, 3, 3, P.white);
       R(g, 7, 0, 1, 1, P.red);
     }
   } else if (a.tipo === 'globo') {
-    // Burner flame flickers over the basket.
+    // Burner flame flickers over the basket; every few seconds it roars (a taller
+    // flame that lights the inside of the envelope from below, warm).
     const f = Math.floor(t * 10 + a.semilla * 5) % 3;
-    R(g, 0, 11 - f, 2, 1 + f, P.gold);
-    R(g, 0, 12, 2, 1, '#ff9a3c');
+    const ruge = (t * 0.35 + a.semilla) % 1 < 0.14;
+    if (ruge && !flash) {
+      g.globalAlpha = 0.35 + (f === 1 ? 0.1 : 0);
+      D.oval(g, 0, 6, 6, 3, '#ffb060');
+      g.globalAlpha = 1;
+      R(g, 0, 7 - f, 2, 5 + f, '#ff9a3c');
+      R(g, 0, 8 - f, 2, 3 + f, P.gold);
+      R(g, 0, 10, 1, 1, P.white);
+    } else {
+      R(g, 0, 11 - f, 2, 1 + f, P.gold);
+      R(g, 0, 12, 2, 1, '#ff9a3c');
+    }
     // The mine about to drop blinks red/white.
     if (avisando) {
       const on = Math.floor(t * 12) % 2 === 0;

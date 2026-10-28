@@ -1329,42 +1329,95 @@ function mouse(g: Ctx, x: number, y: number) {
   R(g, x - 2, y - 6, 5, 1, P.r1);
 }
 
+/*
+ * Ground units share one light: from the top-left, warm. Lit edges take a
+ * pale, slightly pink rim (VW); faces turned away drop to a cooler, bluer
+ * violet (VS) instead of just a darker lilac (hue shift: light warm, shade
+ * cool). Fine 1 px lines (panel seams, rails, antennas) carry the detail.
+ */
+const VS = '#5a46b4', VW = '#f8eeff';
+const TIRE0 = '#2c2240', TIRE1 = '#6a5a82';
+
+/** A tyre with tread notches and a hub: 4 frames per turn (f), lit from the top-left. */
 function wheel(g: Ctx, x: number, y: number, r: number, f: number) {
   D.disc(g, x, y, r, TIRE);
+  // Tread: four notches on the rim, a quarter-step further each frame.
+  for (let i = 0; i < 4; i++) {
+    const a = ((i + f / 4) * Math.PI) / 2;
+    R(g, x + Math.round(Math.cos(a) * r), y + Math.round(Math.sin(a) * r), 1, 1, TIRE0);
+  }
+  R(g, x - r + 1, y - r + 1, 1, 1, TIRE1);
   D.disc(g, x, y, Math.max(1, r - 2), P.metal);
+  // Hub: a dark nut and a lit spoke that turns.
+  R(g, x, y, 1, 1, P.metal0);
   const a = (f * Math.PI) / 2;
-  R(g, x + Math.round(Math.cos(a) * (r - 1)), y + Math.round(Math.sin(a) * (r - 1)), 1, 1, '#8a7a9a');
+  R(g, x + Math.round(Math.cos(a) * (r - 2)), y + Math.round(Math.sin(a) * (r - 2)), 1, 1, P.white);
 }
 
 function paintJeep(g: Ctx, f: number) {
+  // Spare tyre on the tailgate.
+  D.disc(g, 11, -8, 2, TIRE);
+  R(g, 11, -8, 1, 1, P.metal0);
+  // Body: lit top and nose, cool shade underneath.
   R(g, -12, -10, 24, 6, V0);
   R(g, -12, -10, 24, 4, V);
   R(g, -11, -10, 22, 1, V1);
+  R(g, -12, -9, 1, 3, VW);
+  R(g, -11, -5, 22, 1, VS);
+  // Wheel arches, a door seam and its handle.
+  R(g, -10, -6, 7, 1, VS);
+  R(g, 4, -6, 7, 1, VS);
+  R(g, -2, -9, 1, 4, V0);
+  R(g, 0, -8, 2, 1, V1);
+  // Headlight with a glint, bumper.
   R(g, -13, -8, 2, 3, P.gold);
+  R(g, -13, -8, 1, 1, P.white);
+  R(g, -14, -5, 3, 1, P.metal0);
+  // Windscreen: a fine frame and the glass.
+  R(g, -6, -15, 1, 5, P.metal0);
   R(g, -5, -15, 1, 5, P.gl1);
+  R(g, -5, -15, 1, 1, P.white);
   mouse(g, 0, -10);
   // Rocket pod on the back.
   R(g, 4, -14, 8, 4, P.metal0);
   R(g, 4, -14, 8, 2, P.metal);
+  R(g, 5, -14, 6, 1, VW);
+  R(g, 5, -11, 6, 1, VS);
   R(g, 3, -14, 2, 2, P.red);
+  R(g, 3, -14, 1, 1, P.r3);
   wheel(g, -7, -4, 3, f);
   wheel(g, 7, -4, 3, f);
 }
 
 function paintCamion(g: Ctx, f: number) {
+  // Exhaust stack behind the cab.
+  R(g, -4, -19, 2, 6, P.metal0);
+  R(g, -4, -19, 1, 6, P.metal);
   // Cab at the front (left).
   R(g, -16, -16, 11, 12, V0);
   R(g, -16, -16, 11, 10, V);
   R(g, -15, -16, 9, 1, V1);
+  R(g, -16, -15, 1, 8, VW);
+  R(g, -15, -7, 10, 1, VS);
   R(g, -15, -14, 6, 5, P.gl1);
+  R(g, -15, -14, 6, 1, P.gl2);
   mouse(g, -11, -9);
+  // Grille: three fine bars, and a headlight.
+  for (let i = 0; i < 3; i++) R(g, -17, -10 + i * 2, 1, 1, P.metal0);
   R(g, -17, -7, 2, 2, P.gold);
-  // Flat bed and a missile on its launch rail.
+  R(g, -17, -7, 1, 1, P.white);
+  // Flat bed with slats and a missile on its launch rail.
   R(g, -5, -9, 21, 5, V0);
   R(g, -5, -9, 21, 3, V);
+  R(g, -5, -9, 21, 1, V1);
+  R(g, -5, -5, 21, 1, VS);
+  for (let x = -2; x < 16; x += 4) R(g, x, -8, 1, 2, V0);
   R(g, 0, -12, 13, 3, P.metal0);
+  R(g, 0, -12, 13, 1, P.metal);
   R(g, 1, -15, 12, 3, P.white);
+  R(g, 1, -13, 12, 1, P.metal);
   R(g, -1, -15, 2, 3, P.red);
+  R(g, -1, -15, 1, 1, P.r3);
   R(g, 12, -16, 2, 1, P.red);
   wheel(g, -11, -4, 3, f);
   wheel(g, 3, -4, 3, f);
@@ -1372,34 +1425,69 @@ function paintCamion(g: Ctx, f: number) {
 }
 
 function paintTanque(g: Ctx, f: number) {
-  // Tracks: a rounded band with road wheels.
+  // Tracks: a rounded band; the links run forward on top and back below.
   D.oval(g, 0, -4, 15, 4, TIRE);
+  D.oval(g, 0, -4, 13, 2, '#3e3252');
+  for (let x = -12; x <= 12; x += 4) {
+    R(g, x + (f % 4) - 2, -8, 2, 1, TIRE1);
+    R(g, x - (f % 4) + 1, 0, 2, 1, TIRE0);
+  }
+  // Road wheels with turning hubs, a drive sprocket at the front and an idler at the back.
   for (let i = -2; i <= 2; i++) {
     D.disc(g, i * 6, -4, 2, P.metal);
-    R(g, i * 6 + (f % 2 ? 1 : -1), -4, 1, 1, '#8a7a9a');
+    R(g, i * 6 - 1, -5, 1, 1, P.white);
+    R(g, i * 6 + (f % 2 ? 1 : 0), -4 + (f >> 1 ? 1 : 0), 1, 1, P.metal0);
   }
-  // Hull.
+  for (const [x, c] of [[-14, P.metal0], [14, P.metal0]] as const) {
+    D.disc(g, x, -5, 1, c);
+    R(g, x + (f % 2 ? 1 : -1), -5, 1, 1, P.metal);
+  }
+  // Hull with a side skirt and rivets.
   R(g, -14, -11, 28, 5, V0);
   R(g, -13, -11, 26, 3, V);
   R(g, -12, -11, 24, 1, V1);
-  // Turret with a mouse peeking out of the hatch.
+  R(g, -14, -10, 1, 3, VW);
+  R(g, -13, -7, 26, 1, VS);
+  for (let x = -10; x <= 10; x += 5) R(g, x, -9, 1, 1, V1);
+  // Exhaust grille at the back.
+  R(g, 10, -10, 3, 1, V0);
+  // Turret with a hatch, a periscope and a mouse peeking out.
   D.oval(g, 2, -13, 8, 4, V0);
   D.oval(g, 2, -14, 7, 3, V);
   R(g, -2, -16, 6, 1, V1);
+  R(g, -4, -15, 1, 2, VW);
+  R(g, -3, -11, 11, 1, VS);
+  R(g, 8, -17, 2, 2, P.metal0);
+  R(g, 8, -17, 1, 1, P.gl1);
   mouse(g, 5, -16);
 }
 
 function paintSam(g: Ctx, f: number) {
   R(g, -16, -15, 8, 11, V0);
   R(g, -16, -15, 8, 9, V);
+  R(g, -16, -15, 8, 1, V1);
+  R(g, -16, -14, 1, 7, VW);
   R(g, -15, -13, 5, 4, P.gl1);
+  R(g, -15, -13, 5, 1, P.gl2);
   mouse(g, -12, -8);
   R(g, -8, -9, 24, 5, V0);
   R(g, -8, -9, 24, 3, V);
-  // A launcher box tilted up and back with two missile noses.
-  for (let i = 0; i < 9; i++) R(g, -3 + i, -12 - Math.round(i * 0.8), 5, 4, i === 8 ? V1 : V0);
+  R(g, -8, -9, 24, 1, V1);
+  R(g, -8, -5, 24, 1, VS);
+  // Outrigger legs folded on the bed.
+  R(g, -6, -6, 3, 1, P.metal0);
+  R(g, 12, -6, 3, 1, P.metal0);
+  // A launcher box tilted up and back with two missile noses, its lit top edge and a cool underside.
+  for (let i = 0; i < 9; i++) {
+    const y = -12 - Math.round(i * 0.8);
+    R(g, -3 + i, y, 5, 4, i === 8 ? V1 : V0);
+    R(g, -3 + i, y, 1, 1, V);
+    R(g, 1 + i, y + 3, 1, 1, VS);
+  }
   R(g, 5, -22, 2, 2, P.red);
+  R(g, 5, -22, 1, 1, P.r3);
   R(g, 8, -19, 2, 2, P.red);
+  R(g, 8, -19, 1, 1, P.r3);
   wheel(g, -11, -4, 3, f);
   wheel(g, 2, -4, 3, f);
   wheel(g, 11, -4, 3, f);
@@ -1852,6 +1940,73 @@ function white(src: HTMLCanvasElement) {
 }
 
 /**
+ * A whip antenna: a fine 1 px line from (x, y) up `len` px whose tip lags and
+ * swings (secondary motion), with a tip light or a little pennant.
+ */
+function antena(g: Ctx, x: number, y: number, len: number, t: number, seed: number, punta: 'luz' | 'banderin') {
+  // One fillStyle and one rect per straight run of the line (fill state changes are the cost here).
+  const sw = Math.sin(t * 4.2 + seed) * 1.6;
+  g.fillStyle = '#4a3a6a';
+  let tx = x, runX = x, runY = y - 1, runN = 0;
+  for (let i = 1; i <= len; i++) {
+    const k = (i * i) / (len * len);
+    tx = x + Math.round(sw * k + k);
+    if (tx !== runX && runN) {
+      g.fillRect(runX, runY - runN + 1, 1, runN);
+      runN = 0;
+    }
+    if (!runN) {
+      runX = tx;
+      runY = y - i;
+    }
+    runN++;
+  }
+  g.fillRect(runX, runY - runN + 1, 1, runN);
+  const ty = y - len;
+  if (punta === 'luz') {
+    const on = Math.floor(t * 2 + seed) % 2 === 0;
+    R(g, tx, ty - 1, 1, 1, on ? P.red : P.r0);
+  } else {
+    // A pennant streaming back, rippling over three frames.
+    const fr = Math.floor(t * 9 + seed) % 3;
+    R(g, tx + 1, ty, 3, 1, P.r1);
+    R(g, tx + 1, ty + 1, 2 + (fr === 1 ? 1 : 0), 1, P.r1);
+    R(g, tx + 4, ty + (fr === 2 ? 1 : 0), 1, 1, P.r2);
+    R(g, tx + 1, ty, 1, 1, P.r3);
+  }
+}
+
+/** Exhaust: three small puffs drifting back and up, fading in quarter steps. No particles, no allocation. */
+function humito(g: Ctx, x: number, y: number, t: number, seed: number, dx: number, oscuro = false) {
+  for (let i = 0; i < 3; i++) {
+    const ph = (t * 1.5 + i / 3 + seed) % 1;
+    if (ph >= 0.75) continue;
+    const px = Math.round(x + ph * 7 * dx), py = Math.round(y - ph * 6);
+    g.drawImage(puffSpr(oscuro, ph >= 0.3, ph >= 0.45), px, py);
+  }
+}
+
+const puffs: HTMLCanvasElement[] = [];
+/** Smoke puffs (1 px or 2×2 with a lit top-left pixel) with their alpha baked in: one blit, no state changes. */
+function puffSpr(oscuro: boolean, grande: boolean, tenue: boolean): HTMLCanvasElement {
+  const i = (oscuro ? 4 : 0) + (grande ? 2 : 0) + (tenue ? 1 : 0);
+  let c = puffs[i];
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = c.height = grande ? 2 : 1;
+    const q = c.getContext('2d')!;
+    q.globalAlpha = tenue ? 0.25 : 0.5;
+    q.fillStyle = oscuro ? '#6a5e80' : '#d4cce4';
+    q.fillRect(0, 0, c.width, c.height);
+    q.fillStyle = oscuro ? '#8a7ea0' : '#f4f0fc';
+    q.clearRect(0, 0, 1, 1);
+    q.fillRect(0, 0, 1, 1);
+    puffs[i] = c;
+  }
+  return c;
+}
+
+/**
  * A vehicle with its wheels at (x, y) on screen, tilted by `tilt` (screen
  * radians). `wheel` is the distance driven (turns the wheels), `aim` the
  * screen angle of the tank's barrel or the radar sweep.
@@ -1868,9 +2023,13 @@ export function drawVehicle(g: Ctx, k: VehiculoTipo, x: number, y: number, tilt:
     g.save();
     g.translate(0, -14);
     g.rotate(aim);
-    R(g, 0, -2, 13, 4, VINK);
-    R(g, 0, -1, 12, 2, P.metal);
-    R(g, 10, -2, 3, 4, P.metal0);
+    R(g, 0, -2, 14, 4, VINK);
+    R(g, 0, -1, 12, 2, P.metal0);
+    R(g, 0, -1, 12, 1, P.metal);
+    // Muzzle brake: a wider ring with a lit edge and a dark bore.
+    R(g, 11, -2, 3, 4, P.metal0);
+    R(g, 11, -2, 3, 1, P.metal);
+    R(g, 13, 0, 1, 1, VINK);
     g.restore();
   }
   if (k === 'portaaviones') {
@@ -1893,6 +2052,27 @@ export function drawVehicle(g: Ctx, k: VehiculoTipo, x: number, y: number, tilt:
     g.drawImage(src, 0, top, src.width, src.height - top, -L.w / 2 - 3, 1, src.width, src.height - top);
     g.globalAlpha = 1;
   } else g.drawImage(src, -L.w / 2 - 3, -L.h - 2);
+  // Secondary motion: antennas that lag and swing, exhaust, beacons.
+  const sd = (Math.abs(x) * 0.013) % 6.28;
+  if (k === 'jeep') {
+    antena(g, 10, -14, 9, t, sd, 'luz');
+    humito(g, 13, -5, t, sd, 1);
+  } else if (k === 'camion') {
+    humito(g, -3, -20, t, sd, 1);
+  } else if (k === 'tanque') {
+    antena(g, 8, -15, 10, t, sd, 'banderin');
+    humito(g, 14, -10, t * 1.3, sd, 1);
+  } else if (k === 'sam') {
+    // Rotating beacon on the cab: a red flash with a soft halo every half second.
+    if (Math.floor(t * 4 + sd) % 2 === 0) {
+      g.globalAlpha = 0.35;
+      R(g, -14, -18, 3, 3, P.red);
+      g.globalAlpha = 1;
+      R(g, -13, -17, 1, 1, P.white);
+    } else R(g, -13, -17, 1, 1, P.r0);
+  } else if (k === 'lancha') {
+    antena(g, 6, -8, 6, t * 1.4, sd, 'banderin');
+  }
   if (k === 'margarita') {
     // She shakes her broom at the sky.
     g.save();
@@ -2116,6 +2296,12 @@ export function scorchMarks(g: Ctx, k: VehiculoTipo, x: number, y: number, seed:
     const cx = Math.round(x - L.w / 4 + (seed % 7));
     for (let i = 0; i < 5; i++) R(g, cx + i, Math.round(y - L.h * 0.6) + (i % 2), 1, 1, '#3a2a4a');
   }
+  // Damage you can read at a glance: a thin grey wisp once hurt, a dark plume when it's nearly done.
+  if (amount > 0.35 && k !== 'portaaviones' && k !== 'margarita') {
+    const sx = Math.round(x - L.w / 6 + (seed % 5));
+    const top = Math.round(y - L.h + 4);
+    humito(g, sx, top, t * 0.8, (seed % 13) * 0.07, 0.6, amount > 0.7);
+  }
 }
 
 /** What a reward balloon gives: one more slot of missiles, bombs or flares. */
@@ -2144,31 +2330,84 @@ export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number,
     g.restore();
     return;
   }
-  const [c0, c1, c2] = PRIZE_COL[kind];
+  const c2 = PRIZE_COL[kind][2];
   const X = Math.round(x);
   const Y = Math.round(y);
   const sway = Math.round(Math.sin(t * 2.4 + x * 0.05) * 1.5);
   const r = big ? 7 : 5;
   const by = Y - (big ? 14 : 10) - r;
-  // String.
-  for (let i = 0; i < (big ? 14 : 10); i++) R(g, X + Math.round((sway * i) / 12), Y - i, 1, 1, '#8a7a9a');
+  // String: a fine line that curves with the sway (the knot end lags the balloon).
+  const n = big ? 14 : 10;
+  g.fillStyle = '#8a7a9a';
+  for (let i = 0; i < n; i++) g.fillRect(X + Math.round((sway * i * i) / (n * n)), Y - i, 1, 1);
   if ((big || kind === 'especial' || kind === 'vida' || kind === 'nuclear') && Math.floor(t * 3) % 2) {
-    g.globalAlpha = 0.5;
-    D.disc(g, X + sway, by, r + 3, c2);
-    g.globalAlpha = 1;
+    const a0 = g.globalAlpha;
+    g.globalAlpha = a0 * 0.5;
+    g.drawImage(prizeHalo(c2, r + 3), X + sway - r - 3, by - r - 3);
+    g.globalAlpha = a0;
   }
-  D.disc(g, X + sway, by, r + 1, c0);
-  D.disc(g, X + sway, by, r, c1);
-  R(g, X + sway - Math.round(r / 2), by - Math.round(r / 2), 2, 2, c2);
-  R(g, X + sway - 1, by + r + 1, 3, 1, c0);
+  const body = prizeBody(kind, big);
+  g.drawImage(body, X + sway - r - 3, by - r - 3);
+  // Now and then a glint runs over it: an anticipation cue that says «grab me».
+  const ph = (((t * 0.55 + x * 0.013) % 1) + 1) % 1;
+  if (ph < 0.14) {
+    const tam = ph < 0.035 ? 1 : ph < 0.09 ? 2 : 1;
+    const gx = X + sway - Math.round(r * 0.6), gy = by - Math.round(r * 0.7);
+    R(g, gx - tam, gy, tam * 2 + 1, 1, P.white);
+    R(g, gx, gy - tam, 1, tam * 2 + 1, P.white);
+  }
+}
+
+const prizeHalos = new Map<string, HTMLCanvasElement>();
+function prizeHalo(col: string, r: number): HTMLCanvasElement {
+  const key = col + r;
+  let c = prizeHalos.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = c.height = 2 * r + 1;
+    D.disc(c.getContext('2d')!, r, r, r, col);
+    prizeHalos.set(key, c);
+  }
+  return c;
+}
+
+const prizeBodies = new Map<string, HTMLCanvasElement>();
+/** The balloon itself (skin, shading, shine, knot and icon), baked once per kind and size. */
+function prizeBody(kind: Premio, big: boolean): HTMLCanvasElement {
+  const key = kind + (big ? '|g' : '|p');
+  let c = prizeBodies.get(key);
+  if (c) return c;
+  const [c0, c1, c2] = PRIZE_COL[kind];
+  const r = big ? 7 : 5;
+  c = document.createElement('canvas');
+  c.width = 2 * r + 7;
+  c.height = 2 * r + 8;
+  const g = c.getContext('2d')!;
+  g.translate(r + 3, r + 3);
+  const by = 0, ix = 0;
+  D.disc(g, 0, 0, r + 1, c0);
+  D.disc(g, 0, 0, r, c1);
+  // Cool core shadow on the lower right (toward the dark tone), lit body top-left.
+  g.globalAlpha = 0.45;
+  D.disc(g, 1, 1, r - 1, c0);
+  g.globalAlpha = 1;
+  D.disc(g, -1, -1, r - 1, c1);
+  // Shine: a thin arc and a hot point.
+  R(g, -r + 2, -1, 1, 2, c2);
+  R(g, -r + 3, -Math.round(r / 2) - 1, 1, 1, c2);
+  R(g, -Math.round(r / 2), -Math.round(r / 2), 2, 2, c2);
+  R(g, -Math.round(r / 2), -Math.round(r / 2), 1, 1, P.white);
+  // Knot.
+  R(g, -1, r + 1, 3, 1, c0);
+  R(g, 0, r + 2, 1, 1, c0);
   // The icon inside.
-  const ix = X + sway;
   if (kind === 'misil') {
     R(g, ix - 2, by, 5, 1, P.white);
     R(g, ix + 3, by, 1, 1, P.red0);
     R(g, ix - 3, by - 1, 1, 3, P.white);
   } else if (kind === 'bomba') {
     D.disc(g, ix, by + 1, 2, '#2a2438');
+    R(g, ix - 1, by, 1, 1, '#5a5470');
     R(g, ix + 1, by - 2, 1, 2, P.gold);
   } else if (kind === 'vida') {
     // A little plane: one more life.
@@ -2197,6 +2436,8 @@ export function drawPrize(g: Ctx, x: number, y: number, kind: Premio, t: number,
     R(g, ix, by - 2, 1, 5, P.white);
     R(g, ix - 2, by, 5, 1, P.white);
   }
+  prizeBodies.set(key, c);
+  return c;
 }
 
 export function drawShell(g: Ctx, x: number, y: number) {
@@ -2216,29 +2457,72 @@ export function drawFlare(g: Ctx, x: number, y: number, t: number) {
   }
 }
 
-/** A tin of fish under a little parachute. (x, y) is the tin. */
+/**
+ * A tin of fish under a little parachute. (x, y) is the tin. The canopy has
+ * striped gores lit from the top-left, a scalloped hem that breathes with the
+ * sway, and four fine shroud lines down to the tin.
+ */
 export function drawCrate(g: Ctx, x: number, y: number, sway: number, chute: boolean) {
-  const X = Math.round(x);
-  const Y = Math.round(y);
+  const s = chute ? Math.round(sway * 2) : 0;
+  // The canopy breathes: 1 px narrower at the ends of the swing.
+  const w = Math.abs(sway) > 0.75 ? 8 : 9;
+  g.drawImage(crateSprite(chute, s, w), Math.round(x) - CRATE_OX, Math.round(y) - CRATE_OY);
+}
+
+const CRATE_W = 28, CRATE_H = 29, CRATE_OX = 14, CRATE_OY = 23;
+const crates = new Map<number, HTMLCanvasElement>();
+/** Every pose of the crate is baked once (≤ 11 small canvases) and blitted. */
+function crateSprite(chute: boolean, s: number, w: number): HTMLCanvasElement {
+  const key = chute ? (s + 2) * 2 + (w - 8) + 1 : 0;
+  let c = crates.get(key);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = CRATE_W;
+  c.height = CRATE_H;
+  paintCrate(c.getContext('2d')!, CRATE_OX, CRATE_OY, chute, s, w);
+  crates.set(key, c);
+  return c;
+}
+
+function paintCrate(g: Ctx, X: number, Y: number, chute: boolean, s: number, w: number) {
   if (chute) {
-    const s = Math.round(sway * 2);
-    R(g, X - 5 + s, Y - 12, 1, 9, P.metal0);
-    R(g, X + 4 + s, Y - 12, 1, 9, P.metal0);
-    D.oval(g, X + s, Y - 15, 9, 5, P.r0);
-    D.oval(g, X + s, Y - 15, 8, 4, P.r2);
-    R(g, X - 8 + s, Y - 14, 16, 2, P.r2);
-    R(g, X - 3 + s, Y - 18, 4, 1, P.r3);
-    R(g, X - 8 + s, Y - 13, 16, 1, P.r0);
+    const cx = X + s, cy = Y - 14;
+    // Shroud lines.
+    g.fillStyle = '#7a6a8a';
+    for (const ax of SHROUDS) {
+      const x0 = Math.round(cx + ax * w), y0 = cy + 1, x1 = X + Math.sign(ax) * 2, y1 = Y - 3;
+      const n = y1 - y0;
+      for (let i = 1; i < n; i++) g.fillRect(Math.round(x0 + ((x1 - x0) * i) / n), y0 + i, 1, 1);
+    }
+    // Dome, row by row: gores alternate red and cream; the right side is in shade.
+    for (let dy = -5; dy <= 0; dy++) {
+      const hw = Math.round(w * Math.sqrt(1 - ((dy + 0.5) * (dy + 0.5)) / 30));
+      for (let dx = -hw; dx <= hw; dx++) {
+        const gore = Math.floor(((dx + w) * 5) / (2 * w + 1)) % 2;
+        const shade = dx > hw * 0.4 || dy === 0;
+        const lit = dx < -hw * 0.3 && dy <= -3;
+        g.fillStyle = gore ? (shade ? '#c8b4c8' : lit ? '#ffffff' : P.cream) : shade ? P.r0 : lit ? P.r3 : P.r2;
+        g.fillRect(cx + dx, cy + dy, 1, 1);
+      }
+    }
+    // Outline on top and the scalloped hem.
+    R(g, cx - 3, cy - 6, 7, 1, P.r0);
+    for (let dx = -w; dx <= w; dx++) if ((dx + w) % 3 !== 1) R(g, cx + dx, cy + 1, 1, 1, P.r0);
+    R(g, cx - 2, cy - 5, 2, 1, P.white);
   }
+  // The tin: lit lid, cool shadow on the right, a fish on the label.
   D.oval(g, X, Y, 6, 4, P.w0);
   D.oval(g, X, Y - 1, 5, 3, P.metal);
+  R(g, X - 4, Y - 3, 3, 1, P.white);
   R(g, X - 5, Y, 10, 2, P.w1);
-  // A fish on the label.
+  R(g, X + 3, Y, 2, 2, P.w0);
   R(g, X - 3, Y - 2, 4, 2, P.o2);
   R(g, X + 1, Y - 3, 2, 1, P.o2);
   R(g, X + 1, Y, 2, 1, P.o2);
   R(g, X - 2, Y - 2, 1, 1, P.eye);
 }
+/** Where the shroud lines leave the hem, as a fraction of the canopy half-width. */
+const SHROUDS = [-0.9, -0.33, 0.33, 0.9];
 
 /* ── Explosions, smoke and sparks ────────────────────────────────────────── */
 

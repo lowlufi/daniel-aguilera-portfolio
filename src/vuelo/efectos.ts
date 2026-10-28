@@ -47,7 +47,31 @@ const G_ESCOMBRO = 170;
 const G_PIEZA = 140;
 
 // Tipos de partícula.
-const T_BOLA = 0, T_CHISPA = 1, T_ESCOMBRO = 2, T_BRASA = 3;
+const T_BOLA = 0, T_CHISPA = 1, T_ESCOMBRO = 2, T_BRASA = 3, T_ESTRELLA = 4;
+/*
+ * Destellos de premio (T_ESTRELLA): estrellitas de 4 puntas que nacen,
+ * revientan a su tamaño máximo en ~0,1 s (impacto) y se encogen titilando
+ * (continuidad). Con `reb & 1` son papel picado: caen aleteando y giran
+ * (cara clara / canto / cara oscura). Paletas en pares brazo/punta, con la
+ * punta corrida de tono (más saturada, más fría) para que lean como luz.
+ */
+const ESTRELLAS: [string, string][] = [
+  ['#fff6b0', '#ffc84a'], // oro
+  ['#d8fff0', '#4ad8a8'], // menta
+  ['#e0f4ff', '#5aa8ff'], // cielo
+  ['#ffe0f4', '#ff5aa8'], // rosa
+  ['#f0e4ff', '#9a6af0'], // lila
+];
+const CONFETI: [string, string][] = [
+  ['#ff6a8a', '#c03a6a'],
+  ['#ffe048', '#d89a2a'],
+  ['#7af0c8', '#3aa88a'],
+  ['#8ab8ff', '#4a6ad0'],
+  ['#ffb0f0', '#c060b8'],
+  ['#ff9a3c', '#c0582a'],
+];
+/** Paletas de `brillos`: 0 oro … 4 lila, 5 arcoíris (cada estrella elige). */
+export const BRILLO_ORO = 0, BRILLO_MENTA = 1, BRILLO_CIELO = 2, BRILLO_ROSA = 3, BRILLO_LILA = 4, BRILLO_ARCOIRIS = 5;
 const G_BRASA = 38;
 const LARGO_CHISPA = 8; // largos de cola 0–7
 // Paletas calientes (secuencia de enfriamiento).
@@ -809,6 +833,80 @@ function agregarRestos(e: Efectos, x: number, y: number, ancho: number, vida: nu
   r.acH = 0;
 }
 
+/* ── Recompensa: destellos y papel picado ───────────────────────────────── */
+
+function estrella(e: Efectos, x: number, y: number, vx: number, vy: number, vida: number, pal: number, retraso: number, confeti: boolean) {
+  const i = nueva(e, 0);
+  if (i < 0) return;
+  e.tipo[i] = T_ESTRELLA;
+  e.x[i] = x;
+  e.y[i] = y;
+  e.vx[i] = vx;
+  e.vy[i] = vy;
+  e.edad[i] = -retraso;
+  e.vida[i] = vida;
+  e.arr[i] = confeti ? 2.2 : 4.5;
+  e.pal[i] = pal;
+  e.sem[i] = (azar() * 256) | 0;
+  e.reb[i] = confeti ? 1 : 0;
+  e.r0[i] = e.r1[i] = 0;
+  e.sube[i] = confeti ? -22 : 8;
+}
+
+/**
+ * Estrellitas que saltan en anillo desde (x, y): `n` de ellas, con un poco
+ * de azar en cantidad, ángulo y retraso (para que dos premios iguales nunca
+ * se vean idénticos: la sorpresa mantiene el gusto, la repetición lo gasta).
+ */
+export function brillos(e: Efectos, x: number, y: number, n: number, paleta = BRILLO_ORO, radio = 1, quieto = false): void {
+  const h = holgura(e) * (quieto ? 0.5 : 1);
+  const m = Math.max(1, Math.round((n + ((azar() * 3) | 0) - 1) * h));
+  const a0 = azar() * 6.283;
+  for (let k = 0; k < m; k++) {
+    const a = a0 + (k / m) * 6.283 + entre(-0.25, 0.25);
+    const v = entre(45, 85) * radio;
+    const pal = paleta === BRILLO_ARCOIRIS ? (k + ((azar() * 2) | 0)) % ESTRELLAS.length : paleta;
+    estrella(e, x, y, Math.cos(a) * v, Math.sin(a) * v + 10, entre(0.45, 0.7), pal, k * 0.012, false);
+  }
+}
+
+/**
+ * Premio recogido: un aro fino que se abre (lectura clara: «lo tomaste»),
+ * un destello de un par de cuadros y estrellitas que salen después del
+ * destello (anticipación → impacto → continuidad).
+ */
+export function premio(e: Efectos, x: number, y: number, paleta = BRILLO_ARCOIRIS, quieto = false): void {
+  onda(e, 2, x, y, 2, 5, 0.06, 0);
+  onda(e, 0, x, y, 4, 16, 0.32, 0.02);
+  brillos(e, x, y, 10, paleta, 1, quieto);
+  if (!quieto) brillos(e, x, y, 5, BRILLO_ORO, 0.45, false);
+}
+
+/**
+ * Derribo confirmado: unas pocas estrellas doradas un instante después de la
+ * explosión, más (y de colores) cuanto mayor el combo. Pocas a propósito: la
+ * explosión ya es el impacto; esto es la firma de «punto para ti».
+ */
+export function derribo(e: Efectos, x: number, y: number, combo: number, quieto = false): void {
+  const c = Math.max(1, Math.min(5, combo | 0));
+  const n = 3 + c * 2;
+  const h = holgura(e) * (quieto ? 0.5 : 1);
+  const m = Math.max(1, Math.round(n * h));
+  for (let k = 0; k < m; k++) {
+    const a = (k / m) * 6.283 + entre(-0.3, 0.3);
+    const v = entre(30, 60) + c * 8;
+    estrella(e, x, y, Math.cos(a) * v, Math.sin(a) * v + 15, entre(0.4, 0.62), c >= 3 ? k % ESTRELLAS.length : BRILLO_ORO, 0.08 + k * 0.01, false);
+  }
+}
+
+/** Oleada limpia: papel picado de colores que cae aleteando sobre (x ± ancho/2, y). */
+export function confeti(e: Efectos, x: number, y: number, ancho: number, quieto = false): void {
+  const h = holgura(e) * (quieto ? 0.4 : 1);
+  const n = Math.round(Math.min(90, ancho / 5) * h);
+  for (let k = 0; k < n; k++)
+    estrella(e, x + entre(-0.5, 0.5) * ancho, y + entre(-10, 30), entre(-20, 20), entre(10, 60), entre(2.2, 3.4), k % CONFETI.length, azar() * 0.5, true);
+}
+
 /** Sacudida de cámara acumulada (px); decae sola en `actualizar`. */
 export function sacudida(e: Efectos): number {
   return e.sacudida;
@@ -892,6 +990,18 @@ export function actualizar(e: Efectos, dt: number, viento: number, suelo: (x: nu
       X[i] += VX[i] * dt;
       Y[i] += VY[i] * dt;
       if (Y[i] < suelo(X[i])) {
+        quitar(e, i);
+        continue;
+      }
+    } else if (tipo === T_ESTRELLA) {
+      // Destello: frena rápido y flota; papel picado: cae a velocidad terminal aleteando.
+      const k = Math.min(1, e.arr[i] * dt);
+      const confeti = e.reb[i] & 1;
+      VX[i] += ((confeti ? viento * 0.5 : 0) - VX[i]) * k;
+      VY[i] += (e.sube[i] - VY[i]) * k;
+      X[i] += (VX[i] + (confeti ? Math.sin(ed * 7 + e.sem[i]) * 14 : 0)) * dt;
+      Y[i] += VY[i] * dt;
+      if (confeti && Y[i] < suelo(X[i])) {
         quitar(e, i);
         continue;
       }
@@ -1283,6 +1393,56 @@ export function dibujar(
       g.globalAlpha = alfa0;
     }
     g.fillStyle = u < 0.25 ? '#ffffff' : u < 0.55 ? (fase < 6 ? '#fff6b0' : '#ffe048') : fase < 4 ? '#ffe048' : '#ff9a3c';
+    g.fillRect(x, y, 1, 1);
+  }
+
+  // 10) Destellos de premio y papel picado (encima: son la recompensa).
+  for (let j = 0; j < nc; j++) {
+    const i = cI[j];
+    if (e.tipo[i] !== T_ESTRELLA) continue;
+    const q = aPantalla(X[i], Y[i]);
+    const x = Math.round(q[0]), y = Math.round(q[1]);
+    if (x < -MARGEN || y < -MARGEN || x > Wc || y > Hc) continue;
+    const u = ED[i] / VI[i];
+    const sem = e.sem[i];
+    if (e.reb[i] & 1) {
+      // Papel picado: gira (cara, canto, revés, canto) a su propio ritmo.
+      if (u > 0.85 && (cuadro + sem) & 1) continue;
+      const [c0, c1] = CONFETI[e.pal[i] % CONFETI.length];
+      const giro = ((cuadro >> 1) + sem) & 3;
+      g.fillStyle = giro === 2 ? c1 : c0;
+      if (giro === 1 || giro === 3) g.fillRect(x, y - 1, 1, 2);
+      else g.fillRect(x - 1, y, 2 + (sem & 1), 1 + (giro === 0 ? 1 : 0));
+      continue;
+    }
+    // Estrella: crece de golpe (impacto), se sostiene y se apaga titilando.
+    let tam = u < 0.06 ? 1 : u < 0.2 ? 3 : u < 0.45 ? 2 : u < 0.75 ? 1 : 0;
+    if (tam > 0 && ((cuadro + sem) & 3) === 0) tam--;
+    if (u > 0.75 && (cuadro + sem) & 1) continue;
+    const [brazo, punta] = ESTRELLAS[e.pal[i] % ESTRELLAS.length];
+    if (tam === 0) {
+      g.fillStyle = punta;
+      g.fillRect(x, y, 1, 1);
+      continue;
+    }
+    // Brazos finos de 1 px; la punta, más saturada; el centro, blanco.
+    g.fillStyle = punta;
+    g.fillRect(x - tam, y, tam * 2 + 1, 1);
+    g.fillRect(x, y - tam, 1, tam * 2 + 1);
+    if (tam > 1) {
+      g.fillStyle = brazo;
+      g.fillRect(x - tam + 1, y, tam * 2 - 1, 1);
+      g.fillRect(x, y - tam + 1, 1, tam * 2 - 1);
+    }
+    if (tam === 3) {
+      g.globalAlpha = alfa0 * 0.5;
+      g.fillRect(x - 1, y - 1, 1, 1);
+      g.fillRect(x + 1, y - 1, 1, 1);
+      g.fillRect(x - 1, y + 1, 1, 1);
+      g.fillRect(x + 1, y + 1, 1, 1);
+      g.globalAlpha = alfa0;
+    }
+    g.fillStyle = '#ffffff';
     g.fillRect(x, y, 1, 1);
   }
   g.globalAlpha = alfa0;
