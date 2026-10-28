@@ -515,6 +515,13 @@ function Radio({ quien, texto, top }: { quien: string; texto: string; top: numbe
   );
 }
 
+/** The Android app (android/) exposes this bridge; inside it the game runs from the APK, offline. */
+type PuenteAndroid = { abrirExterno: (url: string) => void; salir: () => void };
+const appAndroid: PuenteAndroid | null =
+  typeof window !== 'undefined' ? ((window as unknown as { AppAndroid?: PuenteAndroid }).AppAndroid ?? null) : null;
+/** An Android phone in the browser: it gets the APK download instead of the web install. */
+const esAndroidWeb = !appAndroid && typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+
 /**
  * Turns /aviones into an installable app while the game is open: adds the manifest,
  * the iOS home-screen tags and the offline service worker, and catches the browser's
@@ -583,7 +590,12 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
   const [ayudaIos, setAyudaIos] = useState(false);
   const instalada = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || window.matchMedia?.('(display-mode: fullscreen)').matches || (navigator as unknown as { standalone?: boolean }).standalone === true);
   const esIos = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent);
-  useEffect(() => usarWebApp((e) => setInstalar(e)), []);
+  useEffect(() => (appAndroid ? undefined : usarWebApp((e) => setInstalar(e))), []);
+  // Inside the app the portfolio opens in the phone's browser, so the game keeps its state.
+  const irPortafolio = useCallback(() => {
+    if (appAndroid) appAndroid.abrirExterno('https://danieleduardo.cl/clasico');
+    else navigate('/clasico');
+  }, [navigate]);
   // «Seguir» gets the focus without scrolling the wave card (autoFocus would jump it to the bottom).
   const seguirRef = useRef<HTMLButtonElement>(null);
   // The top bar's real height (its chips wrap on phones), so the boss bar and banners sit under it.
@@ -1632,7 +1644,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <button type="button" aria-label={muted ? 'Activar sonido' : 'Silenciar'} title={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className={tecla}>
                 <Px i={muted ? 'mudo' : 'parlante'} s={ic} />
               </button>
-              <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/clasico')} className={`${TECLA} hud-key-amarilla px-3`}>
+              <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={irPortafolio} className={`${TECLA} hud-key-amarilla px-3`}>
                 danieleduardo.cl
               </button>
             </>
@@ -2013,7 +2025,12 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
             <button type="button" onClick={() => { menu.aceptar(); setPhase('creditos'); }} className={`${BTN} h-12 w-full text-base`}>
               🎬 Créditos
             </button>
-            {!instalada && (instalar || esIos) && (
+            {esAndroidWeb && (
+              <a href="/escuadron-dui.apk" download="escuadron-dui.apk" onClick={() => menu.aceptar()} className={`${BTN} inline-flex h-12 w-full items-center justify-center text-base`}>
+                🤖 Descargar para Android
+              </a>
+            )}
+            {!instalada && !esAndroidWeb && !appAndroid && (instalar || esIos) && (
               <button
                 type="button"
                 onClick={() => {
@@ -2031,7 +2048,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 En iPhone/iPad: toca <b>Compartir</b> (el cuadrado con la flecha) y luego <b>«Agregar a inicio»</b>. Se abrirá a pantalla completa como una app.
               </p>
             )}
-            <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/clasico')} className={`${BTN} h-12 w-full text-base`}>
+            <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={irPortafolio} className={`${BTN} h-12 w-full text-base`}>
               🏠 danieleduardo.cl
             </button>
           </nav>
@@ -2409,7 +2426,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                         Zoom
                       </button>
                     )}
-                    <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/clasico')} className={`${TECLA} px-2.5`}>
+                    <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={irPortafolio} className={`${TECLA} px-2.5`}>
                       <Px i="casa" s={2} />
                       danieleduardo.cl
                     </button>
