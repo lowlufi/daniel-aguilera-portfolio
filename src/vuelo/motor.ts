@@ -1620,9 +1620,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
 
   function save() {
     if (s.mode !== 'play' || s.dead || s.attract) return;
+    // On the way to another map the craters and bridges belong to the one being left:
+    // loaded onto the new map they'd be dug and painted in the wrong place (planks on the sea).
+    const viaja = !!s.toMapa && s.toMapa !== s.mapa;
     writeSave({
-      v: 1, pilot: s.piloto, avion: s.spec.id, bomba: s.bomba, wave: s.wave, score: s.ckScore, kills: s.ckKills, lives: s.lives, lost: [...s.lost], cap: { ...s.cap }, bridges: s.bridges,
-      meta: s.meta, bossFor: s.bossFor, bossCount: s.bossCount, jefeFor: s.jefeFor, craters: s.craters, puntosMejora: s.puntosMejora, niv: { ...s.niv }, mapa: s.toMapa || s.mapa, enValpo: s.toMapa === 'oceano' ? false : s.enValpo, at: Date.now(),
+      v: 1, pilot: s.piloto, avion: s.spec.id, bomba: s.bomba, wave: s.wave, score: s.ckScore, kills: s.ckKills, lives: s.lives, lost: [...s.lost], cap: { ...s.cap }, bridges: viaja ? [] : s.bridges,
+      meta: s.meta, bossFor: s.bossFor, bossCount: s.bossCount, jefeFor: s.jefeFor, craters: viaja ? [] : s.craters, puntosMejora: s.puntosMejora, niv: { ...s.niv }, mapa: s.toMapa || s.mapa, enValpo: s.toMapa === 'oceano' ? false : s.enValpo, at: Date.now(),
     });
   }
 
@@ -2603,6 +2606,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.congelado = false;
     s.nitroT = 0;
     s.enfriaT = 0;
+    s.nitroCalor = 0;
+    s.nitroQuemado = false;
+    s.nitroSuper = false;
+    s.nitroNivel = 0;
+    s.frenoAutoT = 0;
     s.lost = [];
     FV.fijarDano(s.plane, FV.SANO);
     s.hp = s.spec.hp;
@@ -2695,6 +2703,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const [lo, hi] = JF.ZONA[tipo];
     prepJefe();
     s.jefe = JF.crear(tipo, clamp(s.camX + view.vw + 140, 150, LEVEL - 150), clamp(p.y + 60, lo, hi), s.wave);
+    // A level boss replacing a visiting mothership is no visitor: it must be beaten to end the wave
+    // (the caller marks the mothership's visit again).
+    s.jefeEspacio = false;
     s.banner = tipo === 'dirigible' ? '¡Se acerca el Gran Queso!' : tipo === 'zepelin' ? '¡Se acerca el zepelín de Margarita!' : '¡La nave nodriza del Emperador Ratón!';
     window.setTimeout(() => {
       if (s.banner.startsWith('¡Se acerca') || s.banner.startsWith('¡La nave')) s.banner = '';
@@ -3988,7 +3999,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           s.jefe = null;
           s.jefeEspacio = false;
           s.aereos = [];
+          s.airMax.clear();
+          s.ufoMode.clear();
+          s.airFlash.clear();
+          s.airPrize.clear();
           s.fighters = [];
+          // Mice on foot, shells, Margarita's junk and the napalm, mines and smoke of the
+          // last map would stand on (or burn over) ground that isn't there any more.
+          s.gigantes = [];
+          s.shells = [];
+          s.junk = [];
+          ars.reiniciar();
           s.mision = elegirMision();
           s.shots = [];
           s.proy = [];
@@ -4072,6 +4093,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (quiereNitro && !s.nitroQuemado) {
         if (s.nitroT <= 0) encenderNitro();
         s.nitroT = NITRO_SOSTEN;
+        nitroSostenido = true;
         // The super nitro heats up faster.
         s.nitroCalor = Math.min(1, s.nitroCalor + (dt / NITRO_CALOR_T) * NITRO_NIVEL[s.nitroNivel].calor * nitroAvion().calor);
         if (s.nitroCalor >= 1) {
@@ -4086,7 +4108,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         }
       } else {
         // Letting go of the nitro brakes on its own: back down to cruise in a second or so.
-        if (s.nitroT > 0 && !s.attract) s.frenoAutoT = 1.6;
+        // Only a held nitro: a scripted burst (prize, map trip) burns without the throttle.
+        if (s.nitroT > 0 && nitroSostenido && !s.attract) s.frenoAutoT = 1.6;
         if (!tecleando && (!input.gas || input.gas <= 0)) {
           s.nitroSuper = false;
           s.nitroNivel = 0;
@@ -4173,8 +4196,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       s.overT -= dt;
       if (s.overT <= 0) {
         s.overT = 0;
+        // The pantry emptied while the plane was going down (or just before it crashed): that ends it.
+        if (s.meta <= 0) gameOver('despensa');
         // Shot down with planes to spare: a fresh one takes off.
-        if (s.reason === 'avion' && s.lives > 1) {
+        else if (s.reason === 'avion' && s.lives > 1) {
           s.lives--;
           respawn();
         } else gameOver(s.reason);
@@ -4497,6 +4522,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (c.x <= META_X && c.hp > 0) {
         c.hp = 0;
         c.x = -999;
+        s.carPrize.delete(c.id);
         // Margarita empties three crates at once.
         if (isBoss(c.kind)) talk(SAY.win, META_X, ground(META_X));
         s.meta -= isBoss(c.kind) ? 3 : 1;
@@ -6571,8 +6597,13 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.nitroT = NITRO_T;
     s.nitroCalor = 0;
     s.nitroQuemado = false;
+    // Its own burst: no auto-brake from an earlier held nitro working against it.
+    nitroSostenido = false;
+    s.frenoAutoT = 0;
     return true;
   }
+  /** The nitro burning now was lit by holding the throttle (letting go auto-brakes), not a scripted burst. */
+  let nitroSostenido = false;
   /** The nitro lights up (the throttle was just pressed): the roar, and a ring behind the plane on a cold start. */
   let ultimaIgnicion = -1e9;
   function encenderNitro() {
