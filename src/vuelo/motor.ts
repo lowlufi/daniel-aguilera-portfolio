@@ -1589,13 +1589,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (imp > 0.5) FA.empujeVehiculo(c, ((c.mid.x - x) / (d || 1)) * imp, ((c.mid.y - y) / (d || 1)) * imp + imp * 0.5);
       if (hiereRatones) {
         let dmg = damage * ex.dano(d);
-        if (c.kind === 'portaaviones') {
-          // A huge hull: measure to its nearest plate, not its middle, and bombs (big
-          // blasts) hit it extra hard — the deck and the hangar below are its weak spot.
+        {
+          // Measure to the nearest plate of the hull, not its middle: a missile that hits
+          // the edge of a big vehicle (Margarita's cart, the carrier) does its full damage.
+          // Bombs hit the carrier extra hard — the deck and the hangar below are its weak spot.
           const look = A.VEH_LOOK[c.kind];
           const hx = Math.max(0, Math.abs(x - c.x) - look.w / 2);
           const hy = y < c.y ? c.y - y : Math.max(0, y - (c.y + look.h));
-          dmg = damage * ex.dano(Math.hypot(hx, hy)) * (s.golpeBomba ? 2.2 : 1);
+          dmg = damage * ex.dano(Math.hypot(hx, hy)) * (c.kind === 'portaaviones' && s.golpeBomba ? 2.2 : 1);
         }
         if (dmg >= 0.25) hurtCar(c, dmg);
       }
@@ -2701,7 +2702,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       const lado = i % 2 ? 1 : -1;
       const b = { x: q.x, y: q.y - 2, vx: q.vx * 0.4 + lado * (50 + i * 18), vy: q.vy * 0.4 - 20 - i * 6, t: 0 };
       s.bengalasR.push(b);
-      if (!engano && Math.random() < (moderno ? 0.28 : 0.55)) {
+      // Margarita's flares fool fewer missiles: she must stay beatable with missiles.
+      const jefa = (quien as { jefa?: boolean }).jefa ? 0.4 : 1;
+      if (!engano && Math.random() < (moderno ? 0.28 : 0.55) * jefa) {
         engano = true;
         sh.lock = { pos: () => b as Movil, vivo: () => b.t < 2.4 && s.bengalasR.includes(b), r: 3 };
       }
@@ -3903,7 +3906,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     }
     s.fighters = s.fighters.filter((f) => f.hp > 0);
     // Enemy flyers defend themselves: a player missile closing in gets a burst of flares.
-    for (const f of s.fighters) defensaBengalas(f.a, f.a, f.jefa ? 0.8 : 1.6, f.jefa ? 5 : 3);
+    for (const f of s.fighters) defensaBengalas(f, f.a, f.jefa ? 0.8 : 1.6, f.jefa ? 5 : 3);
     for (const a of s.aereos) if (a.tipo === 'helicoptero' && a.hp > 0) defensaBengalas(a, a, 2.4, 3);
     for (const b of s.bengalasR) {
       FV.pasoBengala(b, dt, wind);
