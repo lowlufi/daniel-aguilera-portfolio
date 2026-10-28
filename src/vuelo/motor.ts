@@ -2538,6 +2538,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     if (s.hot && s.heat < 0.35) s.hot = false;
     const gk = s.spec.kit.metralla;
     if (!input.gun) s.gunWasDown = false;
+    if (s.despegue && s.mode === 'play' && !s.attract) return;
     if (!input.gun || s.hot || s.gunT > 0) return;
     if (!gk) {
       // The B-2 has no gun: say so once per press.
@@ -2921,9 +2922,26 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.bullets = s.bullets.filter((b) => b.t < b.life);
   }
 
+  /** On the ground before take-off every weapon is locked (safety on): a dry click and a note per press. */
+  function armasBloqueadas() {
+    if (!s.despegue || s.mode !== 'play' || s.attract) return false;
+    const nueva = (input.fire && !s.fireWasDown) || (input.bomb && !s.bombWasDown) || (input.flare && !s.flareWasDown) || (input.gun && !s.gunWasDown) || (input.nuke && !s.nukeWasDown);
+    if (nueva) {
+      AB.sinMunicion(panOf(s.plane.x));
+      pop(s.plane.x, s.plane.y + 20, 'Armas bloqueadas: despega primero', P.metal);
+    }
+    s.fireWasDown = input.fire;
+    s.bombWasDown = input.bomb;
+    s.flareWasDown = input.flare;
+    s.gunWasDown = input.gun;
+    s.nukeWasDown = input.nuke;
+    return true;
+  }
+
   function firePlayer() {
     const p = s.plane;
     const km = s.spec.kit.misil;
+    if (armasBloqueadas()) return;
     // Pressing a weapon that isn't ready: a dry click (once per press).
     if (!s.attract) {
       if (input.fire && !s.fireWasDown && (s.ammo < 1 || s.fireT > 0.05)) AB.sinMunicion(panOf(p.x));
@@ -3193,6 +3211,17 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       touch.y = Math.sin(p.rumbo + off);
       syncInput();
     } else turnK = 0;
+    // PC mouse: the nose follows the cursor (re-aimed every frame, the plane moves under it).
+    if (raton && !turn && s.mode === 'play' && !s.dead && !s.attract) {
+      const vx = raton.x / view.s - (p.x - s.camX);
+      const vy = toS(p.y) - raton.y / view.s;
+      const d = Math.hypot(vx, vy);
+      if (d > 6) {
+        touch.x = vx / d;
+        touch.y = vy / d;
+      } else touch.x = touch.y = 0;
+      syncInput();
+    }
     // Phones: the machine gun fires by itself whenever an enemy sits in the sights
     // (on its own flag, so the gun button still fires whenever it's held).
     if (s.autoGun && s.mode === 'play' && !s.dead && !s.attract) {
@@ -3467,7 +3496,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (!s.congelado) {
         firePlayer();
         fireGun(dt);
-        if (input.nuke && !s.nukeWasDown && s.nukes > 0 && !s.nuke) soltarNuke();
+        if (input.nuke && !s.nukeWasDown && s.nukes > 0 && !s.nuke && !s.despegue) soltarNuke();
         if (input.tonel && !s.tonelWasDown) tonel();
         acrobacias(dt);
       }
@@ -5458,6 +5487,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   /** The automatic machine gun's own trigger (phones), apart from the gun button. */
   let gunSola = false;
   let autoGunPref = true;
+  /** PC mouse aiming: the cursor in CSS px inside the canvas (null = not aiming), and whether Space drops bombs. */
+  let raton: { x: number; y: number } | null = null;
+  let modoRaton = false;
   /** Touch turning: +1 counterclockwise (left half held), -1 clockwise (right half), 0 none; and how far into the hold (0…1). */
   let turn = 0;
   let turnK = 0;
@@ -5495,7 +5527,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     input.tonel = keys.has('tonel') || touch.tonel;
   }
   const onKey = (e: KeyboardEvent) => {
-    const k = CODES[e.code];
+    // Mouse mode: the right button fires missiles, so Space drops bombs.
+    const k = modoRaton && e.code === 'Space' ? 'bomb' : CODES[e.code];
     // Menus (the title's self-playing game) and the pause keep their keys for the buttons.
     if (!k || s.mode !== 'play' || ((s.attract || s.paused) && e.type === 'keydown')) return;
     // With the wave card's shop (and its hangar) open, Enter presses the focused button.
@@ -5745,6 +5778,26 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       touch.x = vx / d;
       touch.y = vy / d;
       syncInput();
+    },
+    /** PC mouse mode on/off: the nose follows the cursor (`ratonEn`) and Space becomes the bomb key. */
+    setModoRaton(on: boolean) {
+      modoRaton = on;
+      if (!on && raton) {
+        raton = null;
+        touch.x = touch.y = 0;
+        syncInput();
+      }
+    },
+    /** The cursor over the canvas (CSS px), or null when it leaves. */
+    ratonEn(px: number | null, py = 0) {
+      if (!modoRaton) return;
+      if (px === null) {
+        raton = null;
+        touch.x = touch.y = 0;
+        syncInput();
+        return;
+      }
+      raton = { x: px, y: py };
     },
     steer(dir: number) {
       turn = Math.sign(dir);

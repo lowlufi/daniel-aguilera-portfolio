@@ -804,6 +804,22 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
     }
   };
   useEffect(() => game.current?.setAutoGun(autoGun), [autoGun]);
+  // PC: fly with the mouse (on by default): the nose follows the cursor, the buttons fire.
+  const [ratonOn, setRatonOn] = useState(() => {
+    try {
+      return localStorage.getItem('vuelo-raton') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const toggleRaton = (on: boolean) => {
+    setRatonOn(on);
+    try {
+      localStorage.setItem('vuelo-raton', on ? '1' : '0');
+    } catch {
+      /* private mode */
+    }
+  };
   // «Menos movimiento», remembered on this device.
   const [calma, setCalma] = useState(() => {
     // The system's «reduce motion» turns it on unless the player chose otherwise.
@@ -973,6 +989,45 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
       game.current?.girar(0);
     };
   }, [phase, touchUi, control, paused]);
+  // PC mouse mode: the cursor over the sky steers, left button = machine gun, right = missile.
+  const conRaton = phase === 'play' && !touchUi && ratonOn && !paused;
+  useEffect(() => {
+    const g = game.current;
+    const box = boxRef.current;
+    if (!g || !box) return;
+    g.setModoRaton(conRaton);
+    if (!conRaton) return;
+    const mueve = (e: MouseEvent) => {
+      const r = canvasRef.current?.getBoundingClientRect();
+      if (r) g.ratonEn(e.clientX - r.left, e.clientY - r.top);
+    };
+    const sale = () => g.ratonEn(null);
+    const baja = (e: MouseEvent) => {
+      if (e.button === 0) g.touch({ gun: true });
+      else if (e.button === 2) g.touch({ fire: true });
+    };
+    const sube = (e: MouseEvent) => {
+      if (e.button === 0) g.touch({ gun: false });
+      else if (e.button === 2) g.touch({ fire: false });
+    };
+    const menu = (e: Event) => e.preventDefault();
+    box.style.cursor = 'crosshair';
+    box.addEventListener('mousemove', mueve);
+    box.addEventListener('mouseleave', sale);
+    box.addEventListener('mousedown', baja);
+    window.addEventListener('mouseup', sube);
+    box.addEventListener('contextmenu', menu);
+    return () => {
+      box.style.cursor = '';
+      box.removeEventListener('mousemove', mueve);
+      box.removeEventListener('mouseleave', sale);
+      box.removeEventListener('mousedown', baja);
+      window.removeEventListener('mouseup', sube);
+      box.removeEventListener('contextmenu', menu);
+      g.touch({ gun: false, fire: false });
+      g.ratonEn(null);
+    };
+  }, [conRaton]);
   // «Tocar»: the plane flies towards the finger.
   const puntoEnCanvas = (e: ReactPointerEvent<HTMLDivElement>) => {
     const r = canvasRef.current?.getBoundingClientRect();
@@ -1733,8 +1788,19 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 <Key k="E · Shift" label="Acelerar" on={hud?.throttle === 1} />
                 <Key k="E (mantener)" label="Nitro (se recalienta)" on={hud?.nitro === 'activo'} />
                 <Key k="Q · Ctrl" label="Frenar (apaga el nitro)" on={hud?.throttle === -1} />
-                <Key k="Espacio" label="Misil (sale por la nariz)" />
-                <Key k="K" label="Bomba" />
+                {ratonOn ? (
+                  <>
+                    <Key k="Mouse" label="El avión sigue al cursor" />
+                    <Key k="Clic izq." label="Metralla" />
+                    <Key k="Clic der." label="Misil" />
+                    <Key k="Espacio · K" label="Bomba" />
+                  </>
+                ) : (
+                  <>
+                    <Key k="Espacio" label="Misil (sale por la nariz)" />
+                    <Key k="K" label="Bomba" />
+                  </>
+                )}
                 <Key k="L · Enter" label="Bengalas" />
                 <Key k="H · F" label="Metralla (se calienta)" />
                 <Key k="N" label="Bomba nuclear (de los ovnis)" />
@@ -1879,6 +1945,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 </span>
                 <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
               </label>
+              {!touchUi && (
+                <label className="hud-ajuste">
+                  <span>
+                    Apuntar con el mouse
+                    <small className="block text-[11px] font-bold text-[#c8c0e0]">El avión sigue al cursor. Clic izquierdo: metralla · clic derecho: misil · Espacio: bomba</small>
+                  </span>
+                  <input type="checkbox" role="switch" checked={ratonOn} onChange={(e) => toggleRaton(e.target.checked)} className="hud-switch" />
+                </label>
+              )}
               {touchUi && (
                 <label className="hud-ajuste">
                   <span>
@@ -2135,6 +2210,15 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                   </span>
                   <input type="checkbox" role="switch" checked={gore} onChange={(e) => toggleGore(e.target.checked)} className="hud-switch" />
                 </label>
+                {!touchUi && (
+                  <label className="hud-ajuste">
+                    <span>
+                      Apuntar con el mouse
+                      <small className="block text-[11px] font-bold text-[#c8c0e0]">El avión sigue al cursor. Clic izquierdo: metralla · clic derecho: misil · Espacio: bomba</small>
+                    </span>
+                    <input type="checkbox" role="switch" checked={ratonOn} onChange={(e) => toggleRaton(e.target.checked)} className="hud-switch" />
+                  </label>
+                )}
                 {touchUi && (
                   <label className="hud-ajuste">
                     <span>
