@@ -1139,6 +1139,26 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     canvas.style.height = `${view.vh * sc}px`;
     g.imageSmoothingEnabled = false;
   }
+  /**
+   * A zoom step changes the canvas resolution at once; to hide the jump the canvas starts
+   * scaled to look like the old zoom, around the plane's spot on screen (where the eye is),
+   * and eases back to 1 in ~0.7 s.
+   */
+  function zoomSuave(cambiar: () => void) {
+    const prevS = view.s;
+    const p = s.plane;
+    const ox = (p.x - s.camX) * prevS;
+    const oy = toS(p.y) * prevS;
+    cambiar();
+    const k = prevS / view.s;
+    if (Math.abs(k - 1) < 0.01 || still || s.calma) return;
+    canvas.style.transition = 'none';
+    canvas.style.transformOrigin = `${Math.round(ox)}px ${Math.round(oy)}px`;
+    canvas.style.transform = `scale(${k})`;
+    void canvas.offsetWidth;
+    canvas.style.transition = 'transform 0.7s cubic-bezier(0.22, 0.8, 0.3, 1)';
+    canvas.style.transform = 'scale(1)';
+  }
   const ro = new ResizeObserver(fit);
   ro.observe(box);
   fit();
@@ -3603,7 +3623,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (quiere !== view.auto) {
         view.auto = quiere;
         autoZoomT = 2.2;
-        fit();
+        zoomSuave(() => fit());
       }
     }
     // PC mouse: the nose follows the cursor (re-aimed every frame, the plane moves under it).
@@ -6141,7 +6161,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const n = view.levels.length;
     view.zi = dir === 0 ? (view.zi + 1) % n : clamp(view.zi + dir, 0, n - 1);
     view.want = view.levels[view.zi];
-    fit();
+    zoomSuave(() => fit());
     s.hudKey = '';
   }
   const onWheel = (e: WheelEvent) => {
