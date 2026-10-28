@@ -47,11 +47,26 @@ const VIDA_MANCHA = 140; // s
 const VIDA_TROZO = 16; // s
 const VIDA_TINTE = 40; // s
 const VIDA_SALP = 45; // s
+const MAX_HUESOS = 220; // bones lying on the ground (they outlast the blood)
+const VIDA_HUESO = 200; // s
+const MAX_ARR = 12; // wounded mice crawling
+const MAX_AV = 16; // red specks on the player's plane
+const VIDA_AV = 30; // s (faster in rain, at once in the sea)
+/** `rebotes` value of a piece lying still. */
+const REPOSO = 7;
 
 // Particle kinds.
 const T_GOTA = 0, T_TROZO = 1, T_AGUA = 2, T_NIEBLA = 3, T_CUERPO = 4;
 // Gib shapes.
 const CABEZA = 0, TORSO = 1, MIEMBRO = 2, COLA = 3, OREJA_G = 4, OJO_G = 5, DIENTE = 6, BIGOTE = 7, COSTILLAS = 8, TRIPA = 9;
+// Bones (and half-bone pieces, brains, gut ropes).
+const CRANEO = 10, FEMUR = 11, VERTEBRA = 12, MANDIBULA = 13, ASTILLA = 14, MEDIO = 15, SESO = 16, SOGA = 17;
+/** A whole skeleton lying on the ground (bone decals only). */
+const ESQUELETO = 20;
+const esHueso = (f: number) => f === COSTILLAS || (f >= CRANEO && f <= ASTILLA);
+
+/** Kinds of cry for `Gore.grito`: a death, a piece torn off, a crawling moan, a falling «¡noo!». */
+export const L_MUERTE = 0, L_DESMEMBRAR = 1, L_HERIDO = 2, L_NOO = 3;
 // Emitters.
 const E_ARTERIA = 0, E_GOTEO = 1;
 // Decals.
@@ -84,6 +99,10 @@ const BIGOTE_C = '#5a5068';
 const TRIPA_C = ['#ff8aa8', '#d85a80'];
 const CHAMUSCA = ['#3a3048', '#241c30', '#5a5068'];
 const VIDRIO = '#9ad8ff';
+const HUESO_SOMBRA = '#b8ac98';
+/** Charred bone: black, soot, and a pale glint. */
+const CARBON = ['#241c30', '#4a4048', '#9a9088'];
+const SESO_C = ['#ffb4cc', '#e07898'];
 
 export type Gore = {
   n: number;
@@ -154,6 +173,35 @@ export type Gore = {
   camY: number;
   camOn: boolean;
   camCd: number;
+  // Bones lying on the ground (ring buffer): position, shape, quarter turn, charred.
+  hn: number;
+  hi: number;
+  hx: Float32Array;
+  hy: Float32Array;
+  hforma: Uint8Array;
+  hq: Uint8Array;
+  hcarbon: Uint8Array;
+  hedad: Float32Array;
+  // Wounded mice crawling (swap-remove pool).
+  an: number;
+  ax: Float32Array;
+  adir: Int8Array;
+  aedad: Float32Array;
+  avida: Float32Array;
+  at: Float32Array;
+  apelo: Uint8Array;
+  // Red specks on the player's plane (ring buffer, along / across its body).
+  vn: number;
+  vi: number;
+  vu: Float32Array;
+  vv: Float32Array;
+  vedad: Float32Array;
+  vtam: Uint8Array;
+  avOn: boolean;
+  avLargo: number;
+  avLavado: number;
+  /** Cries: the engine plays a mouse's scream (kind L_*, at x, y). */
+  grito: ((tipo: number, x: number, y: number) => void) | null;
   /** The world, as last seen by `actualizar` (for spawn-time ground checks). */
   suelo: (x: number) => number;
   esMar: (x: number) => boolean;
@@ -221,6 +269,31 @@ export function crearGore(): Gore {
     camY: 0,
     camOn: false,
     camCd: 0,
+    hn: 0,
+    hi: 0,
+    hx: new Float32Array(MAX_HUESOS),
+    hy: new Float32Array(MAX_HUESOS),
+    hforma: new Uint8Array(MAX_HUESOS),
+    hq: new Uint8Array(MAX_HUESOS),
+    hcarbon: new Uint8Array(MAX_HUESOS),
+    hedad: new Float32Array(MAX_HUESOS),
+    an: 0,
+    ax: new Float32Array(MAX_ARR),
+    adir: new Int8Array(MAX_ARR),
+    aedad: new Float32Array(MAX_ARR),
+    avida: new Float32Array(MAX_ARR),
+    at: new Float32Array(MAX_ARR),
+    apelo: new Uint8Array(MAX_ARR),
+    vn: 0,
+    vi: 0,
+    vu: new Float32Array(MAX_AV),
+    vv: new Float32Array(MAX_AV),
+    vedad: new Float32Array(MAX_AV),
+    vtam: new Uint8Array(MAX_AV),
+    avOn: false,
+    avLargo: 10,
+    avLavado: 1,
+    grito: null,
     suelo: sinSuelo,
     esMar: nunca,
     nivelMar: -1e9,
@@ -239,11 +312,16 @@ export function limpiar(e: Gore): void {
   e.si = 0;
   e.pn = 0;
   e.pi = 0;
+  e.hn = 0;
+  e.hi = 0;
+  e.an = 0;
+  e.vn = 0;
+  e.vi = 0;
 }
 
 /** True when there is nothing to update or draw. */
 export function vacio(e: Gore): boolean {
-  return e.n === 0 && e.mn === 0 && e.tn === 0 && e.en === 0 && e.sn === 0 && e.pn === 0;
+  return e.n === 0 && e.mn === 0 && e.tn === 0 && e.en === 0 && e.sn === 0 && e.pn === 0 && e.hn === 0 && e.an === 0 && e.vn === 0;
 }
 
 /** Live particles (to measure). */
@@ -261,8 +339,38 @@ export function camara(e: Gore, x: number, y: number, on: boolean): void {
   e.camOn = on;
 }
 
+/**
+ * The player's plane this frame: its length (px from the middle to the nose),
+ * how fast specks wash off (1 dry air, more in rain, a lot in the sea), and
+ * whether it is flying (blood only sticks to it then).
+ */
+export function avion(e: Gore, largo: number, lavado: number, on: boolean): void {
+  e.avLargo = largo;
+  e.avLavado = lavado;
+  e.avOn = on;
+}
+
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
+/** A few red specks stuck on the plane's body. */
+function manchaAvion(e: Gore, n: number) {
+  if (!e.avOn) return;
+  for (let k = 0; k < n; k++) {
+    const i = e.vi;
+    e.vi = (e.vi + 1) % MAX_AV;
+    if (e.vn < MAX_AV) e.vn++;
+    e.vu[i] = Math.round(rnd(-0.75, 0.6) * e.avLargo);
+    e.vv[i] = Math.round(rnd(-1.4, 1.4));
+    e.vedad[i] = 0;
+    e.vtam[i] = Math.random() < 0.3 ? 2 : 1;
+  }
+}
+
+/** Optional pieces (extra bones, scraps): skipped more often the fuller the pool. */
+const opc = (e: Gore) => {
+  const k = lod(e);
+  return k >= 0.6 || Math.random() < k;
+};
 /** Level of detail: fewer new droplets the fuller the pool is. */
 function lod(e: Gore): number {
   const k = e.n / MAX_P;
@@ -388,8 +496,10 @@ export function lluvia(e: Gore, x: number, y: number, vx: number, n: number, anc
 
 /** A burst close to the player: red drops splatter on the camera. */
 function cerca(e: Gore, x: number, y: number, fuerza: number) {
-  if (!e.camOn || e.camCd > 0) return;
   const d = Math.hypot(x - e.camX, y - e.camY);
+  // Right through it: the plane's body gets splashed.
+  if (d < 50) manchaAvion(e, Math.round(2 + fuerza * 3 * (1 - d / 50)));
+  if (!e.camOn || e.camCd > 0) return;
   if (d > 110) return;
   e.camCd = 0.7;
   const n = Math.max(1, Math.round(fuerza * (1 - d / 110) * 7));
@@ -419,15 +529,19 @@ function salpicarSuelo(e: Gore, x: number, y: number, n: number) {
 
 /**
  * A mouse blown apart at (x, y) (its middle), moving with (vx, vy): head,
- * torso (still pumping), limbs, tail, ears, eyeballs, buck teeth, whiskers,
- * a ribcage and a loop of gut fly off, with a fountain of blood and a mist.
+ * torso (still pumping), limbs (some torn to the bone), tail, ears, eyeballs,
+ * buck teeth, whiskers, a ribcage, a skull, femurs, vertebrae, a jaw, bone
+ * splinters and gut ropes fly off, with a fountain of blood and a mist.
+ * `mult` (1–3) makes it heavier for big blasts.
  */
-export function despedazar(e: Gore, x: number, y: number, vx: number, vy: number, pelo: Pelaje = SOLDADO): void {
-  const ex = (k: number) => vx * 0.4 + rnd(-75, 75) * k;
-  const ey = (k: number) => vy * 0.4 + rnd(55, 140) * k;
+export function despedazar(e: Gore, x: number, y: number, vx: number, vy: number, pelo: Pelaje = SOLDADO, mult = 1): void {
+  const ex = (k: number) => vx * 0.4 + rnd(-75, 75) * k * (0.8 + mult * 0.2);
+  const ey = (k: number) => vy * 0.4 + rnd(55, 140) * k * (0.85 + mult * 0.15);
   trozo(e, x, y + 3, ex(1), ey(1.15), CABEZA, pelo.piel, pelo.casco);
   trozo(e, x, y, ex(0.6), ey(0.7), TORSO, pelo.ropa, pelo.casco, 4);
-  for (let k = 0; k < 4; k++) trozo(e, x + rnd(-2, 2), y + rnd(-2, 2), ex(1.2), ey(1), MIEMBRO, k < 2 ? pelo.ropa : pelo.piel, pelo.casco);
+  for (let k = 0; k < 2; k++) trozo(e, x + rnd(-2, 2), y + rnd(-2, 2), ex(1.2), ey(1), MIEMBRO, k ? pelo.ropa : pelo.piel, pelo.casco);
+  // Limbs torn to the bone.
+  for (let k = 0; k < 2; k++) trozo(e, x + rnd(-2, 2), y + rnd(-2, 2), ex(1.2), ey(1), MEDIO, k ? pelo.piel : pelo.ropa, pelo.casco);
   // The tail in two segments.
   trozo(e, x, y - 2, ex(1), ey(0.9), COLA, COLA_C, pelo.casco);
   trozo(e, x, y - 2, ex(1.1), ey(0.8), COLA, COLA_C, pelo.casco);
@@ -439,19 +553,130 @@ export function despedazar(e: Gore, x: number, y: number, vx: number, vy: number
   trozo(e, x, y + 3, ex(1.6), ey(1.1), BIGOTE, BIGOTE_C, pelo.casco);
   trozo(e, x, y + 1, ex(0.8), ey(0.8), COSTILLAS, HUESO, pelo.casco);
   trozo(e, x, y, ex(0.9), ey(0.7), TRIPA, TRIPA_C[0], TRIPA_C[1]);
+  trozo(e, x, y, ex(0.9), ey(0.6), SOGA, TRIPA_C[0], TRIPA_C[1]);
+  // The bones.
+  if (Math.random() < 0.4 + mult * 0.2) trozo(e, x, y + 3, ex(1.2), ey(1.2), CRANEO, HUESO, pelo.casco);
+  trozo(e, x, y, ex(1.3), ey(1.1), FEMUR, HUESO, pelo.casco);
+  if (opc(e)) trozo(e, x, y, ex(1.3), ey(1.1), FEMUR, HUESO, pelo.casco);
+  trozo(e, x, y, ex(1), ey(0.9), VERTEBRA, HUESO, pelo.casco);
+  if (opc(e)) trozo(e, x, y, ex(1.1), ey(0.9), VERTEBRA, HUESO, pelo.casco);
+  if (opc(e)) trozo(e, x, y + 2, ex(1.4), ey(1.1), MANDIBULA, HUESO, pelo.casco);
+  for (let k = 0; k < 3; k++) if (opc(e)) trozo(e, x, y, ex(1.7), ey(1.3), ASTILLA, HUESO, pelo.casco);
   // Bloody scraps of what was inside.
   for (let k = 0; k < 4; k++) trozo(e, x + rnd(-2, 2), y + rnd(-1, 2), ex(1.3), ey(0.8), MIEMBRO, k % 2 ? ROJO[1] : ROJO[2], ROJO[0]);
+  // Big blasts: more of everything.
+  const extra = Math.round((mult - 1) * 6);
+  for (let k = 0; k < extra; k++) {
+    if (!opc(e)) break;
+    const f = k % 3 === 0 ? SOGA : k % 3 === 1 ? ASTILLA : MIEMBRO;
+    trozo(e, x + rnd(-3, 3), y + rnd(-2, 2), ex(1.5), ey(1.2), f, f === SOGA ? TRIPA_C[0] : f === ASTILLA ? HUESO : ROJO[1], f === SOGA ? TRIPA_C[1] : ROJO[0]);
+  }
   // A tall fountain up, a fast red ring all round and a mist.
-  sangre(e, x, y, vx * 0.01, 1, 46, 1.7);
-  const n = cuantos(e, 20);
+  sangre(e, x, y, vx * 0.01, 1, Math.round(46 * (0.7 + mult * 0.3)), 1.6 + mult * 0.15);
+  const n = cuantos(e, 20 * mult);
   for (let k = 0; k < n; k++) {
     const a = (k / n) * Math.PI * 2 + rnd(-0.2, 0.2);
-    const v = rnd(90, 170);
+    const v = rnd(90, 170) * (0.85 + mult * 0.15);
     gota(e, x, y, vx * 0.2 + Math.cos(a) * v, vy * 0.2 + Math.sin(a) * v);
   }
-  niebla(e, x, y, vx * 0.2, vy * 0.2 + 10, 8);
-  salpicarSuelo(e, x, y, 8);
-  cerca(e, x, y, 1);
+  niebla(e, x, y, vx * 0.2, vy * 0.2 + 10, Math.round(8 * mult));
+  salpicarSuelo(e, x, y, Math.round(8 * mult));
+  cerca(e, x, y, mult);
+}
+
+/** A headshot: brains, splinters of skull, an eye, and a red mist. */
+export function sesos(e: Gore, x: number, y: number, vx: number, vy: number): void {
+  trozo(e, x, y, vx * 0.4 + rnd(-40, 40), vy * 0.3 + rnd(70, 130), SESO, SESO_C[0], SESO_C[1]);
+  if (Math.random() < 0.5) trozo(e, x, y, vx * 0.4 + rnd(-50, 50), vy * 0.3 + rnd(60, 120), SESO, SESO_C[0], SESO_C[1]);
+  for (let k = 0; k < 3; k++) trozo(e, x, y, vx * 0.4 + rnd(-60, 60), vy * 0.3 + rnd(60, 140), ASTILLA, HUESO, ROJO[1]);
+  if (Math.random() < 0.5) trozo(e, x, y, vx * 0.4 + rnd(-50, 50), vy * 0.3 + rnd(70, 120), OJO_G, BLANCO, ROJO[1]);
+  sangre(e, x, y, vx, 2, 16, 1.4);
+  niebla(e, x, y, vx * 0.3, 10, 7);
+  cerca(e, x, y, 0.8);
+}
+
+/**
+ * A shot tears an arm off a mouse still on its feet: the arm (bone sticking
+ * out) flies off and the shoulder spurts. `dir`: away from the shot.
+ */
+export function amputar(e: Gore, x: number, y: number, dir: number, pelo: Pelaje = SOLDADO): void {
+  trozo(e, x, y, dir * rnd(60, 110), rnd(70, 130), MEDIO, pelo.piel, pelo.casco);
+  if (Math.random() < 0.4) trozo(e, x, y, dir * rnd(40, 90), rnd(60, 110), ASTILLA, HUESO, ROJO[1]);
+  sangre(e, x, y, dir, 1, 16, 1.3);
+  niebla(e, x, y, dir * 20, 8, 3);
+  cerca(e, x, y, 0.5);
+}
+
+/**
+ * A mouse whose legs a blast took off: the legs (bones out), the tail and a
+ * gut rope fly, and what's left of him crawls away (`arrastrado`).
+ */
+export function partir(e: Gore, x: number, yGround: number, dir: number, pelo: Pelaje = SOLDADO): void {
+  for (let k = 0; k < 2; k++) trozo(e, x, yGround + 3, rnd(-70, 70), rnd(70, 140), MEDIO, pelo.ropa, pelo.casco);
+  trozo(e, x, yGround + 2, rnd(-60, 60), rnd(60, 120), COLA, COLA_C, pelo.casco);
+  trozo(e, x, yGround + 3, rnd(-40, 40), rnd(40, 90), SOGA, TRIPA_C[0], TRIPA_C[1]);
+  if (opc(e)) trozo(e, x, yGround + 3, rnd(-60, 60), rnd(60, 120), FEMUR, HUESO, ROJO[1]);
+  sangre(e, x, yGround + 3, 0, 1, 26, 1.3);
+  niebla(e, x, yGround + 3, 0, 10, 5);
+  charco(e, x, yGround, 10);
+  arrastrado(e, x, dir, pelo);
+  cerca(e, x, yGround, 0.8);
+}
+
+/** What's left of a mouse drags itself along the ground for a few seconds, moaning. */
+export function arrastrado(e: Gore, x: number, dir: number, pelo: Pelaje = SOLDADO): void {
+  if (e.esMar(x)) return;
+  let i = e.an;
+  if (i >= MAX_ARR) {
+    i = 0;
+    for (let k = 1; k < e.an; k++) if (e.aedad[k] > e.aedad[i]) i = k;
+  } else e.an++;
+  e.ax[i] = x;
+  e.adir[i] = dir >= 0 ? 1 : -1;
+  e.aedad[i] = 0;
+  e.avida[i] = rnd(5, 9);
+  e.at[i] = rnd(0.2, 0.8);
+  e.apelo[i] = pelajeIdx(pelo);
+}
+
+function quitarArrastrado(e: Gore, i: number) {
+  const j = --e.an;
+  if (i === j) return;
+  e.ax[i] = e.ax[j];
+  e.adir[i] = e.adir[j];
+  e.aedad[i] = e.aedad[j];
+  e.avida[i] = e.avida[j];
+  e.at[i] = e.at[j];
+  e.apelo[i] = e.apelo[j];
+}
+
+/** A blast catches the crawling wounded within `r`: they burst. */
+export function reventarArrastrados(e: Gore, x: number, y: number, r: number): void {
+  for (let i = e.an - 1; i >= 0; i--) {
+    const ax = e.ax[i], ay = e.suelo(ax);
+    if (Math.hypot(ax - x, ay - y) > r) continue;
+    const pelo = PELAJES[e.apelo[i]] ?? SOLDADO;
+    quitarArrastrado(e, i);
+    despedazar(e, ax, ay + 3, (ax - x) * 2, 60, pelo);
+  }
+}
+
+/** A skeleton lying on the ground at (x, yGround), charred by fire or clean. */
+export function esqueleto(e: Gore, x: number, yGround: number, carbon: boolean): void {
+  if (e.esMar(x)) return;
+  hueso(e, x, yGround, ESQUELETO, Math.random() < 0.5 ? 0 : 2, carbon);
+}
+
+function hueso(e: Gore, x: number, y: number, forma: number, q: number, carbon: boolean) {
+  const i = e.hi;
+  e.hi = (e.hi + 1) % MAX_HUESOS;
+  if (e.hn < MAX_HUESOS) e.hn++;
+  e.hx[i] = Math.round(x);
+  e.hy[i] = Math.round(y);
+  e.hforma[i] = forma;
+  e.hq[i] = q;
+  e.hcarbon[i] = carbon ? 1 : 0;
+  e.hedad[i] = 0;
 }
 
 /** A few small bits knocked off a mouse by a shot: an eyeball, a tooth, an ear, whiskers. */
@@ -561,6 +786,8 @@ export function chatarra(e: Gore, x: number, yGround: number, ancho: number): vo
   for (let k = 0; k < 2; k++) salpicon(e, x + rnd(-ancho / 2, ancho / 2), yGround + rnd(3, 9), Math.round(rnd(2, 4)));
   goteo(e, x, yGround + 5, Math.max(6, ancho * 0.4), 14);
   charco(e, x, yGround, 12);
+  // Someone burnt to the bone beside it.
+  if (Math.random() < 0.6) hueso(e, x + (Math.random() < 0.5 ? -1 : 1) * rnd(ancho * 0.4, ancho * 0.6 + 6), yGround, ESQUELETO, Math.random() < 0.5 ? 0 : 2, true);
 }
 
 /** A big red slick around a sinking boat (or a body in the sea). */
@@ -716,6 +943,39 @@ function pasoEmisores(e: Gore, dt: number) {
   }
 }
 
+function pasoArrastrados(e: Gore, dt: number) {
+  for (let i = e.an - 1; i >= 0; i--) {
+    e.aedad[i] += dt;
+    const x0 = e.ax[i];
+    if (e.aedad[i] >= e.avida[i] || e.esMar(x0)) {
+      // He stops for good: a pool, and the half body lies there a while.
+      if (!e.esMar(x0)) {
+        const y = e.suelo(x0);
+        charco(e, x0, y, 12);
+        const pelo = PELAJES[e.apelo[i]] ?? SOLDADO;
+        trozo(e, x0, y + 2, 0, 10, TORSO, pelo.ropa, pelo.casco, 2);
+        trozo(e, x0 + e.adir[i] * 3, y + 3, 0, 10, CABEZA, pelo.piel, pelo.casco);
+        if (e.grito && Math.random() < 0.5) e.grito(L_HERIDO, x0, y);
+      }
+      quitarArrastrado(e, i);
+      continue;
+    }
+    // Pulling with his arms: a jerk forward, a pause.
+    const k = Math.max(0, Math.sin(e.aedad[i] * 5));
+    const x1 = x0 + e.adir[i] * 8 * k * dt;
+    e.ax[i] = x1;
+    const y = e.suelo(x1);
+    // The trail behind him, and his stumps still bleeding.
+    if (Math.floor(x0 / 2) !== Math.floor(x1 / 2)) manchaGota(e, x1 - e.adir[i] * 3, y, 2);
+    if (Math.random() < dt * 4 * lod(e)) gota(e, x1 - e.adir[i] * 3, y + 2, -e.adir[i] * rnd(10, 40), rnd(20, 50));
+    e.at[i] -= dt;
+    if (e.at[i] <= 0) {
+      e.at[i] = rnd(1.4, 3);
+      if (e.grito) e.grito(L_HERIDO, x1, y);
+    }
+  }
+}
+
 /**
  * Moves everything. `suelo(x)` is the ground altitude; over open sea
  * (`esMar(x)`) the surface is at `nivelMar`.
@@ -736,7 +996,17 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
     for (let i = 0; i < e.pn; i++) if (e.pedad[i] < e.pvida[i]) vivo = true;
     if (!vivo) e.pn = e.pi = 0;
   }
+  for (let i = 0; i < e.hn; i++) e.hedad[i] += dt;
+  if (e.vn > 0) {
+    let vivo = false;
+    for (let i = 0; i < e.vn; i++) {
+      e.vedad[i] += dt * e.avLavado;
+      if (e.vedad[i] < VIDA_AV) vivo = true;
+    }
+    if (!vivo) e.vn = e.vi = 0;
+  }
   if (e.en > 0) pasoEmisores(e, dt);
+  if (e.an > 0) pasoArrastrados(e, dt);
   const n0 = e.n;
   for (let i = n0 - 1; i >= 0; i--) {
     if (i >= e.n) continue;
@@ -746,9 +1016,16 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
       continue;
     }
     const t = e.tipo[i];
-    if (t === T_TROZO && e.rebotes[i] >= 3) {
+    if (t === T_TROZO && e.rebotes[i] >= REPOSO) {
       // Lying on the ground: it slides to a stop, smearing a trail, and a
-      // fresh torso still pumps a few times and drips into its pool.
+      // fresh torso still pumps a few times and drips into its pool. A bone
+      // at rest joins the bones on the ground (they stay much longer).
+      const oseo = esHueso(e.forma[i]);
+      if (oseo && e.vx[i] === 0 && e.edad[i] > 1.5) {
+        hueso(e, e.x[i], e.y[i], e.forma[i], ((Math.round(e.ang[i] / (Math.PI / 2)) % 4) + 4) % 4, false);
+        quitar(e, i);
+        continue;
+      }
       if (e.vx[i] !== 0) {
         const x0 = e.x[i];
         e.x[i] += e.vx[i] * dt;
@@ -760,7 +1037,7 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
           continue;
         }
         e.y[i] = suelo(e.x[i]);
-        if (Math.floor(x0 / 4) !== Math.floor(e.x[i] / 4)) manchaGota(e, e.x[i], e.y[i], 3);
+        if (!oseo && Math.floor(x0 / 4) !== Math.floor(e.x[i] / 4)) manchaGota(e, e.x[i], e.y[i], 3);
       }
       if (e.color[i] > 0) {
         e.aux[i] -= dt;
@@ -793,13 +1070,19 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
       if (e.y[i] < nivelMar && e.vy[i] < 0) quitar(e, i);
       continue;
     }
+    // Flying through the blood: a drop that meets the plane sticks to it.
+    if (t === T_GOTA && e.avOn && Math.abs(x - e.camX) < e.avLargo && Math.abs(e.y[i] - e.camY) < 4 && Math.random() < 0.5) {
+      manchaAvion(e, 1);
+      quitar(e, i);
+      continue;
+    }
     if (t === T_TROZO || t === T_CUERPO) {
       e.ang[i] += e.giro[i] * dt;
       // Fresh pieces drip as they fly; a falling body streaks red.
       if (t === T_CUERPO) {
         if (Math.random() < dt * 40 * lod(e)) gota(e, x + rnd(-1, 1), e.y[i] + rnd(-1, 1), e.vx[i] * 0.3 + rnd(-12, 12), e.vy[i] * 0.3 + rnd(-6, 12), T_GOTA, rnd(3, 6));
         if (Math.random() < dt * 8 * lod(e)) gota(e, x, e.y[i], e.vx[i] * 0.2, e.vy[i] * 0.2, T_NIEBLA);
-      } else if (e.edad[i] < 2.5 && Math.random() < dt * 7 * lod(e)) gota(e, x, e.y[i], e.vx[i] * 0.2, e.vy[i] * 0.2);
+      } else if (e.edad[i] < 2.5 && !esHueso(e.forma[i]) && Math.random() < dt * 7 * lod(e)) gota(e, x, e.y[i], e.vx[i] * 0.2, e.vy[i] * 0.2);
     }
     if (e.y[i] > piso) continue;
     if (t === T_CUERPO) {
@@ -820,20 +1103,23 @@ export function actualizar(e: Gore, dt: number, suelo: (x: number) => number, es
       continue;
     }
     // A gib: bounces twice, smearing the ground, then slides to a stop.
+    // A bone clatters: harder, bouncier, more times, and barely smears.
     e.y[i] = piso;
-    // Every landing leaves a smear; the first a real pool.
-    if (e.rebotes[i] === 0) charco(e, x, piso, e.forma[i] === TORSO || e.forma[i] === COSTILLAS ? 10 : 7);
+    const oseo = esHueso(e.forma[i]);
+    if (oseo) {
+      if (e.rebotes[i] === 0) manchaGota(e, x, piso, 2);
+    } else if (e.rebotes[i] === 0) charco(e, x, piso, e.forma[i] === TORSO ? 10 : 7);
     else mancha(e, x, piso, 4);
-    if (e.rebotes[i] < 2 && e.vy[i] < -25) {
-      e.vy[i] = -e.vy[i] * 0.38;
-      e.vx[i] *= 0.55;
-      e.giro[i] *= 0.5;
+    if (oseo ? e.rebotes[i] < 4 && e.vy[i] < -14 : e.rebotes[i] < 2 && e.vy[i] < -25) {
+      e.vy[i] = -e.vy[i] * (oseo ? 0.56 : 0.38);
+      e.vx[i] *= oseo ? 0.78 : 0.55;
+      e.giro[i] *= oseo ? -0.9 : 0.5;
       e.rebotes[i]++;
     } else {
       e.vy[i] = e.giro[i] = 0;
-      e.vx[i] *= 0.8;
+      e.vx[i] *= oseo ? 0.5 : 0.8;
       e.ang[i] = Math.round(e.ang[i] / (Math.PI / 2)) * (Math.PI / 2);
-      e.rebotes[i] = 3;
+      e.rebotes[i] = REPOSO;
     }
   }
 }
@@ -845,7 +1131,7 @@ const alfa = (k: number) => Math.max(0, Math.min(1, Math.ceil(k * 4) / 4));
  * `sx`, `sy`: world → screen. `vw`: screen width (off-screen stains are skipped).
  */
 export function dibujarSuelo(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y: number) => number, vw: number, nivelMar: number): void {
-  if (e.mn === 0 && e.tn === 0) return;
+  if (e.mn === 0 && e.tn === 0 && e.hn === 0) return;
   let a = 1;
   for (let i = 0; i < e.mn; i++) {
     const ed = e.medad[i];
@@ -885,6 +1171,10 @@ export function dibujarSuelo(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y:
       g.fillRect(X + (w >> 1) + 1 + (h % 2), Y - 1 + (h % 2), 1, 1);
       g.fillRect(X + (h % 5) - 2, Y - 2 - (w >= 12 ? 1 : 0), 1, 1);
     }
+  }
+  if (e.hn > 0) {
+    dibujarHuesos(g, e, sx, sy, vw);
+    a = 1;
   }
   const Ym = sy(nivelMar);
   for (let i = 0; i < e.tn; i++) {
@@ -957,6 +1247,11 @@ function dibujarSalpicones(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y: n
       g.fillRect(x0 + 3, wy + 1, Math.max(1, ww - 2), 1);
       g.fillStyle = ROJO[0];
       if (!seco) g.fillRect(x0 + 2 + (h % 3), wy + 1, 1, 1);
+      // The driver still at the wheel: a charred little skull behind the glass.
+      g.fillStyle = CARBON[2];
+      g.fillRect(x0 + 2 + (ww >> 1), wy + 1, 2, 2);
+      g.fillStyle = CARBON[0];
+      g.fillRect(x0 + 2 + (ww >> 1), wy + 1, 1, 1);
       // Specks on the hull.
       g.fillStyle = ROJO[1];
       g.fillRect(x0 + ww + 3, y0 + 1 + (h % 2), 1, 1);
@@ -987,9 +1282,325 @@ function dibujarSalpicones(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y: n
   if (a !== 1) g.globalAlpha = 1;
 }
 
+/** One piece, at (X, Y) on screen, turned q quarter turns. */
+function pintaTrozo(g: Ctx, X: number, Y: number, q: number, forma: number, c: string, casco: string) {
+  switch (forma) {
+    case CABEZA: {
+      // A 3×3 head with an ear, an eye, a helmet strip and a bloody neck.
+      g.fillStyle = c;
+      g.fillRect(X - 1, Y - 1, 3, 3);
+      const ox = q === 0 || q === 3 ? -1 : 1, oy = q < 2 ? -1 : 1;
+      g.fillStyle = OREJA;
+      g.fillRect(X + ox * 2, Y + oy * 2, 1, 1);
+      g.fillStyle = casco;
+      if (q % 2 === 0) g.fillRect(X - 1, Y + oy, 3, 1);
+      else g.fillRect(X + ox, Y - 1, 1, 3);
+      g.fillStyle = OJO;
+      g.fillRect(X - ox, Y, 1, 1);
+      g.fillStyle = ROJO[1];
+      g.fillRect(X - ox, Y - oy * 2, 1, 1);
+      break;
+    }
+    case TORSO: {
+      const w = q % 2 ? 4 : 3, h = q % 2 ? 3 : 4;
+      g.fillStyle = c;
+      g.fillRect(X - 1, Y - 1, w, h);
+      g.fillStyle = ROJO[1];
+      if (q % 2) g.fillRect(q === 1 ? X - 1 : X + w - 2, Y - 1, 1, h);
+      else g.fillRect(X - 1, q === 0 ? Y - 1 : Y + h - 2, w, 1);
+      break;
+    }
+    case MIEMBRO: {
+      g.fillStyle = c;
+      if (q % 2) g.fillRect(X - 1, Y, 3, 1);
+      else g.fillRect(X, Y - 1, 1, 3);
+      g.fillStyle = ROJO[0];
+      if (q % 2) g.fillRect(q === 1 ? X - 1 : X + 1, Y, 1, 1);
+      else g.fillRect(X, q === 0 ? Y - 1 : Y + 1, 1, 1);
+      break;
+    }
+    case OREJA_G: {
+      // A round ear: lilac with its pink inside and a torn red edge.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -1, -1, 3, 2);
+      g.fillStyle = OREJA_IN;
+      rr(g, X, Y, q, 0, -1, 1, 1);
+      g.fillStyle = ROJO[1];
+      rr(g, X, Y, q, -1, 1, 3, 1);
+      break;
+    }
+    case OJO_G: {
+      // An eyeball trailing its red stalk.
+      g.fillStyle = c;
+      rr(g, X, Y, q, 0, -1, 2, 2);
+      g.fillStyle = OJO;
+      rr(g, X, Y, q, 1, -1, 1, 1);
+      g.fillStyle = ROJO[1];
+      rr(g, X, Y, q, -1, 0, 1, 1);
+      g.fillStyle = ROJO[2];
+      rr(g, X, Y, q, -2, 1, 1, 1);
+      break;
+    }
+    case DIENTE: {
+      // A buck tooth with a red root.
+      g.fillStyle = c;
+      rr(g, X, Y, q, 0, -1, 1, 2);
+      g.fillStyle = ROJO[1];
+      rr(g, X, Y, q, 0, 1, 1, 1);
+      break;
+    }
+    case BIGOTE: {
+      g.fillStyle = c;
+      rr(g, X, Y, q, -1, 0, 3, 1);
+      rr(g, X, Y, q, 2, -1, 1, 1);
+      break;
+    }
+    case COSTILLAS: {
+      // A ribcage: bone bars over red, a dark spine down the middle.
+      g.fillStyle = ROJO[1];
+      rr(g, X, Y, q, -2, -1, 4, 3);
+      g.fillStyle = c;
+      rr(g, X, Y, q, -2, -1, 4, 1);
+      rr(g, X, Y, q, -2, 1, 4, 1);
+      g.fillStyle = ROJO[2];
+      rr(g, X, Y, q, 0, -1, 1, 3);
+      break;
+    }
+    case TRIPA: {
+      // A loop of gut.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -2, 0, 2, 1);
+      rr(g, X, Y, q, 0, -1, 2, 1);
+      rr(g, X, Y, q, 2, 0, 1, 1);
+      g.fillStyle = casco;
+      rr(g, X, Y, q, -1, 1, 2, 1);
+      break;
+    }
+    case CRANEO: {
+      // A tiny mouse skull: round cranium, dark eye socket, long snout with buck teeth.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -1, -1, 3, 2);
+      rr(g, X, Y, q, 2, 0, 1, 1);
+      g.fillStyle = c === HUESO ? HUESO_SOMBRA : CARBON[0];
+      rr(g, X, Y, q, -1, 1, 3, 1);
+      g.fillStyle = CARBON[0];
+      rr(g, X, Y, q, 0, 0, 1, 1);
+      g.fillStyle = DIENTE_C;
+      rr(g, X, Y, q, 2, 1, 1, 1);
+      break;
+    }
+    case FEMUR: {
+      // A long bone with a knob at each end.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -2, 0, 5, 1);
+      rr(g, X, Y, q, -2, -1, 1, 1);
+      rr(g, X, Y, q, 2, 1, 1, 1);
+      break;
+    }
+    case VERTEBRA: {
+      g.fillStyle = c;
+      rr(g, X, Y, q, -1, 0, 3, 1);
+      rr(g, X, Y, q, 0, -1, 1, 1);
+      g.fillStyle = c === HUESO ? HUESO_SOMBRA : CARBON[0];
+      rr(g, X, Y, q, 0, 0, 1, 1);
+      break;
+    }
+    case MANDIBULA: {
+      // A jaw: a bone L with the buck teeth still in it.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -1, 0, 3, 1);
+      rr(g, X, Y, q, -1, -1, 1, 1);
+      g.fillStyle = DIENTE_C;
+      rr(g, X, Y, q, 2, -1, 1, 1);
+      break;
+    }
+    case ASTILLA: {
+      g.fillStyle = c;
+      rr(g, X, Y, q, 0, 0, 1, 2);
+      break;
+    }
+    case MEDIO: {
+      // A limb torn to the bone: fur/cloth, a red end and the bone sticking out.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -2, 0, 3, 1);
+      g.fillStyle = ROJO[1];
+      rr(g, X, Y, q, 1, 0, 1, 1);
+      g.fillStyle = HUESO;
+      rr(g, X, Y, q, 2, 0, 2, 1);
+      rr(g, X, Y, q, 3, -1, 1, 1);
+      break;
+    }
+    case SESO: {
+      // A blob of brain: pink with darker folds.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -1, -1, 3, 2);
+      g.fillStyle = casco;
+      rr(g, X, Y, q, 0, -1, 1, 1);
+      rr(g, X, Y, q, -1, 0, 1, 1);
+      g.fillStyle = ROJO[1];
+      rr(g, X, Y, q, 1, 1, 1, 1);
+      break;
+    }
+    case SOGA: {
+      // A long rope of gut, looping.
+      g.fillStyle = c;
+      rr(g, X, Y, q, -4, 0, 2, 1);
+      rr(g, X, Y, q, -2, -1, 2, 1);
+      rr(g, X, Y, q, 0, 0, 2, 1);
+      rr(g, X, Y, q, 2, 1, 2, 1);
+      g.fillStyle = casco;
+      rr(g, X, Y, q, -3, 1, 1, 1);
+      rr(g, X, Y, q, 1, -1, 1, 1);
+      g.fillStyle = ROJO[1];
+      rr(g, X, Y, q, 4, 1, 1, 1);
+      break;
+    }
+    default: {
+      // The tail: a thin pink squiggle.
+      g.fillStyle = c;
+      if (q % 2) {
+        g.fillRect(X - 1, Y, 2, 1);
+        g.fillRect(X + 1, Y - 1, 1, 1);
+      } else {
+        g.fillRect(X, Y - 1, 1, 2);
+        g.fillRect(X + 1, Y + 1, 1, 1);
+      }
+    }
+  }
+}
+
+/** A rect at (dx, dy) from (X, Y), mirrored left–right when m < 0. */
+function rm(g: Ctx, X: number, Y: number, m: number, dx: number, dy: number, w: number, h: number) {
+  g.fillRect(m > 0 ? X + dx : X - dx - w, Y + dy, w, h);
+}
+
+/** A whole mouse skeleton lying on its side (head at +x, or −x when `m` = −1), its feet on Y. */
+function pintaEsqueleto(g: Ctx, X: number, Y: number, m: number, carbon: boolean) {
+  const hueso = carbon ? CARBON[1] : HUESO;
+  const sombra = carbon ? CARBON[0] : HUESO_SOMBRA;
+  // Skull with its socket, snout and teeth; the jaw dropped open.
+  g.fillStyle = hueso;
+  rm(g, X, Y, m, 4, -4, 3, 2);
+  rm(g, X, Y, m, 7, -3, 1, 1);
+  rm(g, X, Y, m, 5, -1, 3, 1);
+  g.fillStyle = sombra;
+  rm(g, X, Y, m, 4, -2, 3, 1);
+  g.fillStyle = CARBON[0];
+  rm(g, X, Y, m, 5, -3, 1, 1);
+  g.fillStyle = DIENTE_C;
+  rm(g, X, Y, m, 7, -2, 1, 1);
+  // Spine, ribs, pelvis.
+  g.fillStyle = hueso;
+  rm(g, X, Y, m, -4, -2, 8, 1);
+  rm(g, X, Y, m, -2, -4, 1, 2);
+  rm(g, X, Y, m, 0, -4, 1, 2);
+  rm(g, X, Y, m, 2, -4, 1, 2);
+  rm(g, X, Y, m, -6, -3, 2, 2);
+  // Legs and an arm along the ground.
+  rm(g, X, Y, m, -10, -1, 4, 1);
+  rm(g, X, Y, m, -9, -2, 1, 1);
+  rm(g, X, Y, m, 1, -1, 3, 1);
+  // The tail: a row of tiny vertebrae.
+  rm(g, X, Y, m, -8, -3, 1, 1);
+  rm(g, X, Y, m, -10, -4, 1, 1);
+  rm(g, X, Y, m, -12, -4, 1, 1);
+  if (carbon) {
+    // A pale glint on the charred skull and ribs.
+    g.fillStyle = CARBON[2];
+    rm(g, X, Y, m, 5, -4, 1, 1);
+    rm(g, X, Y, m, 0, -4, 1, 1);
+  }
+}
+
+/** Bones on the ground (and skeletons): they stay well after the blood is gone. */
+function dibujarHuesos(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y: number) => number, vw: number) {
+  let a = 1;
+  for (let i = 0; i < e.hn; i++) {
+    const ed = e.hedad[i];
+    if (ed >= VIDA_HUESO) continue;
+    const wx = e.hx[i];
+    const X = sx(wx);
+    if (X < -16 || X > vw + 16 || e.esMar(wx)) continue;
+    const k = alfa(Math.min(1, (VIDA_HUESO - ed) / 6));
+    if (k <= 0) continue;
+    if (k !== a) g.globalAlpha = a = k;
+    // Follow the ground if a blast has dug a crater under it since.
+    const Y = sy(Math.min(e.hy[i], Math.round(e.suelo(wx))));
+    const f = e.hforma[i];
+    if (f === ESQUELETO) pintaEsqueleto(g, X, Y, e.hq[i] === 2 ? -1 : 1, e.hcarbon[i] === 1);
+    else pintaTrozo(g, X, Y - 1, e.hq[i], f, e.hcarbon[i] ? CARBON[1] : HUESO, '');
+  }
+  g.globalAlpha = 1;
+}
+
+/** The crawling wounded: half a mouse dragging itself on its arms, stumps bleeding. */
+function dibujarArrastrados(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y: number) => number, vw: number) {
+  for (let i = 0; i < e.an; i++) {
+    const wx = e.ax[i];
+    const X = sx(wx);
+    if (X < -10 || X > vw + 10) continue;
+    const Y = sy(e.suelo(wx));
+    const d = e.adir[i];
+    const pelo = PELAJES[e.apelo[i]] ?? SOLDADO;
+    const tira = Math.sin(e.aedad[i] * 5) > 0;
+    // Torso flat on the ground, head raised a little, helmet askew.
+    g.fillStyle = pelo.ropa;
+    rm(g, X, Y, d, -2, -2, 4, 2);
+    g.fillStyle = pelo.piel;
+    rm(g, X, Y, d, 2, -4, 3, 3);
+    g.fillStyle = OREJA;
+    rm(g, X, Y, d, 2, -5, 1, 1);
+    g.fillStyle = pelo.casco;
+    rm(g, X, Y, d, 2, -4, 2, 1);
+    g.fillStyle = OJO;
+    rm(g, X, Y, d, 4, -3, 1, 1);
+    // The reaching arm: out in front, then pulling.
+    g.fillStyle = pelo.piel;
+    if (tira) rm(g, X, Y, d, 4, -1, 3, 1);
+    else rm(g, X, Y, d, 5, -2, 2, 1);
+    // Stumps and a dangling gut at the back.
+    g.fillStyle = ROJO[1];
+    rm(g, X, Y, d, -3, -2, 1, 2);
+    g.fillStyle = ROJO[0];
+    rm(g, X, Y, d, -3, -2, 1, 1);
+    g.fillStyle = TRIPA_C[0];
+    rm(g, X, Y, d, -5, -1, 2, 1);
+  }
+}
+
+/**
+ * Red specks on the player's plane, drawn over its sprite at (X, Y) on
+ * screen; `rumbo` is the plane's heading (rad, y up). They darken and wash off.
+ */
+export function dibujarAvion(g: Ctx, e: Gore, X: number, Y: number, rumbo: number): void {
+  if (e.vn === 0) return;
+  const c = Math.cos(rumbo), s = Math.sin(rumbo);
+  let a = 1;
+  for (let i = 0; i < e.vn; i++) {
+    const ed = e.vedad[i];
+    if (ed >= VIDA_AV) continue;
+    const k = alfa(Math.min(1, (VIDA_AV - ed) / 8));
+    if (k <= 0) continue;
+    if (k !== a) g.globalAlpha = a = k;
+    const u = e.vu[i], v = e.vv[i];
+    // Along the nose (c, −s) on screen, across it (s, c).
+    const px = Math.round(X + c * u + s * v), py = Math.round(Y - s * u + c * v);
+    const t = e.vtam[i];
+    g.fillStyle = ed < 6 ? ROJO[0] : ed < 15 ? ROJO[1] : ROJO[2];
+    g.fillRect(px, py, t, t);
+    // Fresh blood streaks back along the body in the wind.
+    if (ed < 4) {
+      g.fillStyle = ROJO[1];
+      g.fillRect(Math.round(px - c * 2), Math.round(py + s * 2), 1, 1);
+    }
+  }
+  g.globalAlpha = 1;
+}
+
 /** Droplets, mist, gibs, bodies and decals: draw them with the other effects. */
 export function dibujar(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y: number) => number, vw = 1e5, vh = 1e5): void {
   if (e.sn > 0) dibujarSalpicones(g, e, sx, sy, vw, vh);
+  if (e.an > 0) dibujarArrastrados(g, e, sx, sy, vw);
   if (e.n === 0) return;
   let a = 1;
   for (let i = 0; i < e.n; i++) {
@@ -1042,110 +1653,7 @@ export function dibujar(g: Ctx, e: Gore, sx: (x: number) => number, sy: (y: numb
       rr(g, X, Y, q, -1, 0, 1, 1);
       continue;
     }
-    switch (e.forma[i]) {
-      case CABEZA: {
-        // A 3×3 head with an ear, an eye, a helmet strip and a bloody neck.
-        g.fillStyle = c;
-        g.fillRect(X - 1, Y - 1, 3, 3);
-        const ox = q === 0 || q === 3 ? -1 : 1, oy = q < 2 ? -1 : 1;
-        g.fillStyle = OREJA;
-        g.fillRect(X + ox * 2, Y + oy * 2, 1, 1);
-        g.fillStyle = e.casco[i];
-        if (q % 2 === 0) g.fillRect(X - 1, Y + oy, 3, 1);
-        else g.fillRect(X + ox, Y - 1, 1, 3);
-        g.fillStyle = OJO;
-        g.fillRect(X - ox, Y, 1, 1);
-        g.fillStyle = ROJO[1];
-        g.fillRect(X - ox, Y - oy * 2, 1, 1);
-        break;
-      }
-      case TORSO: {
-        const w = q % 2 ? 4 : 3, h = q % 2 ? 3 : 4;
-        g.fillStyle = c;
-        g.fillRect(X - 1, Y - 1, w, h);
-        g.fillStyle = ROJO[1];
-        if (q % 2) g.fillRect(q === 1 ? X - 1 : X + w - 2, Y - 1, 1, h);
-        else g.fillRect(X - 1, q === 0 ? Y - 1 : Y + h - 2, w, 1);
-        break;
-      }
-      case MIEMBRO: {
-        g.fillStyle = c;
-        if (q % 2) g.fillRect(X - 1, Y, 3, 1);
-        else g.fillRect(X, Y - 1, 1, 3);
-        g.fillStyle = ROJO[0];
-        if (q % 2) g.fillRect(q === 1 ? X - 1 : X + 1, Y, 1, 1);
-        else g.fillRect(X, q === 0 ? Y - 1 : Y + 1, 1, 1);
-        break;
-      }
-      case OREJA_G: {
-        // A round ear: lilac with its pink inside and a torn red edge.
-        g.fillStyle = c;
-        rr(g, X, Y, q, -1, -1, 3, 2);
-        g.fillStyle = OREJA_IN;
-        rr(g, X, Y, q, 0, -1, 1, 1);
-        g.fillStyle = ROJO[1];
-        rr(g, X, Y, q, -1, 1, 3, 1);
-        break;
-      }
-      case OJO_G: {
-        // An eyeball trailing its red stalk.
-        g.fillStyle = c;
-        rr(g, X, Y, q, 0, -1, 2, 2);
-        g.fillStyle = OJO;
-        rr(g, X, Y, q, 1, -1, 1, 1);
-        g.fillStyle = ROJO[1];
-        rr(g, X, Y, q, -1, 0, 1, 1);
-        g.fillStyle = ROJO[2];
-        rr(g, X, Y, q, -2, 1, 1, 1);
-        break;
-      }
-      case DIENTE: {
-        // A buck tooth with a red root.
-        g.fillStyle = c;
-        rr(g, X, Y, q, 0, -1, 1, 2);
-        g.fillStyle = ROJO[1];
-        rr(g, X, Y, q, 0, 1, 1, 1);
-        break;
-      }
-      case BIGOTE: {
-        g.fillStyle = c;
-        rr(g, X, Y, q, -1, 0, 3, 1);
-        rr(g, X, Y, q, 2, -1, 1, 1);
-        break;
-      }
-      case COSTILLAS: {
-        // A ribcage: bone bars over red, a dark spine down the middle.
-        g.fillStyle = ROJO[1];
-        rr(g, X, Y, q, -2, -1, 4, 3);
-        g.fillStyle = c;
-        rr(g, X, Y, q, -2, -1, 4, 1);
-        rr(g, X, Y, q, -2, 1, 4, 1);
-        g.fillStyle = ROJO[2];
-        rr(g, X, Y, q, 0, -1, 1, 3);
-        break;
-      }
-      case TRIPA: {
-        // A loop of gut.
-        g.fillStyle = c;
-        rr(g, X, Y, q, -2, 0, 2, 1);
-        rr(g, X, Y, q, 0, -1, 2, 1);
-        rr(g, X, Y, q, 2, 0, 1, 1);
-        g.fillStyle = e.casco[i];
-        rr(g, X, Y, q, -1, 1, 2, 1);
-        break;
-      }
-      default: {
-        // The tail: a thin pink squiggle.
-        g.fillStyle = c;
-        if (q % 2) {
-          g.fillRect(X - 1, Y, 2, 1);
-          g.fillRect(X + 1, Y - 1, 1, 1);
-        } else {
-          g.fillRect(X, Y - 1, 1, 2);
-          g.fillRect(X + 1, Y + 1, 1, 1);
-        }
-      }
-    }
+    pintaTrozo(g, X, Y, q, e.forma[i], c, e.casco[i]);
   }
   g.globalAlpha = 1;
 }

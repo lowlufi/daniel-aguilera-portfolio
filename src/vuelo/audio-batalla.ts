@@ -4222,3 +4222,159 @@ export function __usarContexto(ctx: BaseAudioContext | null, dest?: AudioNode) {
 }
 /** Solo para pruebas: nodos vivos creados por este módulo. */
 export const __nodosVivos = () => vivos;
+
+/* ────────────────────────── lamentos (modo GORE) ────────────────────────── */
+
+/*
+ * Chillidos, gritos, gemidos y «¡noo!» de ratón de dibujo animado, sintetizados
+ * (sin grabaciones ni voces de personas): una fuente glotal aguda (armónicos de
+ * una diente de sierra suave, algo saturada, con un poco de aliento) pasada por
+ * dos o tres formantes de vocal subidos al tamaño de un ratón. Se hornean
+ * aparte de HORNO (solo si el modo GORE los pide, ver `precalentarLamentos`).
+ *
+ * Tope: como mucho dos lamentos sonando a la vez y uno nuevo cada ~0.18 s; lejos
+ * suenan más bajo y muy lejos no suenan.
+ */
+
+type Vocal = [number, number, number][]; // [frecuencia, q, ganancia] por formante
+const V_I: Vocal = [[480, 6, 1], [3600, 9, 0.7], [5200, 9, 0.25]];
+const V_A: Vocal = [[1250, 5, 1], [1900, 7, 0.8], [4100, 9, 0.25]];
+const V_O: Vocal = [[760, 5, 1], [1350, 7, 0.65], [4000, 9, 0.2]];
+const V_U: Vocal = [[560, 5, 1], [1250, 7, 0.45], [3800, 9, 0.15]];
+
+type VozRaton = {
+  dur: number;
+  /** Tono fundamental (Hz) a lo largo del sonido, u = 0…1. */
+  f0: (u: number) => number;
+  /** Vocal al principio y al final (se funden). */
+  v0: Vocal;
+  v1: Vocal;
+  aspereza: number;
+  vibrato: number;
+  prof: number;
+  aliento: number;
+  /** Envolvente extra (u = 0…1 → 0…1), p. ej. sílabas. */
+  env?: (u: number) => number;
+  /** Segundos iniciales de «n» nasal (boca cerrada). */
+  nasal?: number;
+};
+
+function hornoVozRaton(sr: number, o: VozRaton) {
+  const a = new Float32Array(Math.floor(sr * o.dur));
+  const fs = o.v0.map(([f, q]) => new Bq(sr, 'bp', f, q));
+  const nas = new Bq(sr, 'lp', 450, 0.9);
+  const ali = new Bq(sr, 'hp', 2500, 0.7);
+  let fase = 0, jit = 0;
+  const vp = rand(0, 6);
+  for (let i = 0; i < a.length; i++) {
+    const t = i / sr, u = t / o.dur;
+    if ((i & 31) === 0) {
+      jit += (ruido() - jit) * 0.2;
+      for (let k = 0; k < fs.length; k++) fs[k].f(o.v0[k][0] + (o.v1[k][0] - o.v0[k][0]) * u);
+    }
+    const f = o.f0(u) * (1 + o.prof * Math.sin(2 * Math.PI * o.vibrato * t + vp) + 0.012 * jit);
+    fase += f / sr;
+    const p = fase % 1;
+    // Fuente: diente de sierra suavizada (pocos armónicos), saturada según la aspereza.
+    let src = 0;
+    for (let k = 1; k <= 7; k++) src += Math.sin(2 * Math.PI * k * p) / Math.pow(k, 1.15);
+    src = Math.tanh(src * o.aspereza) + ali.run(ruido()) * o.aliento;
+    let y = 0;
+    if (o.nasal && t < o.nasal) y = nas.run(src) * 0.6;
+    else for (let k = 0; k < fs.length; k++) y += fs[k].run(src) * (o.v0[k][2] + (o.v1[k][2] - o.v0[k][2]) * u);
+    const env = Math.min(1, t / 0.018) * Math.min(1, (o.dur - t) / 0.08) * (o.env ? o.env(u) : 1);
+    a[i] = y * env;
+  }
+  return normaliza(a, 0.9);
+}
+
+/** Una curva de tono: sube de a a b hasta `pico` y cae a c. */
+const curva = (a: number, b: number, c: number, pico = 0.2) => (u: number) => (u < pico ? a + (b - a) * (u / pico) : b + (c - b) * ((u - pico) / (1 - pico)));
+/** `n` sílabas separadas por un respiro. */
+const silabas = (n: number) => (u: number) => {
+  const k = (u * n) % 1;
+  return Math.min(1, k / 0.08) * Math.min(1, (1 - k) / 0.25);
+};
+
+type Lamento = 'chillido' | 'chillido2' | 'grito' | 'grito2' | 'gemido' | 'gemido2' | 'noo' | 'noo2' | 'quejido' | 'ay';
+const HORNO_LAMENTO: Record<Lamento, (sr: number) => Float32Array> = {
+  chillido: (sr) => hornoVozRaton(sr, { dur: 0.3, f0: curva(1800, 2600, 1500, 0.3), v0: V_I, v1: V_I, aspereza: 1.6, vibrato: 0, prof: 0, aliento: 0.08 }),
+  chillido2: (sr) => hornoVozRaton(sr, { dur: 0.26, f0: curva(2100, 2500, 1900, 0.4), v0: V_I, v1: V_A, aspereza: 1.4, vibrato: 0, prof: 0, aliento: 0.06, env: silabas(2) }),
+  grito: (sr) => hornoVozRaton(sr, { dur: 0.78, f0: curva(1100, 1550, 780, 0.15), v0: V_A, v1: V_A, aspereza: 2.6, vibrato: 11, prof: 0.06, aliento: 0.12 }),
+  grito2: (sr) => hornoVozRaton(sr, { dur: 0.62, f0: curva(1300, 1750, 980, 0.2), v0: V_I, v1: V_A, aspereza: 2.2, vibrato: 9, prof: 0.05, aliento: 0.1 }),
+  gemido: (sr) => hornoVozRaton(sr, { dur: 1.1, f0: curva(700, 830, 520, 0.3), v0: V_U, v1: V_O, aspereza: 0.9, vibrato: 5, prof: 0.04, aliento: 0.16 }),
+  gemido2: (sr) => hornoVozRaton(sr, { dur: 0.9, f0: curva(620, 660, 470, 0.5), v0: V_O, v1: V_U, aspereza: 0.8, vibrato: 4, prof: 0.05, aliento: 0.2 }),
+  noo: (sr) => hornoVozRaton(sr, { dur: 0.72, f0: curva(950, 1220, 720, 0.25), v0: V_O, v1: V_U, aspereza: 1.8, vibrato: 7, prof: 0.04, aliento: 0.08, nasal: 0.08 }),
+  noo2: (sr) => hornoVozRaton(sr, { dur: 1.15, f0: curva(1150, 1250, 480, 0.1), v0: V_O, v1: V_O, aspereza: 2, vibrato: 8, prof: 0.05, aliento: 0.1, nasal: 0.07 }),
+  quejido: (sr) => hornoVozRaton(sr, { dur: 0.48, f0: curva(430, 470, 360, 0.3), v0: V_O, v1: V_U, aspereza: 1.3, vibrato: 3, prof: 0.03, aliento: 0.22 }),
+  ay: (sr) => hornoVozRaton(sr, { dur: 0.46, f0: curva(1250, 1400, 1100, 0.5), v0: V_A, v1: V_I, aspereza: 1.7, vibrato: 0, prof: 0, aliento: 0.08, env: silabas(2) }),
+};
+/** Qué variantes suenan en cada ocasión: 0 muerte, 1 desmembrado, 2 herido que se arrastra, 3 «¡noo!» (cae). */
+const LAMENTOS: Lamento[][] = [
+  ['grito', 'grito2', 'chillido', 'ay'],
+  ['grito', 'grito2', 'chillido', 'chillido2'],
+  ['gemido', 'gemido2', 'quejido'],
+  ['noo', 'noo2'],
+];
+const hornosLamento = new Map<Lamento, AudioBuffer>();
+const lamentosFin: number[] = [];
+let ultimoLamento = -1;
+let ctxLamento: BaseAudioContext | null = null;
+function bufLamento(m: Mezcla, n: Lamento) {
+  if (ctxLamento !== m.ctx) {
+    // A new audio context: new buffers, and its own clock for the limits.
+    hornosLamento.clear();
+    lamentosFin.length = 0;
+    ultimoLamento = -1;
+    ctxLamento = m.ctx;
+  }
+  let b = hornosLamento.get(n);
+  if (!b) {
+    const d = HORNO_LAMENTO[n](m.ctx.sampleRate);
+    b = m.ctx.createBuffer(1, d.length, m.ctx.sampleRate);
+    b.getChannelData(0).set(d);
+    hornosLamento.set(n, b);
+  }
+  return b;
+}
+let horneandoLamentos = false;
+
+/** Hornea los lamentos de a uno en ratos libres (al activar el modo GORE). */
+export function precalentarLamentos(): void {
+  const m = salida(true);
+  if (!m || horneandoLamentos) return;
+  const pend = (Object.keys(HORNO_LAMENTO) as Lamento[]).filter((n) => !(ctxLamento === m.ctx && hornosLamento.has(n)));
+  if (!pend.length) return;
+  horneandoLamentos = true;
+  const paso = () => {
+    const n = pend.shift();
+    if (n && salida(true) === m) bufLamento(m, n);
+    if (pend.length && salida(true) === m) window.setTimeout(paso, 120);
+    else horneandoLamentos = false;
+  };
+  window.setTimeout(paso, 120);
+}
+
+/**
+ * Un ratón que muere, pierde un trozo, se arrastra herido o cae gritando
+ * (`tipo` 0…3, ver LAMENTOS). Tono al azar; más bajo con la distancia.
+ */
+export function lamento(tipo: number, distancia: number, pan = 0): void {
+  const m = salida();
+  if (!m) return;
+  if (ctxLamento !== m.ctx) bufLamento(m, 'quejido');
+  const t = m.ctx.currentTime;
+  const d = Math.max(0, num(distancia));
+  if (d > 900 || t - ultimoLamento < 0.18) return;
+  for (let i = lamentosFin.length - 1; i >= 0; i--) if (lamentosFin[i] <= t) lamentosFin.splice(i, 1);
+  if (lamentosFin.length >= 2 || vivos + 3 > LIMITE) return;
+  const k = clamp(Math.floor(num(tipo)), 0, LAMENTOS.length - 1);
+  const vol = (k === 2 ? 0.2 : 0.3) * Math.pow(1 - d / 900, 1.6) * cede();
+  if (vol < 0.02) return;
+  const lista = LAMENTOS[k];
+  const b = bufLamento(m, lista[Math.floor(Math.random() * lista.length)]);
+  const rate = rand(0.85, 1.25);
+  ultimoLamento = t;
+  lamentosFin.push(t + b.duration / rate);
+  unaVezBuf(m, b, vol, rate, t, lado(pan) * 0.8, m.bus);
+}

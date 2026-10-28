@@ -1712,10 +1712,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // A stray falling missile wrecks mice but earns the player nothing.
     const premioAntes = s.sinPremio;
     if (from === 'caida') s.sinPremio = true;
+    // Gore mode: the bigger the blast, the more pieces (bombs, nukes).
+    const goreAntes = goreK;
+    goreK = Math.min(3, Math.max(1, Math.cbrt(energy) / 1.6));
     try {
       blastCuerpo(x, y, energy, from, damage, hiereRatones);
+      if (s.gore && hiereRatones) GR.reventarArrastrados(s.sangre, x, y, FA.explosion(energy).radio * 1.2);
     } finally {
       s.sinPremio = premioAntes;
+      goreK = goreAntes;
     }
   }
   function blastCuerpo(x: number, y: number, energy: number, from: 'jugador' | 'raton' | 'nadie' | 'caida', damage: number, hiereRatones: boolean) {
@@ -1976,8 +1981,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     GR.niebla(s.sangre, a.x, a.y, a.vx, a.vy, 10);
     GR.lluvia(s.sangre, a.x, a.y, a.vx, a.tipo === 'globo' ? 22 : 36, a.tipo === 'helicoptero' ? 34 : 22);
     if (a.tipo === 'ovni') GR.estallido(s.sangre, a.x, a.y + 4, a.vx, a.vy, pelo);
-    else GR.despedazar(s.sangre, a.x, a.y, a.vx, a.vy, pelo);
-    if (a.tipo !== 'globo') GR.cuerpo(s.sangre, a.x + rand(-4, 4), a.y, a.vx * 0.5 + rand(-40, 40), rand(20, 70), pelo);
+    else GR.despedazar(s.sangre, a.x, a.y, a.vx, a.vy, pelo, goreK);
+    if (a.tipo !== 'globo') {
+      GR.cuerpo(s.sangre, a.x + rand(-4, 4), a.y, a.vx * 0.5 + rand(-40, 40), rand(20, 70), pelo);
+      lamentoEn(GR.L_NOO, a.x, a.y);
+    } else lamentoEn(GR.L_MUERTE, a.x, a.y);
   }
   /** Gore mode: a hit on a flying mouse's cabin draws a spurt (and a little mist). */
   function goreAereoHerido(a: AE.Aereo, hx: number, hy: number) {
@@ -2043,7 +2051,12 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       abatirAereo(a);
     }
     for (const f of s.fighters) if (seen(f.a.x)) hurtFighter(f, f.jefa ? f.hpMax * 0.35 : 99);
+    goreK = 3;
+    goreNuke = true;
     for (const u of s.gigantes) if (u.viva && seen(u.x)) giantHit(u, G.golpear(u, u.x, u.y + 6, 99), u.x, u.y);
+    goreK = 1;
+    goreNuke = false;
+    if (s.gore) GR.reventarArrastrados(s.sangre, nx, ny, view.vw);
     for (const e of s.eyectados) if (!e.jefa && seen(e.x)) golpearEyectado(e);
     for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) sh.m.t = -1;
     s.proy = [];
@@ -2081,6 +2094,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function reventarEyectado(e: (typeof s.eyectados)[number]) {
     if (e.t >= 16) return;
     GR.estallido(s.sangre, e.x, e.y + 4, e.vx, e.vy, GR.PILOTO);
+    lamentoEn(GR.L_DESMEMBRAR, e.x, e.y);
     if (e.t > 0.55) for (let i = 0; i < 2; i++) VFX.pieza(s.fx, e.x + rand(-4, 4), e.y + 12, rand(-30, 30), rand(10, 40), null, i ? '#ff9ad0' : P.white);
     // Past its time: the list filter drops it.
     e.t = 99;
@@ -2093,6 +2107,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (let i = 0; i < 5; i++) VFX.pieza(s.fx, e.x + rand(-6, 6), e.y + 12, rand(-40, 40), rand(0, 50), null, i % 2 ? '#ff9ad0' : P.white);
     if (s.mode === 'play') pop(e.x, e.y + 22, RADIO.grito[Math.floor(Math.random() * RADIO.grito.length)], '#ffd0e8');
     if (!s.attract) sfx.pop();
+    // Gore mode: and he knows it.
+    lamentoEn(GR.L_NOO, e.x, e.y);
   }
   /**
    * Fire that catches a bailed-out pilot: in gore mode he bursts; otherwise he goes
@@ -2112,10 +2128,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   function goreCaza(x: number, y: number, vx: number, vy: number) {
     const gy = ground(x);
     if (y - gy < 10 && !sobreMar(x)) {
-      GR.despedazar(s.sangre, x, gy + 4, vx * 0.6, 40, GR.PILOTO);
+      GR.despedazar(s.sangre, x, gy + 4, vx * 0.6, 40, GR.PILOTO, 1.5);
       GR.charco(s.sangre, x, gy, 18);
       return;
     }
+    lamentoEn(GR.L_NOO, x, y);
     GR.niebla(s.sangre, x, y, vx, vy, 10);
     GR.sangre(s.sangre, x, y, vx, vy, 18, 1.3, 5);
     GR.lluvia(s.sangre, x, y, vx, 14, 18);
@@ -2252,9 +2269,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const n = c.kind === 'bici' ? 1 : look.w >= 34 ? 3 : 2;
     for (let i = 0; i < n; i++) {
       const lado = i % 2 ? 1 : -1;
-      GR.despedazar(s.sangre, c.mid.x + lado * rand(2, look.w / 3), top, lado * rand(30, 90), rand(50, 110), GR.TRIPULANTE);
+      GR.despedazar(s.sangre, c.mid.x + lado * rand(2, look.w / 3), top, lado * rand(30, 90), rand(50, 110), GR.TRIPULANTE, goreK);
     }
     GR.cuerpo(s.sangre, c.mid.x, top + 4, rand(-90, 90), rand(150, 210), GR.TRIPULANTE);
+    lamentoEn(Math.random() < 0.5 ? GR.L_NOO : GR.L_MUERTE, c.mid.x, top);
     GR.lluvia(s.sangre, c.mid.x, top + 12, 0, 14, look.w);
     if (mar) GR.marea(s.sangre, c.mid.x, c.kind === 'fragata' ? 34 : 22, look.w * 1.4);
     else GR.chatarra(s.sangre, c.mid.x, ground(c.mid.x), look.w);
@@ -2581,8 +2599,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       if (s.gore) {
         const pelo = j.tipo === 'nodriza' ? GR.ESPACIAL : GR.TRIPULANTE;
         GR.lluvia(s.sangre, j.x, j.y, j.vx, 60, 90);
-        for (let i = 0; i < 4; i++) GR.cuerpo(s.sangre, j.x + rand(-40, 40), j.y + rand(-10, 10), j.vx * 0.4 + rand(-70, 70), rand(20, 90), pelo);
-        GR.despedazar(s.sangre, j.x, j.y, j.vx, j.vy, pelo);
+        for (let i = 0; i < 8; i++) GR.cuerpo(s.sangre, j.x + rand(-50, 50), j.y + rand(-12, 12), j.vx * 0.4 + rand(-80, 80), rand(20, 110), pelo);
+        for (let i = 0; i < 3; i++) GR.despedazar(s.sangre, j.x + rand(-30, 30), j.y + rand(-8, 8), j.vx + rand(-40, 40), j.vy, pelo, 2.5);
+        lamentoEn(GR.L_NOO, j.x, j.y);
       }
       s.jefe = null;
       s.jefeEspacio = false;
@@ -2656,31 +2675,107 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * Gore mode on a foot soldier: gunfire draws a spurt of blood (he still
    * falls whole); a blast that kills him tears him into pieces.
    */
+  /** Gore mode: pieces per mouse (more for big blasts and the nuke) and whether it's the nuke. */
+  let goreK = 1;
+  let goreNuke = false;
+  /** Gore mode: foot soldiers who lost an arm and keep going (id → time to the next spurt). */
+  const mancos = new Map<number, number>();
+  /** Gore mode: a mouse's cry (GR.L_*) at (x, y), quieter when far. */
+  function lamentoEn(tipo: number, x: number, y: number) {
+    if (!s.gore || s.attract) return;
+    AB.lamento(tipo, Math.hypot(x - s.plane.x, y - s.plane.y), panOf(x));
+  }
+  function gritoGore(tipo: number, x: number, y: number) {
+    lamentoEn(tipo, x, y);
+  }
+  /**
+   * Gore mode: a shot may tear the arm off a soldier on his feet instead of
+   * killing him; he squeals and limps on, spurting from the shoulder.
+   */
+  function goreBrazo(u: G.Unidad, vx: number) {
+    if (u.tipo !== 'infanteria' || !u.viva || u.estado === 'aire' || u.estado === 'muerto' || mancos.has(u.id) || Math.random() > 0.3) return false;
+    GR.amputar(s.sangre, u.x, u.y + 8, vx >= 0 ? 1 : -1, GR.SOLDADO);
+    mancos.set(u.id, 0.3);
+    if (mancos.size > 40) mancos.clear();
+    lamentoEn(GR.L_DESMEMBRAR, u.x, u.y);
+    return true;
+  }
+  /** A one-armed soldier: half speed, the shoulder still spurting, a moan now and then. */
+  function goreManco(u: G.Unidad, x0: number, dt: number) {
+    if (!u.viva || u.quitar) {
+      mancos.delete(u.id);
+      return;
+    }
+    u.x = x0 + (u.x - x0) * 0.55;
+    let t = (mancos.get(u.id) ?? 0) - dt;
+    if (t <= 0) {
+      t = rand(0.35, 0.7);
+      GR.sangre(s.sangre, u.x, u.y + 8, u.mira, 1, 3, 0.8, 3);
+      if (Math.random() < 0.12) lamentoEn(GR.L_HERIDO, u.x, u.y);
+    }
+    mancos.set(u.id, t);
+  }
+  /**
+   * Gore mode on a foot soldier: gunfire draws a spurt (a headshot spills his
+   * brains, a gut shot leaves him crawling); a blast tears him apart (heavier
+   * for big blasts), takes his legs off so he crawls, or (the nuke) leaves a
+   * charred skeleton.
+   */
   function goreSoldado(u: G.Unidad, muerto: boolean, hx: number, hy: number, bala: boolean) {
     const cx = u.x, cy = u.y + 6;
     const dx = cx - hx || (Math.random() < 0.5 ? -1 : 1), dy = cy - hy;
+    const dir = dx > 0 ? 1 : -1;
     if (bala) {
       GR.sangre(s.sangre, hx, hy, dx, Math.max(0, dy) + 2, muerto ? 34 : 12, muerto ? 1.5 : 1.2);
       GR.niebla(s.sangre, hx, hy, dx * 0.5, 4, muerto ? 5 : 2);
+      if (!muerto) return;
+      mancos.delete(u.id);
+      if (hy > u.y + 8) {
+        // Headshot.
+        GR.sesos(s.sangre, hx, hy, dir * 40, 20);
+        if (Math.random() < 0.5) lamentoEn(GR.L_MUERTE, cx, cy);
+      } else if (Math.random() < 0.22 && !sobreMar(cx)) {
+        // Gut shot: he goes down and crawls on.
+        GR.arrastrado(s.sangre, cx, -dir, GR.SOLDADO);
+        GR.charco(s.sangre, cx, ground(cx), 8);
+        lamentoEn(GR.L_HERIDO, cx, cy);
+        u.quitar = true;
+        return;
+      } else lamentoEn(GR.L_MUERTE, cx, cy);
       // Shot dead: he flies off pumping arterial spurts, then bleeds into a pool where he lies.
-      if (muerto) {
-        GR.arteria(s.sangre, hx, hy, u.vx, u.vy, dx > 0 ? -1 : 1, 5);
-        // Now and then the shot takes a bit of him with it: an eye, a tooth, an ear.
-        if (Math.random() < 0.5) GR.trocitos(s.sangre, u.x, u.y + 9, dx, 20, 1 + Math.floor(Math.random() * 2));
-      }
+      GR.arteria(s.sangre, hx, hy, u.vx, u.vy, -dir, 5);
+      // Now and then the shot takes a bit of him with it: an eye, a tooth, an ear.
+      if (Math.random() < 0.5) GR.trocitos(s.sangre, u.x, u.y + 9, dx, 20, 1 + Math.floor(Math.random() * 2));
       return;
     }
     if (!muerto) {
       GR.sangre(s.sangre, hx + (cx - hx) * 0.6, cy, dx, 2, 8, 1);
       return;
     }
+    mancos.delete(u.id);
+    const gy = ground(cx);
+    // The nuke: half of them are left as charred skeletons.
+    if (goreNuke && Math.random() < 0.5 && !sobreMar(cx)) {
+      GR.esqueleto(s.sangre, cx, gy, true);
+      GR.niebla(s.sangre, cx, cy, 0, 20, 4);
+      u.quitar = true;
+      return;
+    }
+    // A smaller blast close by may only take his legs: he crawls away screaming.
+    if (goreK < 1.6 && Math.random() < 0.3 && !sobreMar(cx) && cy - gy < 16) {
+      GR.partir(s.sangre, cx, gy, dir, GR.SOLDADO);
+      lamentoEn(GR.L_DESMEMBRAR, cx, cy);
+      u.quitar = true;
+      return;
+    }
     const d = Math.hypot(dx, dy) || 1;
-    GR.despedazar(s.sangre, cx, cy, (dx / d) * 90, 40 + Math.max(0, dy / d) * 60, GR.SOLDADO);
-    GR.arteria(s.sangre, cx, cy, (dx / d) * 40, 70, dx > 0 ? 1 : -1, 4);
-    if (cy - ground(cx) < 24 && !sobreMar(cx)) {
+    GR.despedazar(s.sangre, cx, cy, (dx / d) * 90, 40 + Math.max(0, dy / d) * 60, GR.SOLDADO, goreK);
+    GR.arteria(s.sangre, cx, cy, (dx / d) * 40, 70, dir, 4);
+    if (cy - gy < 24 && !sobreMar(cx)) {
       const px = cx + rand(-6, 6);
       GR.salpicon(s.sangre, px, ground(px) + rand(1, 3), 3);
     }
+    if (Math.random() < 0.6) lamentoEn(GR.L_DESMEMBRAR, cx, cy);
     u.quitar = true;
   }
   /**
@@ -3175,7 +3270,16 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         if (!u.viva) continue;
         const bx = G.caja(u);
         const cx = (bx.x0 + bx.x1) / 2;
-        if (dentro(cx, bx.y0, (bx.x1 - bx.x0) / 2)) giantHit(u, G.golpear(u, cx, bx.y0 + 2, dmg * 2));
+        if (dentro(cx, bx.y0, (bx.x1 - bx.x0) / 2)) {
+          const r = G.golpear(u, cx, bx.y0 + 2, dmg * 2);
+          giantHit(u, r);
+          // Gore mode: burnt to the bone where he stood.
+          if (s.gore && r.muerta && u.tipo === 'infanteria' && z.tipo === 'fuego' && !sobreMar(u.x)) {
+            GR.esqueleto(s.sangre, u.x, ground(u.x), true);
+            u.quitar = true;
+            lamentoEn(GR.L_MUERTE, u.x, u.y);
+          }
+        }
       }
       if (z.tipo === 'gas') {
         for (const a of s.aereos) {
@@ -3227,6 +3331,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
         const bx = G.caja(u);
         if (b.x > bx.x0 && b.x < bx.x1 && b.y > bx.y0 && b.y < bx.y1) {
           hit = true;
+          if (s.gore && goreBrazo(u, b.vx)) continue;
           giantHit(u, G.golpear(u, b.x, b.y, 0.25 * bd), b.x, b.y, true);
         }
       }
@@ -4204,7 +4309,9 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Ground units of every size.
     for (const u of s.gigantes) {
       const onScreen = u.x > s.camX - 30 && u.x < s.camX + view.vw + 30 && u.y > s.camY - A.DIRT - 20;
+      const x0 = u.x;
       const r = G.paso(u, vista, dt, ground, { metaX: META_X, disparar: s.mode === 'play' && !s.dead && onScreen });
+      if (mancos.size && mancos.has(u.id)) goreManco(u, x0, dt);
       giantShots(r.disparos);
       giantEvents(r.eventos);
       if (r.llego && G.ROBO[u.tipo] > 0) {
@@ -4839,6 +4946,10 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     VFX.actualizar(s.fx, dt, wind, ground);
     if (s.gore || !GR.vacio(s.sangre)) {
       GR.camara(s.sangre, s.plane.x, s.plane.y, s.mode === 'play' && !s.attract && !s.dead && !s.calma && !still);
+      // Blood on the plane washes off slowly in the air, faster in the storm's rain, at once in the sea.
+      const enAgua = sobreMar(s.plane.x) && s.plane.y - OC.NIVEL_MAR < 8;
+      GR.avion(s.sangre, s.spec.hit, enAgua ? 40 : s.mapa === 'tormenta' ? 1 + 5 * (1 - s.despeje) : 1, s.mode === 'play' && !s.attract && !s.dead);
+      s.sangre.grito = gritoGore;
       GR.actualizar(s.sangre, dt, ground, sobreMar, OC.NIVEL_MAR);
     }
     L.pasoLuces(s.luces, dt);
@@ -5324,6 +5435,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     // Phones, while a half is held: which way the nose is swinging (drawn just under the plane).
     if (!s.dead && turn && view.touch && s.mode === 'play' && !s.despegue) dibujarGuiaGiro(sx(p.x), sy(p.y), p.rumbo);
     if (!s.dead) drawPlaneGiro(g, s.mode === 'demo' ? 'avioneta' : s.spec.id, sx(p.x), sy(p.y), -p.rumbo, giroVisual, s.cargaSuave, s.t, p.gas, blink, s.mode === 'demo' ? [] : s.lost);
+    // Gore mode: red specks on the plane from bursts it flew through.
+    if (!s.dead && s.gore) GR.dibujarAvion(g, s.sangre, sx(p.x), sy(p.y), p.rumbo);
     else if (s.hundido) {
       // Sinking: under the surface, nose dropping, tinted by the water, trailing bubbles.
       const h = s.hundido;
@@ -6223,7 +6336,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
   };
   raf = requestAnimationFrame(frame);
 
-  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, ground, abatirAereo, hurtCar, spawnAir };
+  if (import.meta.env.DEV) (window as unknown as { __vuelo: unknown }).__vuelo = { s, input, view, JF, HG, cambiarMapa, prepararTormenta, cambiarAvion, impactoBomba, hurtFighter, MS, GR, G, AE, CZ, FA, AB, ground, abatirAereo, hurtCar, spawnAir };
 
   return {
     start,
@@ -6261,11 +6374,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     setGore(on: boolean) {
       s.gore = on;
       if (!on) GR.limpiar(s.sangre);
+      else AB.precalentarLamentos();
     },
     setPaused(p: boolean) {
       s.paused = p;
       if (p) AB.detener();
       if (p) S.callar();
+      // Gore mode: bake the mice's cries once the audio is awake (a few at a time).
+      if (!p && s.gore) window.setTimeout(() => AB.precalentarLamentos(), 900);
       if (p) {
         // Nothing stays held across a pause: fingers lifted while paused never send their «up».
         Object.assign(touch, { x: 0, y: 0, gas: 0, fire: false, bomb: false, flare: false, gun: false, nuke: false, tonel: false });
