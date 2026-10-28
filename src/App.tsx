@@ -9,9 +9,9 @@ const loadIslandGame = () => import('./game/IslandGame');
 const loadClassicSite = () => import('./sitio/ClassicSite');
 const loadVuelo = () => import('./vuelo/VueloGame');
 const landingPath = typeof window !== 'undefined' ? window.location.pathname : '/';
-const earlyGame = landingPath === '/' ? loadIslandGame() : null;
-const earlyVuelo = landingPath === '/aviones' ? loadVuelo() : null;
-const earlyClassic = landingPath !== '/' && landingPath !== '/aviones' ? loadClassicSite() : null;
+const earlyGame = landingPath === '/isla' ? loadIslandGame() : null;
+const earlyVuelo = landingPath === '/' || landingPath === '/aviones' ? loadVuelo() : null;
+const earlyClassic = landingPath !== '/' && landingPath !== '/aviones' && landingPath !== '/isla' ? loadClassicSite() : null;
 const IslandGame = lazy(() => earlyGame ?? loadIslandGame());
 const VueloGame = lazy(() => earlyVuelo ?? loadVuelo());
 const ClassicSite = lazy(() => earlyClassic ?? loadClassicSite());
@@ -20,6 +20,10 @@ const ContactComposer = lazy(() => import('./sitio/ContactComposer'));
 
 const ROUTE_META: Record<string, { title: string; description: string }> = {
   '/': {
+    title: 'Escuadrón Dui — Juego de aviones de Daniel Eduardo',
+    description: 'Pilotea el avión de Dui, esquiva misiles y detén a los ratones antes de que lleguen a la despensa. Un juego de Daniel Eduardo.',
+  },
+  '/isla': {
     title: 'Daniel Eduardo — Portafolio interactivo',
     description: 'Explora la isla de Daniel Eduardo: Ingeniero en Informática. Desarrollo web full stack, IoT y soluciones a medida.',
   },
@@ -52,7 +56,7 @@ function getInitialPath() {
   return window.location.pathname;
 }
 
-const KNOWN_ROUTES = ['/', '/aviones', '/clasico', '/proyectos', '/sobre-mi', '/privacidad'];
+const KNOWN_ROUTES = ['/', '/aviones', '/isla', '/clasico', '/proyectos', '/sobre-mi', '/privacidad'];
 
 export default function App() {
   const [pathname, setPathname] = useState<string>(getInitialPath);
@@ -88,8 +92,8 @@ export default function App() {
 
   type Route = 'game' | 'vuelo' | ClassicRoute;
   const route: Route =
-    pathname === '/' ? (gameSupported ? 'game' : 'home') :
-    pathname === '/aviones' ? 'vuelo' :
+    pathname === '/' || pathname === '/aviones' ? 'vuelo' :
+    pathname === '/isla' ? (gameSupported ? 'game' : 'home') :
     pathname === '/clasico' ? 'home' :
     pathname === '/proyectos' ? 'projects' :
     pathname === '/sobre-mi' ? 'about' :

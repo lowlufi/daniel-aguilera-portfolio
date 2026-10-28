@@ -947,7 +947,8 @@ function CommandPalette({ open, onClose, navigate, setManualTheme, openComposer,
 
   const items = useMemo<CommandItem[]>(() => {
     const pages: CommandItem[] = [
-      { id: 'p:game', group: 'Páginas', label: 'Modo juego (isla)', icon: Gamepad2, keywords: 'juego isla ascii', action: () => navigate('/') },
+      { id: 'p:game', group: 'Páginas', label: 'Escuadrón Dui (juego de aviones)', icon: Gamepad2, keywords: 'juego aviones escuadron dui', action: () => navigate('/') },
+      { id: 'p:isla', group: 'Páginas', label: 'Modo juego (isla)', icon: Gamepad2, keywords: 'juego isla ascii', action: () => navigate('/isla') },
       { id: 'p:home', group: 'Páginas', label: 'Inicio (versión clásica)', icon: Home, action: () => navigate('/clasico') },
       { id: 'p:projects', group: 'Páginas', label: 'Proyectos', icon: Folder, action: () => navigate('/proyectos') },
       { id: 'p:about', group: 'Páginas', label: 'Sobre mí', icon: User, action: () => navigate('/sobre-mi') },

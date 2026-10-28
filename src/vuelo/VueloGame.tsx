@@ -1620,7 +1620,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
               <button type="button" aria-label={muted ? 'Activar sonido' : 'Silenciar'} title={muted ? 'Activar sonido' : 'Silenciar'} onClick={toggleMute} className={tecla}>
                 <Px i={muted ? 'mudo' : 'parlante'} s={ic} />
               </button>
-              <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/')} className={`${TECLA} hud-key-amarilla px-3`}>
+              <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/clasico')} className={`${TECLA} hud-key-amarilla px-3`}>
                 danieleduardo.cl
               </button>
             </>
@@ -2018,7 +2018,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                 En iPhone/iPad: toca <b>Compartir</b> (el cuadrado con la flecha) y luego <b>«Agregar a inicio»</b>. Se abrirá a pantalla completa como una app.
               </p>
             )}
-            <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/')} className={`${BTN} h-12 w-full text-base`}>
+            <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/clasico')} className={`${BTN} h-12 w-full text-base`}>
               🏠 danieleduardo.cl
             </button>
           </nav>
@@ -2395,7 +2395,7 @@ export default function VueloGame({ navigate }: { navigate: (to: string) => void
                         Zoom
                       </button>
                     )}
-                    <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/')} className={`${TECLA} px-2.5`}>
+                    <button type="button" aria-label="Ir al portafolio danieleduardo.cl" onClick={() => navigate('/clasico')} className={`${TECLA} px-2.5`}>
                       <Px i="casa" s={2} />
                       danieleduardo.cl
                     </button>
