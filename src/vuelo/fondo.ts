@@ -58,6 +58,54 @@ const css = (c: RGB) => `rgb(${clamp(c[0])},${clamp(c[1])},${clamp(c[2])})`;
 /** ABGR empaquetado para escribir en un ImageData (little-endian). */
 const pack = (c: RGB) => ((255 << 24) | (clamp(c[2]) << 16) | (clamp(c[1]) << 8) | clamp(c[0])) >>> 0;
 
+/**
+ * How much a backdrop is toned down so the planes, enemies and missiles in
+ * front of it read clearly: `desat` 0..1 takes colour out, `velo` 0..1 pulls
+ * it toward `tinte` (a dusk haze), `oscuro` 0..1 darkens. Baked once into a
+ * cached canvas, never per frame.
+ */
+export type Apagado = { desat: number; velo: number; oscuro: number; tinte?: string; luces?: boolean };
+/** A lit window / lamp pixel: bright and warm. Lights keep their colour when a layer is toned down. */
+const esLuz = (r: number, gr: number, b: number) => r > 228 && gr > 186 && b < 175 && r >= gr;
+const apagarRGB = (r: number, gr: number, b: number, o: Apagado, t: RGB): RGB => {
+  const l = 0.299 * r + 0.587 * gr + 0.114 * b;
+  r += (l - r) * o.desat;
+  gr += (l - gr) * o.desat;
+  b += (l - b) * o.desat;
+  const m = 1 - o.oscuro;
+  return [(r + (t[0] - r) * o.velo) * m, (gr + (t[1] - gr) * o.velo) * m, (b + (t[2] - b) * o.velo) * m];
+};
+const TINTE_APAGADO = '#5a5a7a';
+/** Tones down every painted pixel of a canvas, in place (see `Apagado`). */
+export function apagarLienzo(cv: HTMLCanvasElement, o: Apagado): HTMLCanvasElement {
+  if (!cv.width || !cv.height) return cv;
+  const g = cv.getContext('2d')!;
+  const im = g.getImageData(0, 0, cv.width, cv.height);
+  const d = im.data;
+  const t = hex(o.tinte ?? TINTE_APAGADO);
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) continue;
+    if (o.luces && esLuz(d[i], d[i + 1], d[i + 2])) continue;
+    const c = apagarRGB(d[i], d[i + 1], d[i + 2], o, t);
+    d[i] = clamp(c[0]);
+    d[i + 1] = clamp(c[1]);
+    d[i + 2] = clamp(c[2]);
+  }
+  g.putImageData(im, 0, 0);
+  return cv;
+}
+/** The same toning for a flat CSS colour (#hex or rgb()), so fills match their layer. */
+export function apagarColor(c: string, o: Apagado): string {
+  let v: RGB;
+  if (c[0] === '#') v = hex(c);
+  else {
+    const n = c.match(/[\d.]+/g);
+    if (!n || n.length < 3) return c;
+    v = [+n[0], +n[1], +n[2]];
+  }
+  return css(apagarRGB(v[0], v[1], v[2], o, hex(o.tinte ?? TINTE_APAGADO)));
+}
+
 type Paleta = {
   /** Paradas del cielo: [altura sobre el horizonte, color]. */
   cielo: [number, string][];
@@ -698,6 +746,417 @@ function campoEstrellas(capa: number) {
   return b.canvas();
 }
 
+/* ── Luces de la ciudad: ventanas encendidas, resplandor y balizas ────────
+ * At dusk and at night every lit window and lamp of a painted layer gets a
+ * soft warm glow: found once by scanning the layer for light pixels, stamped
+ * in a half-resolution canvas and added on top ('lighter') when drawn — a
+ * cheap bloom with no blur. A sample of the windows switches off and on over
+ * time (one or other flickers blue with a TV), and the cranes' red aviation
+ * lights blink. None of it by day. */
+
+/** A painted landscape layer: the strip, the flat fill under it, and its lights after dark. */
+type Capa = { cv: Cv; fondo: string; luz?: Cv | null; vent?: Int16Array; balizas?: number[] };
+/** While a layer is painted, cranes push their beacon spots here (layer px). */
+let balizasCaptura: number[] | null = null;
+const CRUZ: [number, number][] = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+const VIDRIO_APAGADO = ['#3a3460', '#4a3a5a'];
+
+function encender(c: Capa, a: Ambiente): Capa {
+  if (a === 'dia') return c;
+  const W = c.cv.width;
+  const H = c.cv.height;
+  if (!W || !H) return c;
+  const d = c.cv.getContext('2d')!.getImageData(0, 0, W, H).data;
+  const w2 = (W + 1) >> 1;
+  const h2 = (H + 1) >> 1;
+  const b = new Buf(w2, h2);
+  const fuerte = P(a === 'noche' ? '#6a4418' : '#4a3018');
+  const suave = P(a === 'noche' ? '#2e1e0c' : '#22180c');
+  const vent: number[] = [];
+  let n = 0;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      if (d[i + 3] < 255 || !esLuz(d[i], d[i + 1], d[i + 2])) continue;
+      const X = x >> 1;
+      const Y = y >> 1;
+      if (b.d[Y * w2 + X] === fuerte) continue;
+      n++;
+      b.d[Y * w2 + X] = fuerte;
+      for (const [dx, dy] of CRUZ) {
+        const xx = X + dx;
+        const yy = Y + dy;
+        if (xx < 0 || yy < 0 || xx >= w2 || yy >= h2) continue;
+        if (b.d[yy * w2 + xx] !== fuerte) b.d[yy * w2 + xx] = suave;
+      }
+      // A sample of windows that will switch off and on.
+      if (vent.length < 240 && ((x * 7 + y * 13) & 7) === 0) vent.push(x, y);
+    }
+  c.luz = n ? b.canvas() : null;
+  c.vent = Int16Array.from(vent);
+  return c;
+}
+
+/** Adds a layer's lights where it was drawn, at (x, top). `t` drives the flicker. */
+function lucesCapa(g: Ctx, c: Capa, x: number, top: number, vw: number, vh: number, t: number, quieto: boolean, hVis = 1e9) {
+  if (!c.luz && !c.balizas?.length) return;
+  const W = c.cv.width;
+  const hv = Math.min(c.cv.height, hVis);
+  if (hv <= 0 || x > vw || x + W < 0 || top > vh || top + hv < 0) return;
+  if (c.luz) {
+    const h2 = Math.min(c.luz.height, Math.ceil(hv / 2));
+    g.globalCompositeOperation = 'lighter';
+    g.drawImage(c.luz, 0, 0, c.luz.width, h2, x, top, c.luz.width * 2, h2 * 2);
+    g.globalCompositeOperation = 'source-over';
+  }
+  const v = c.vent;
+  if (v && !quieto)
+    for (let i = 0; i < v.length; i += 2) {
+      const wx = x + v[i];
+      if (wx < 0 || wx >= vw) continue;
+      if (v[i + 1] >= hv) continue;
+      const wy = top + v[i + 1];
+      if (wy < 0 || wy >= vh) continue;
+      const j = i >> 1;
+      const per = 7 + (j % 9);
+      const h = (Math.floor((t + j * 1.7) / per) * 131 + j * 977) % 29;
+      if (h < 4) {
+        g.fillStyle = VIDRIO_APAGADO[j & 1];
+        g.fillRect(wx, wy, 1, 1);
+      } else if (h === 4) {
+        g.fillStyle = Math.floor(t * 9 + j) % 3 ? '#a8c4ff' : '#d8e4ff';
+        g.fillRect(wx, wy, 1, 1);
+      }
+    }
+  const bz = c.balizas;
+  if (bz)
+    for (let i = 0; i < bz.length; i += 2) {
+      const bx = x + bz[i];
+      if (bz[i + 1] >= hv) continue;
+      const by = top + bz[i + 1];
+      if (bx < -2 || bx > vw + 2 || by < -2 || by > vh + 2) continue;
+      if (!quieto && Math.floor(t * 1.2 + i * 0.37) % 2) continue;
+      g.fillStyle = '#ff5a5a';
+      g.fillRect(bx, by, 1, 1);
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = '#5a1414';
+      g.fillRect(bx - 1, by, 3, 1);
+      g.fillRect(bx, by - 1, 1, 3);
+      g.globalCompositeOperation = 'source-over';
+    }
+}
+/** The same, for a layer repeating in x (drawn with `tira`). */
+function lucesTira(g: Ctx, c: Capa, off: number, yBase: number, vw: number, vh: number, t: number, quieto: boolean, hundida = 0) {
+  if (!c.luz && !c.balizas?.length) return;
+  const W = c.cv.width;
+  const hv = c.cv.height - Math.max(0, Math.round(hundida));
+  const top = Math.round(yBase - hv);
+  if (hv <= 0 || top >= vh || top + hv <= 0) return;
+  for (let x = -mod(Math.round(off), W); x < vw; x += W) lucesCapa(g, c, x, top, vw, vh, t, quieto, hv);
+}
+
+/* ── Luces del suelo (la tira de primer plano): ventanas y faroles ─────────
+ * The ground strips (San Antonio's houses, Valparaíso's cerros) are painted
+ * by day. For dusk and night their window glass (#8ccaf8 / #e4f6ff) is found
+ * once and copied, lit warm, into two overlays: windows that light up at
+ * dusk and ones that only light up at night (so they come on progressively),
+ * plus a half-res glow. Street lamps are found by their gold head under a
+ * dark arm; each throws a cone and a pool of light on the ground. */
+
+export type LucesSuelo = { a: Cv; b: Cv; brillo: Cv; faroles: Int16Array };
+
+export function lucesDeSuelo(cv: Cv): LucesSuelo {
+  const W = cv.width;
+  const H = cv.height;
+  const src = cv.getContext('2d')!.getImageData(0, 0, W, H);
+  const v = new Uint32Array(src.data.buffer);
+  const gl1 = P('#8ccaf8');
+  const gl2 = P('#e4f6ff');
+  const oro = P('#fff6b0');
+  const A = new Buf(W, H);
+  const B = new Buf(W, H);
+  const w2 = (W + 1) >> 1;
+  const h2 = (H + 1) >> 1;
+  const glow = new Buf(w2, h2);
+  const luz = P('#ffd870');
+  const luz2 = P('#fff4c0');
+  const fuerte = P('#5a3a14');
+  const suave = P('#28180a');
+  const halo = (x: number, y: number, r: number) => {
+    const X = x >> 1;
+    const Y = y >> 1;
+    for (let dy = -r; dy <= r; dy++)
+      for (let dx = -r; dx <= r; dx++) {
+        const xx = X + dx;
+        const yy = Y + dy;
+        if (xx < 0 || yy < 0 || xx >= w2 || yy >= h2) continue;
+        const d = Math.abs(dx) + Math.abs(dy);
+        if (d > r) continue;
+        const i = yy * w2 + xx;
+        if (d === 0) glow.d[i] = fuerte;
+        else if (glow.d[i] !== fuerte && ((xx + yy) & 1 || d === 1)) glow.d[i] = suave;
+      }
+  };
+  const oscuro = (c: number) => c >>> 24 === 255 && (c & 255) * 0.3 + ((c >> 8) & 255) * 0.59 + ((c >> 16) & 255) * 0.11 < 110;
+  const faroles: number[] = [];
+  for (let y = 1; y < H - 1; y++)
+    for (let x = 2; x < W - 2; x++) {
+      const c = v[y * W + x];
+      if (c === gl1 || c === gl2) {
+        // Windows in 8×8 cells: half light up at dusk, more at night, some stay dark.
+        const h = (((x >> 3) * 73856093) ^ ((y >> 3) * 19349663)) >>> 0;
+        const q = h % 10;
+        if (q >= 8) continue;
+        (q < 4 ? A : B).d[y * W + x] = c === gl2 ? luz2 : luz;
+        if (((x + y) & 3) === 0) halo(x, y, 1);
+      } else if (c === oro && v[y * W + x + 1] === oro && v[(y + 1) * W + x] === oro && oscuro(v[(y - 1) * W + x - 2]) && oscuro(v[(y - 1) * W + x])) {
+        faroles.push(x + 1, y + 1);
+        halo(x + 1, y, 3);
+      }
+    }
+  return { a: A.canvas(), b: B.canvas(), brillo: glow.canvas(), faroles: Int16Array.from(faroles) };
+}
+
+const CONOS = new Map<number, Cv>();
+/** A street lamp's light: a dithered cone down to the ground and a pool on it (drawn 'lighter'). */
+function conoFarol(alto: number): Cv {
+  let c = CONOS.get(alto);
+  if (c) return c;
+  const W = 31;
+  const b = new Buf(W, alto + 4);
+  const cx = 15;
+  const tenue = P('#2a1c0a');
+  const medio = P('#4a3414');
+  for (let dy = 0; dy <= alto; dy++) {
+    const w = 1 + Math.round(dy * 0.45);
+    for (let dx = -w; dx <= w; dx++) if (tramado(cx + dx, dy, 0.35 - (dy / alto) * 0.15)) b.px(cx + dx, dy, tenue);
+  }
+  // The pool on the ground.
+  for (let dx = -14; dx <= 14; dx++) {
+    const k = 1 - Math.abs(dx) / 15;
+    for (let dy = alto; dy < alto + 3; dy++) if (tramado(cx + dx, dy, k * 0.8)) b.px(cx + dx, dy, k > 0.6 ? medio : tenue);
+  }
+  c = b.canvas();
+  CONOS.set(alto, c);
+  return c;
+}
+
+/**
+ * Draws a strip's night lights at (x0, y0) on screen (`cam` = its left in world
+ * px), with the hour's darkness `k` (0 day … 1 night) and the ground row under
+ * each lamp (`suelo`, strip px → screen y).
+ */
+export function dibujarLucesSuelo(g: Ctx, L: LucesSuelo, cam: number, y0: number, vw: number, k: number, t: number, suelo: (x: number) => number) {
+  if (k <= 0.02) return;
+  const H = L.a.height;
+  const kA = Math.min(1, Math.max(0, (k - 0.2) / 0.3));
+  const kB = Math.min(1, Math.max(0, (k - 0.6) / 0.3));
+  if (kA > 0) {
+    g.globalAlpha = kA;
+    g.drawImage(L.a, cam, 0, vw, H, 0, y0, vw, H);
+  }
+  if (kB > 0) {
+    g.globalAlpha = kB;
+    g.drawImage(L.b, cam, 0, vw, H, 0, y0, vw, H);
+  }
+  g.globalCompositeOperation = 'lighter';
+  g.globalAlpha = Math.max(kA, kB);
+  const c2 = Math.floor(cam / 2);
+  const w2 = Math.ceil(vw / 2) + 1;
+  g.drawImage(L.brillo, c2, 0, w2, L.brillo.height, c2 * 2 - cam, y0, w2 * 2, L.brillo.height * 2);
+  // Street lamps: on from dusk, a gentle hum in the light.
+  const f = L.faroles;
+  for (let i = 0; i < f.length; i += 2) {
+    const x = f[i] - cam;
+    if (x < -20 || x > vw + 20) continue;
+    const yh = y0 + f[i + 1];
+    const alto = Math.max(4, Math.min(40, suelo(f[i]) - yh));
+    const s = conoFarol(alto);
+    g.globalAlpha = kA * (0.9 + 0.1 * Math.sin(t * 7 + i));
+    g.drawImage(s, x - 15, yh);
+  }
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = 1;
+}
+
+/* ── Cielo estrellado: estrellas en todo el cielo de noche ─────────────────
+ * Three star tiles that wrap in x and y (stars are placed on a torus, so the
+ * repeat never shows a seam), a faint Milky Way band that repeats in x, and a
+ * pool of twinkling coloured stars in screen space. They cover every row of
+ * sky at any altitude and zoom; the landscape and the sea of clouds are drawn
+ * on top, so nothing needs clipping. */
+
+/** Pinta un píxel envuelto en x e y (mosaico sin costuras). */
+const pxT = (b: Buf, x: number, y: number, c: number) => {
+  const X = mod(Math.round(x), b.w);
+  const Y = mod(Math.round(y), b.h);
+  b.d[Y * b.w + X] = c;
+};
+
+/** `capa` 0 = polvo de estrellas tenue, 1 = estrellas medianas de colores, 2 = las brillantes. */
+function tejidoEstrellas(capa: number) {
+  const [W, H] = capa === 0 ? [320, 240] : capa === 1 ? [288, 208] : [352, 256];
+  const b = new Buf(W, H);
+  const r = rng(900 + capa * 17);
+  if (capa === 0) {
+    const cs = ['#4e4892', '#5c56a0', '#6a62ac', '#58509a', '#6e5a9e', '#4a5498'].map(P);
+    for (let i = 0; i < 560; i++) pxT(b, r() * W, r() * H, cs[Math.floor(r() * cs.length)]);
+  } else if (capa === 1) {
+    const cs = ['#b8b0e8', '#dcd6fa', '#fff0d0', '#ffd2e6', '#c4ecff', '#e8e4ff', '#ffe0b8'].map(P);
+    const tenue = P('#5a529c');
+    for (let i = 0; i < 170; i++) {
+      const x = r() * W;
+      const y = r() * H;
+      pxT(b, x, y, cs[Math.floor(r() * cs.length)]);
+      // A few are 2 px: a dim neighbour makes them look a touch bigger.
+      if (r() < 0.22) pxT(b, x + (r() < 0.5 ? 1 : -1), y, tenue);
+    }
+  } else {
+    const blanco = P('#ffffff');
+    const brazo = ['#a89ce0', '#c8a8e0', '#a8c4f0', '#d8b8a8'].map(P);
+    const gemas = ['#ffb894', '#a8d8ff', '#ffe89a', '#ffc4e0'].map(P);
+    for (let i = 0; i < 30; i++) {
+      const x = Math.floor(r() * W);
+      const y = Math.floor(r() * H);
+      const k = i % 5;
+      if (k === 0 || k === 3) {
+        // A small cross: white heart, tinted arms.
+        const t = brazo[Math.floor(r() * brazo.length)];
+        pxT(b, x, y, blanco);
+        pxT(b, x - 1, y, t);
+        pxT(b, x + 1, y, t);
+        pxT(b, x, y - 1, t);
+        pxT(b, x, y + 1, t);
+      } else if (k === 1) {
+        // A coloured giant: 2×2 with one bright corner.
+        const c = gemas[Math.floor(r() * gemas.length)];
+        pxT(b, x, y, c);
+        pxT(b, x + 1, y, c);
+        pxT(b, x, y + 1, c);
+        pxT(b, x + 1, y + 1, blanco);
+      } else pxT(b, x, y, gemas[i % gemas.length]);
+    }
+  }
+  return b.canvas();
+}
+
+const VIA_W = 768;
+const VIA_H = 150;
+/** La Vía Láctea: una cinta tenue y ondulada de bruma tramada, polvo oscuro y muchas estrellitas. */
+function viaLactea() {
+  const W = VIA_W;
+  const H = VIA_H;
+  const b = new Buf(W, H);
+  const r = rng(4242);
+  const u = (x: number) => (x / W) * TAU;
+  const centro = (x: number) => H / 2 + 20 * Math.sin(u(x)) + 8 * Math.sin(3 * u(x) + 1.3);
+  const ancho = (x: number) => 24 + 9 * Math.sin(2 * u(x) + 0.7) + 4 * Math.sin(5 * u(x));
+  const cs = ['#2a2466', '#342e76', '#433a86', '#5a4a98', '#7a5ea6'].map(P);
+  for (let x = 0; x < W; x++) {
+    const yc = centro(x);
+    const w = ancho(x);
+    const grumo = 0.8 + 0.2 * Math.sin(u(x) * 11 + 0.4) * Math.sin(u(x) * 7);
+    const polvo = yc + 3 * Math.sin(u(x) * 4 + 2);
+    for (let y = 0; y < H; y++) {
+      const v = (y - yc) / w;
+      let d = Math.exp(-v * v * 1.6) * grumo;
+      // A dark lane of dust along the middle.
+      if (Math.abs(y - polvo) < 2.5) d *= 0.62;
+      let c = -1;
+      if (d > 0.82) c = tramado(x, y, (d - 0.82) / 0.18) ? 4 : 3;
+      else if (d > 0.6) c = tramado(x, y, (d - 0.6) / 0.22) ? 3 : 2;
+      else if (d > 0.36) c = tramado(x, y, (d - 0.36) / 0.24) ? 2 : 1;
+      else if (d > 0.14) c = tramado(x, y, (d - 0.14) / 0.22) ? 1 : tramado(x, y, 0.3) ? 0 : -1;
+      if (c >= 0) b.d[y * W + x] = cs[c];
+    }
+  }
+  // Clusters of tiny stars, thick in the band.
+  const est = ['#e8e0ff', '#fff4dc', '#cfe8ff', '#ffd8ec', '#9a90d8'].map(P);
+  for (let i = 0; i < 900; i++) {
+    const x = r() * W;
+    const g = (r() + r() + r() - 1.5) / 1.5;
+    const y = centro(x) + g * ancho(x) * 1.3;
+    if (y < 1 || y >= H - 1) continue;
+    pxT(b, x, y, est[i % 9 === 0 ? 0 : i % 5 === 0 ? 1 : i % 7 === 0 ? 3 : i % 3 === 0 ? 2 : 4]);
+  }
+  return b.canvas();
+}
+
+/** Estrellas que titilan por todo el cielo (posición en fracción de pantalla). */
+const TITILA_CIELO: { x: number; y: number; f: number; c: number; v: number }[] = (() => {
+  const r = rng(321);
+  return Array.from({ length: 64 }, () => ({ x: r(), y: r(), f: r() * 10, c: Math.floor(r() * 6), v: 1.2 + r() * 1.6 }));
+})();
+const COLOR_TITILA_CIELO = ['#ffffff', '#fff0c4', '#ffd6ec', '#d4f4ff', '#ffc4a0', '#c8d0ff'];
+
+type Noche = { estrellas: Cv[]; via: Cv };
+const tareasNoche = (): Tarea<Noche>[] => [
+  (c) => (c.estrellas = [tejidoEstrellas(0), tejidoEstrellas(1)]),
+  (c) => c.estrellas!.push(tejidoEstrellas(2)),
+  (c) => (c.via = viaLactea()),
+];
+
+/**
+ * The starry sky over the whole screen, down to `yLim` (screen row). `k` is
+ * how strongly it shows (night 1, high day sky a little). `cy` is the camera
+ * in sky altitude, for a gentle vertical parallax.
+ */
+function cieloEstrellado(g: Ctx, o: OpcionesFondo, N: Noche, k: number, yLim: number, cy: number, t: number, via: number) {
+  const { vw, vh, camX } = o;
+  const y1 = Math.min(vh, Math.round(yLim));
+  if (y1 <= 0 || k <= 0.01) return;
+  // The Milky Way: a soft band across the upper sky, sliding down slowly as we climb.
+  const yv = Math.round(vh * 0.16 + (cy - 900) * 0.04);
+  if (via > 0.01 && yv < y1 && yv + VIA_H > 0) {
+    g.globalAlpha = k * 0.55 * via;
+    const W = VIA_W;
+    const h = Math.min(VIA_H, y1 - yv);
+    for (let x = -mod(Math.round(camX * 0.015 + 210), W); x < vw; x += W) g.drawImage(N.via, 0, 0, W, h, x, yv, W, h);
+  }
+  const E = N.estrellas;
+  g.globalAlpha = k;
+  mosaico(g, E[0], camX * 0.01 + 37, 113 - cy * 0.02, vw, y1);
+  g.globalAlpha = k * 0.95;
+  mosaico(g, E[1], camX * 0.025 + 151, 61 - cy * 0.04, vw, y1);
+  mosaico(g, E[2], camX * 0.04 + 89, 7 - cy * 0.06, vw, y1);
+  // Twinkling stars: 1 px at rest, a 2 px cross when they flare.
+  for (let i = 0; i < TITILA_CIELO.length; i++) {
+    const s = TITILA_CIELO[i];
+    const x = Math.round(mod(s.x * (vw + 20) - camX * 0.03, vw + 20)) - 10;
+    const y = Math.round(mod(s.y * (vh + 20) + cy * 0.05, vh + 20)) - 10;
+    if (y >= y1 - 2 || y < -3) continue;
+    const ph = o.quieto ? 0 : Math.sin(t * s.v + s.f * 6);
+    g.fillStyle = COLOR_TITILA_CIELO[s.c];
+    g.globalAlpha = k * (ph > -0.5 ? 1 : 0.6);
+    g.fillRect(x, y, 1, 1);
+    if (ph > 0.15) {
+      g.fillRect(x - 1, y, 3, 1);
+      g.fillRect(x, y - 1, 1, 3);
+    }
+    if (ph > 0.85) {
+      g.fillRect(x - 2, y, 5, 1);
+      g.fillRect(x, y - 2, 1, 5);
+    }
+  }
+  // A shooting star now and then, anywhere in the sky.
+  if (!o.quieto) {
+    const PER = 5.3;
+    const ciclo = Math.floor(t / PER);
+    const f = t / PER - ciclo;
+    if (f < 0.085 && ciclo % 3 !== 2) {
+      const q = f / 0.085;
+      const sx = ((ciclo * 619) % 97) / 97;
+      const sy = ((ciclo * 283) % 89) / 89;
+      const y = Math.round(y1 * (0.08 + sy * 0.55) + q * 26);
+      if (y < y1 - 4) {
+        g.globalAlpha = k * (q < 0.8 ? 1 : (1 - q) * 5);
+        fugaz(g, Math.round(vw * (0.08 + sx * 0.78) + q * 64), y, '#ffffff', ciclo % 2 ? '#ffd0e8' : '#c8ecff', 6 + (ciclo % 3));
+      }
+    }
+  }
+  g.globalAlpha = 1;
+}
+
 /** Nebulosa pastel tramada: nubes de gas en tres densidades y un corazón. */
 function nebulosa(seed: number, cols: string[], W = 230, H = 136) {
   const b = new Buf(W, H);
@@ -1023,7 +1482,7 @@ const LUCIERNAGAS: { x: number; e: number; f: number }[] = (() => {
   return Array.from({ length: 22 }, () => ({ x: r() * 1, e: 4 + r() * 30, f: r() * 10 }));
 })();
 /** Cirros altos: `el` es la altitud de cámara a la que pasan por el centro. */
-const CIRROS_ALTOS = mkNubes(41, 9, 620, 1650, 4, 1.2);
+const CIRROS_ALTOS = mkNubes(41, 14, 620, 1650, 4, 1.2);
 const TITILA_ALTA: { x: number; y: number; f: number; c: number }[] = (() => {
   const r = rng(57);
   return Array.from({ length: 26 }, () => ({ x: r(), y: r(), f: r() * 10, c: Math.floor(r() * 4) }));
@@ -1346,6 +1805,7 @@ function grua(b: Buf, m: Pinta, x: number, yb: number, alto: number, ventana: Ve
     b.px(x + 12 - Math.round(i * 0.45), top - 1 - i, tinta);
   }
   b.rect(x + 4, top - 14, 5, 2, rojo);
+  balizasCaptura?.push(x + 6, top - 15, x - 29, top - 1);
   b.rect(x - 14, top + 3, 5, 4, blanco);
   b.px(x - 13, top + 4, ventana());
   for (let y = top + 3; y < top + 18; y++) b.px(x - 21, y, tinta);
@@ -1795,6 +2255,8 @@ const BRILLO: Record<Ambiente, [string, string]> = {
 type Mar = {
   /** San Antonio, open coast and Valparaíso. */
   costas: Cv[];
+  /** Their night lights (glow + windows); no lights by day. */
+  costasLuz: Capa[];
   bandas: { cv: Cv; fondo: string; lejos: string }[];
   veleros: Cv[];
   buques: Cv[];
@@ -1804,6 +2266,7 @@ const tareasMar = (a: Ambiente): Tarea<Mar>[] => [
   (c) => (c.costas = [capaSanAntonio(a).canvas()]),
   (c) => c.costas!.push(capaCosta(a).canvas()),
   (c) => c.costas!.push(capaValparaiso(a).canvas()),
+  (c) => (c.costasLuz = c.costas!.map((cv) => encender({ cv, fondo: '' }, a))),
   (c) => (c.bandas = [0, 1, 2].map((i) => capaBanda(a, i))),
   (c) => c.bandas!.push(capaBanda(a, 3), capaBanda(a, 4)),
   (c) => ((c.veleros = [0, 1, 2].map((i) => velero(a, i))), (c.buques = [buque(a, 0), buque(a, 1)])),
@@ -1890,6 +2353,7 @@ function gruaGrande(b: Buf, m: Pinta, x: number, yb: number, alto: number, celes
     b.px(x + 12 - Math.round(i * 2.6), top - 2 - Math.round(i * 0.9), tinta);
   }
   b.rect(x + 8, top - 25, 8, 3, col);
+  balizasCaptura?.push(x + 11, top - 26, x - 63, top - 2);
   b.rect(x - 30, top + 4, 8, 6, blanco);
   b.rect(x - 29, top + 5, 6, 2, ventana());
   for (let y = top + 4; y < top + 34; y++) b.px(x - 46, y, tinta);
@@ -2218,11 +2682,33 @@ function capaSACerca(a: Ambiente) {
   return { cv: b.canvas(), fondo: css(mat(a, '#6fa8c9', kk)) };
 }
 
-type SA = { lejos: { cv: Cv; fondo: string }; medio: { cv: Cv; fondo: string }; cerca: { cv: Cv; fondo: string } };
+type SA = { lejos: Capa; medio: Capa; cerca: Capa };
+/*
+ * San Antonio is the busiest, brightest map: its backdrop is toned down more
+ * (less colour, a dusk haze that grows with distance) so the enemies over it
+ * stand out. Night is already dark, so it only takes a little colour out.
+ */
+const APAGADO_SA: Record<Ambiente, [Apagado, Apagado, Apagado]> = {
+  dia: [{ desat: 0.4, velo: 0.22, oscuro: 0.1 }, { desat: 0.36, velo: 0.14, oscuro: 0.1 }, { desat: 0.3, velo: 0.08, oscuro: 0.1 }],
+  tarde: [{ desat: 0.35, velo: 0.18, oscuro: 0.08, tinte: '#6a4a6e', luces: true }, { desat: 0.3, velo: 0.12, oscuro: 0.08, tinte: '#6a4a6e', luces: true }, { desat: 0.25, velo: 0.06, oscuro: 0.08, tinte: '#6a4a6e', luces: true }],
+  noche: [{ desat: 0.25, velo: 0.1, oscuro: 0.04, tinte: '#2a2048', luces: true }, { desat: 0.2, velo: 0.06, oscuro: 0.04, tinte: '#2a2048', luces: true }, { desat: 0.15, velo: 0, oscuro: 0.04, luces: true }],
+};
+const apagarCapa = (c: Capa, o: Apagado): Capa => ({ ...c, cv: apagarLienzo(c.cv, o), fondo: apagarColor(c.fondo, o) });
+/** Paints a layer while catching the cranes' aviation-light spots. */
+const conBalizas = (pinta: () => Capa): Capa => {
+  balizasCaptura = [];
+  const c = pinta();
+  c.balizas = balizasCaptura;
+  balizasCaptura = null;
+  return c;
+};
 const tareasSA = (a: Ambiente): Tarea<SA>[] => [
   (c) => (c.lejos = capaSALejos(a)),
-  (c) => (c.medio = capaSAMedio(a)),
-  (c) => (c.cerca = capaSACerca(a)),
+  (c) => (c.lejos = encender(apagarCapa(c.lejos!, APAGADO_SA[a][0]), a)),
+  (c) => (c.medio = conBalizas(() => capaSAMedio(a))),
+  (c) => (c.medio = encender(apagarCapa(c.medio!, APAGADO_SA[a][1]), a)),
+  (c) => (c.cerca = conBalizas(() => capaSACerca(a))),
+  (c) => (c.cerca = encender(apagarCapa(c.cerca!, APAGADO_SA[a][2]), a)),
 ];
 
 /* ── The Valparaíso map's backdrop: the bay, far ridges and the cerros ─── */
@@ -2405,18 +2891,18 @@ function capaNorte(a: Ambiente, e: 1 | 2): Norte {
 }
 
 type Valpo = {
-  lejos: { cv: Cv; fondo: string };
-  medio: { cv: Cv; fondo: string };
-  cerca: { cv: Cv; fondo: string };
+  lejos: Capa;
+  medio: Capa;
+  cerca: Capa;
   bruma: Cv;
   norteMedio: Norte;
   norteCerca: Norte;
 };
 
 const tareasValpo = (a: Ambiente): Tarea<Valpo>[] => [
-  (c) => (c.lejos = capaCerrosLejos(a)),
-  (c) => (c.medio = capaCerrosMedio(a)),
-  (c) => (c.cerca = capaCerrosCerca(a)),
+  (c) => (c.lejos = encender(capaCerrosLejos(a), a)),
+  (c) => (c.medio = encender(conBalizas(() => capaCerrosMedio(a)), a)),
+  (c) => (c.cerca = encender(capaCerrosCerca(a), a)),
   (c) => (c.bruma = capaNiebla(a, 0.7)),
   (c) => {
     c.norteMedio = capaNorte(a, 1);
@@ -2566,13 +3052,19 @@ function estelaAlta() {
 
 /** A soft dithered haze band (the bright edge of the atmosphere). */
 function bandaBruma(a: Ambiente) {
-  const W = 64;
-  const H = 24;
+  // A wavy, uneven ribbon of haze (a straight dithered stripe read as a glitch line).
+  const W = 640;
+  const H = 40;
   const b = new Buf(W, H);
   const col = pack(hex(a === 'noche' ? '#5a5a98' : a === 'tarde' ? '#ffd8c0' : '#dceaff'));
-  for (let y = 0; y < H; y++) {
-    const k = 1 - Math.abs(y - H / 2) / (H / 2);
-    for (let x = 0; x < W; x++) if (tramado(x, y, k * 0.55)) b.d[y * W + x] = col;
+  for (let x = 0; x < W; x++) {
+    const u = (x / W) * TAU;
+    const c = H / 2 + 7 * Math.sin(2 * u) + 3 * Math.sin(5 * u + 1);
+    const h = 4 + 6 * (0.5 + 0.5 * Math.sin(3 * u + 2)) * (0.6 + 0.4 * Math.sin(7 * u));
+    for (let y = 0; y < H; y++) {
+      const k = 1 - Math.abs(y - c) / h;
+      if (k > 0 && tramado(x, y, k * 0.5)) b.d[y * W + x] = col;
+    }
   }
   return b.canvas();
 }
@@ -3378,7 +3870,38 @@ function ballenaLejos(glow: boolean) {
   return [lomo.canvas(), cola.canvas(), cria.canvas()];
 }
 
-type Tormenta = { techo: Cv; techo2: Cv; techoLuz: Cv; banco: Cv; bancoLuz: Cv; cortina: Cv; rayo: Cv; luna: Cv; ballenas: Cv[]; ballenasGlow: Cv[] };
+/** Scud: a low ragged rag of storm cloud racing under the ceiling, its belly fraying into dither. */
+function jiron(w: number, seed: number) {
+  const H = Math.round(w * 0.26) + 6;
+  const b = new Buf(w, H);
+  const r = rng(seed);
+  const [tinta, cuerpo, luz, sombra] = ['#1e1c38', '#3c3a68', '#6a68a6', '#2c2a50'].map(P);
+  const bolas: [number, number, number, number][] = [];
+  const n = 3 + Math.floor(w / 22);
+  for (let i = 0; i < n; i++) {
+    const u = (i + 0.5) / n;
+    const rx = Math.round(w * (0.1 + 0.08 * r()) * Math.sin(u * Math.PI) + 4);
+    bolas.push([Math.round(w * u), Math.round(H * 0.45 + (r() - 0.5) * 4), rx, Math.max(3, Math.round(rx * (0.45 + 0.2 * r())))]);
+  }
+  for (const [x, y, rx, ry] of bolas) b.oval(x, y, rx + 1, ry + 1, tinta);
+  for (const [x, y, rx, ry] of bolas) b.oval(x, y, rx, ry, sombra);
+  for (const [x, y, rx, ry] of bolas) b.oval(x - 1, y - 1, rx - 2, Math.max(1, ry - 2), cuerpo);
+  for (const [x, y, rx, ry] of bolas) if (rx > 6) b.rect(x - Math.round(rx * 0.5), y - ry + 1, Math.round(rx * 0.7), 1, luz);
+  // Frayed belly: knock out a dither of the lower rows.
+  for (let y = Math.round(H * 0.55); y < H; y++) {
+    const k = (y - H * 0.55) / (H * 0.45);
+    for (let x = 0; x < w; x++) if (b.d[y * w + x] && tramado(x, y, k * 0.9)) b.d[y * w + x] = 0;
+  }
+  return b.canvas();
+}
+/** Scud under the storm ceiling: [world x, row (fraction of the screen), parallax, speed, sprite]. */
+const JIRONES: [number, number, number, number, number][] = [
+  [100, 0.3, 0.12, 22, 0], [700, 0.42, 0.18, 30, 1], [1250, 0.27, 0.1, 18, 2], [1700, 0.5, 0.24, 36, 3], [2150, 0.36, 0.14, 26, 1], [450, 0.56, 0.3, 42, 2],
+];
+/** Rain falling from the ceiling, far off: [world x, width ×10, drift]. */
+const LLUVIA_ALTA: [number, number, number][] = [[200, 22, 4], [900, 30, 6], [1500, 18, 3], [2000, 26, 5]];
+
+type Tormenta = { techo: Cv; techo2: Cv; techoLuz: Cv; banco: Cv; bancoLuz: Cv; cortina: Cv; rayo: Cv; luna: Cv; ballenas: Cv[]; ballenasGlow: Cv[]; jirones: Cv[] };
 const NUBE_TORM: [string, string, string, string] = ['#141228', '#2a2848', '#6e6cae', '#1e1c38'];
 const NUBE_TORM2: [string, string, string, string] = ['#1c1a36', '#3a3866', '#8a88c8', '#2a2850'];
 const NUBE_LUZ: [string, string, string, string] = ['#5a5aa0', '#a8aee8', '#e6ecff', '#8088c8'];
@@ -3388,6 +3911,7 @@ const tareasTormenta = (): Tarea<Tormenta>[] => [
   (c) => ((c.banco = bancoTormenta(NUBE_TORM2)), (c.bancoLuz = bancoTormenta(NUBE_LUZ))),
   (c) => ((c.cortina = cortinaLluvia()), (c.rayo = rayoLejano()), (c.luna = lunaLlena())),
   (c) => ((c.ballenas = ballenaLejos(false)), (c.ballenasGlow = ballenaLejos(true))),
+  (c) => (c.jirones = [110, 150, 180, 130].map((w, i) => jiron(w, 870 + i))),
 ];
 const TORMENTA = new Obra(tareasTormenta());
 
@@ -3421,7 +3945,8 @@ for (const a of AMBIENTES) {
   MAR[a] = new Obra(tareasMar(a));
 }
 const ESPACIO = new Obra(tareasEspacio());
-const ORDEN: Obra<unknown>[] = [BAJO.dia, SANANTONIO.dia, BAJO.tarde, SANANTONIO.tarde, BAJO.noche, SANANTONIO.noche, ESPACIO, ALTO.dia, ALTO.tarde, ALTO.noche, MAR.dia, MAR.tarde, MAR.noche, VALPO.dia, VALPO.tarde, VALPO.noche, VIDA.dia, VIDA.tarde, VIDA.noche] as Obra<unknown>[];
+const NOCHE = new Obra(tareasNoche());
+const ORDEN: Obra<unknown>[] = [BAJO.dia, SANANTONIO.dia, BAJO.tarde, SANANTONIO.tarde, BAJO.noche, NOCHE, SANANTONIO.noche, ESPACIO, ALTO.dia, ALTO.tarde, ALTO.noche, MAR.dia, MAR.tarde, MAR.noche, VALPO.dia, VALPO.tarde, VALPO.noche, VIDA.dia, VIDA.tarde, VIDA.noche] as Obra<unknown>[];
 
 ORDEN.push(TORMENTA as Obra<unknown>);
 
@@ -3520,6 +4045,48 @@ function lucesOvni(g: Ctx, x: number, y: number, t: number) {
     g.fillStyle = LUCES_OVNI[(i + Math.floor(t * 6)) % 4];
     g.fillRect(x + 6 + i * 5, y + 12, 2, 1);
   }
+}
+
+const ANILLOS = new Map<string, Cv>();
+/** A dithered flare ring (or disc), cached by radius and colour; drawn 'lighter'. */
+function anilloFlare(r: number, col: string, lleno: boolean): Cv {
+  const key = `${r}${col}${lleno ? 1 : 0}`;
+  let c = ANILLOS.get(key);
+  if (c) return c;
+  const b = new Buf(2 * r + 3, 2 * r + 3);
+  const p = P(col);
+  for (let y = -r - 1; y <= r + 1; y++)
+    for (let x = -r - 1; x <= r + 1; x++) {
+      const d = Math.sqrt(x * x + y * y);
+      const enAnillo = lleno ? d <= r : Math.abs(d - r) < 1;
+      if (enAnillo && (lleno ? tramado(x + r, y + r, 0.5) : true)) b.px(x + r + 1, y + r + 1, p);
+    }
+  c = b.canvas();
+  ANILLOS.set(key, c);
+  return c;
+}
+/** [position along sun→centre→beyond, radius, ring?] */
+const FLARE: [number, number, boolean][] = [[0.45, 3, false], [0.8, 6, true], [1.2, 3, true], [1.55, 11, false], [1.9, 5, true]];
+const COLOR_FLARE: Record<Ambiente, string[]> = {
+  dia: ['#1e2a34', '#24302a', '#2a2420'],
+  tarde: ['#4a2a14', '#3a1c2a', '#4a3a14'],
+  noche: ['#1a1a30', '#20203a', '#1a2430'],
+};
+function destellos(g: Ctx, sx: number, sy: number, vw: number, vh: number, a: Ambiente, k: number, t: number) {
+  if (k < 0.05 || sx < -40 || sx > vw + 40 || sy < -40 || sy > vh) return;
+  const dx = vw / 2 - sx;
+  const dy = vh / 2 - sy;
+  const fuerza = (a === 'tarde' ? 1 : a === 'dia' ? 0.6 : 0.5) * k * (0.9 + 0.1 * Math.sin(t * 0.7));
+  const cs = COLOR_FLARE[a];
+  g.globalCompositeOperation = 'lighter';
+  g.globalAlpha = Math.min(1, fuerza);
+  for (let i = 0; i < FLARE.length; i++) {
+    const [u, r, lleno] = FLARE[i];
+    const c = anilloFlare(r, cs[i % cs.length], lleno);
+    g.drawImage(c, Math.round(sx + dx * u - c.width / 2), Math.round(sy + dy * u - c.height / 2));
+  }
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = 1;
 }
 
 /** The options as the high sky sees them (camera in sky altitude); reused every frame. */
@@ -3635,6 +4202,20 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
     if (h > 0) for (let x = 0; x < vw; x += cv.width) g.drawImage(cv, 0, sy, cv.width, h, x, dy, cv.width, h);
   }
 
+  // The starry sky over every row of sky: all night long, a little at dusk
+  // (only high up), and in the deep blue of the day's stratosphere.
+  {
+    const kAlto = ss(1050, 1900, altMid);
+    const kN = Math.max(a === 'noche' ? 1 : a === 'tarde' ? 0.3 : 0, kAlto * (a === 'dia' ? 0.8 : 1)) * (1 - kT);
+    if (kN > 0.01) {
+      // Near the horizon the low sky glows: the stars thin out above it.
+      const yLim = a === 'noche' || kAlto > 0.5 ? hz - 36 : hz - 300;
+      // The Milky Way's haze only reads on a dark sky (on a dusk sky it was a smudge).
+      const via = a === 'noche' ? 1 : ss(0.5, 0.9, kAlto);
+      cieloEstrellado(g, o, NOCHE.todo(), kN, altBot > ALTO_OPACO ? vh : yLim, cy, t, via);
+    }
+  }
+
   // Estrellas del espacio (3 profundidades), nebulosas y galaxia.
   const kEst = E ? ss(1250, 2050, altMid) : 0;
   const kEsp = E ? ss(1750, 2150, altMid) : 0;
@@ -3677,7 +4258,8 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
 
   // Aurora pastel de la estratósfera.
   if (E) {
-    const kA = ss(1300, 1600, altMid) * (1 - ss(1850, 2150, altMid));
+    // A night and dusk thing: in the day's blue it read as a grey cut-off band.
+    const kA = ss(1300, 1600, altMid) * (1 - ss(1850, 2150, altMid)) * (a === 'dia' ? 0 : a === 'tarde' ? 0.7 : 1);
     if (kA > 0.02) {
       g.globalAlpha = kA * (0.28 + 0.05 * Math.sin(t * 0.5));
       tira(g, E.aurora, camX * 0.03 + t * 3, Math.round(vh * 0.5 + (cy - 1750) * 0.3), vw);
@@ -3698,6 +4280,8 @@ export function dibujarFondo(g: Ctx, o: OpcionesFondo): void {
       g.globalAlpha = kLuna;
       g.drawImage(s, x, Math.round(cyA - s.height / 2));
       g.globalAlpha = 1;
+      // A soft lens flare across the screen from the low sun (strongest at dusk) or the moon.
+      destellos(g, x + s.width / 2, cyA, vw, vh, a, kLuna * (1 - kSol) * (1 - kT), t);
     }
     if (E && kSol > 0) {
       g.globalAlpha = kSol;
@@ -3936,6 +4520,33 @@ function techoTormentaFrame(g: Ctx, o: OpcionesFondo, TO: Tormenta, t: number, k
   // Hung low enough that its lumps show under the HUD.
   const y1 = Math.round(TO.techo.height + 40 - sube);
   const y2 = Math.round(TO.techo2.height * 0.85 - sube * 1.3);
+  // Far rain hanging from the ceiling, and rags of scud racing under it: the
+  // space between the ceiling and the cloud floor is never an empty slab.
+  {
+    const cv = TO.cortina;
+    const h = cv.height - 12;
+    for (let i = 0; i < LLUVIA_ALTA.length; i++) {
+      const [X, w10, v] = LLUVIA_ALTA[i];
+      const w = Math.round((cv.width * w10) / 10);
+      const x = Math.round(mod(X - camX * 0.07 - t * v - lejos, 2400) - 200);
+      if (x > vw || x + w < 0) continue;
+      g.globalAlpha = kT * 0.45;
+      const sy = quieto ? 0 : mod(Math.round(-t * 70 + i * 37), cv.height - h);
+      g.drawImage(cv, 0, sy, cv.width, h, x, y1 - 34, w, h);
+      g.globalAlpha = kT * 0.25;
+      g.drawImage(cv, 0, sy, cv.width, h, x - 9, y1 - 40 + h, w, Math.round(h * 0.7));
+    }
+    const vh = o.vh;
+    g.globalAlpha = kT * 0.9;
+    for (let i = 0; i < JIRONES.length; i++) {
+      const [X, fy, par, v, si] = JIRONES[i];
+      const s = TO.jirones[si];
+      const x = Math.round(mod(X - camX * par - (quieto ? 0 : t * v) - lejos * 2, 2400) - 200);
+      if (x > vw || x + s.width < 0) continue;
+      const y = Math.round(vh * fy - sube * 0.6 + (quieto ? 0 : Math.sin(t * 0.6 + i) * 2));
+      g.drawImage(s, x, y);
+    }
+  }
   g.globalAlpha = Math.min(1, kT * 1.4);
   tira(g, TO.techo, camX * 0.05 + t * 3 + lejos, y1, vw);
   // A flash inside the cloud: the same ceiling, lit, for a blink.
@@ -4112,8 +4723,10 @@ function dibujarOceano(g: Ctx, o: OpcionesFondo, C: Capas, M: Mar, t: number, ys
   // In the storm the sea's horizon is held up on screen (at most 70% down) so the
   // rain on the horizon, and later the moonlit sea and its whales, can be seen.
   const lift = K_TORM + K_DESP > 0 ? Math.max(0, ys(0.04) - Math.round(vh * 0.7)) : 0;
-  const ysM = (k: number) => ys(k) - lift;
-  const yH = ysM(0.04);
+  const yH = ys(0.04) - lift;
+  // Rows of the sea by depth k: lifted, the water spreads down to the shore
+  // (no flat empty band between the far waves and the near ones).
+  const ysM = (k: number) => (lift > 0 ? Math.max(ys(k) - lift, Math.round(yH + (ys(0.5) + 12 - yH) * k)) : ys(k));
   tira(g, C.banco, camX * 0.04 + t * 0.5, yH + 3, vw);
   nubes(g, NUBES_MEDIO, C.medio, 0.13, ys(0.4), o, drift);
   nubes(g, NUBES_CERCA, C.cerca, 0.22, ys(0.62), o, drift);
@@ -4133,8 +4746,14 @@ function dibujarOceano(g: Ctx, o: OpcionesFondo, C: Capas, M: Mar, t: number, ys
     const H = COSTA_H;
     const hundeA = ss(0.5, 1, u);
     const subeB = ss(0, 0.5, u);
-    if (hundeA < 1) tiraHundida(g, M.costas[i], offI, yH, vw, hundeA * H);
-    if (subeB > 0) tiraHundida(g, M.costas[i + 1], offI + 600 * (1 - u), yH, vw, (1 - subeB) * H);
+    if (hundeA < 1) {
+      tiraHundida(g, M.costas[i], offI, yH, vw, hundeA * H);
+      lucesTira(g, M.costasLuz[i], offI, yH, vw, vh, t, !!o.quieto, hundeA * H);
+    }
+    if (subeB > 0) {
+      tiraHundida(g, M.costas[i + 1], offI + 600 * (1 - u), yH, vw, (1 - subeB) * H);
+      lucesTira(g, M.costasLuz[i + 1], offI + 600 * (1 - u), yH, vw, vh, t, !!o.quieto, (1 - subeB) * H);
+    }
   }
   g.fillStyle = M.bandas[0].lejos;
   g.fillRect(0, yH, vw, vh - yH);
@@ -4286,6 +4905,21 @@ function dibujarOceano(g: Ctx, o: OpcionesFondo, C: Capas, M: Mar, t: number, ys
       g.fillStyle = a === 'noche' ? '#8a80c8' : '#eefaff';
       const wl = 20 + (i % 2) * 10;
       g.fillRect(izq ? x + s.width - 2 : x - wl + 2, y - 2, wl, 1);
+      // After sunset: deck lights, a masthead light, and their wobbly reflections.
+      if (a !== 'dia') {
+        const kq = o.quieto ? 0 : t;
+        for (let j = 0; j < 4; j++) {
+          const lx = x + Math.round(s.width * (0.2 + j * 0.18));
+          const on = (j + i) % 3 !== 0 || Math.floor(kq * 0.3 + j) % 4 !== 0;
+          if (!on) continue;
+          g.fillStyle = j === 1 ? '#fff4c0' : '#ffd870';
+          g.fillRect(lx, y - 5, 1, 1);
+          g.fillStyle = '#c8a050';
+          for (let r = 0; r < 3; r++) if ((Math.floor(kq * 3) + r + j) % 3) g.fillRect(lx + ((r + j) & 1) - (r === 2 ? 1 : 0), y + r * 2, r === 2 ? 2 : 1, 1);
+        }
+        g.fillStyle = Math.floor(kq * 1.5 + i) % 2 ? '#ff6a6a' : '#7aff9a';
+        g.fillRect(x + (izq ? s.width - 4 : 3), y - s.height + 1, 1, 1);
+      }
     }
     g.globalAlpha = 1;
   }
@@ -4324,8 +4958,9 @@ function dibujarValpo(g: Ctx, o: OpcionesFondo, C: Capas, V: Valpo, t: number, y
   nubes(g, NUBES_LEJOS, C.lejos, 0.06, ys(0.3), o, drift);
   tira(g, C.banco, camX * 0.04 + t * 0.5, ys(0.27) - 30, vw);
 
-  const capa = (c: { cv: Cv; fondo: string }, off: number, y: number) => {
+  const capa = (c: Capa, off: number, y: number) => {
     tira(g, c.cv, off, y, vw);
+    lucesTira(g, c, off, y, vw, vh, t, !!o.quieto);
     if (y < vh) {
       g.fillStyle = c.fondo;
       g.fillRect(0, y, vw, vh - y);
@@ -4334,7 +4969,7 @@ function dibujarValpo(g: Ctx, o: OpcionesFondo, C: Capas, V: Valpo, t: number, y
   // Past Valparaíso the cerros give way to the coast north: the layer is cut
   // where the Recreo hill of the coast layer (same parallax) stands at full height.
   const centro = camX + vw / 2;
-  const capaCorte = (c: { cv: Cv; fondo: string }, n: Norte, k: number, y: number) => {
+  const capaCorte = (c: Capa, n: Norte, k: number, y: number) => {
     const xn = Math.round(vw / 2 + (COSTA_NORTE - centro) * k);
     if (xn >= vw) {
       capa(c, camX * k, y);
@@ -4390,12 +5025,15 @@ function dibujarValpo(g: Ctx, o: OpcionesFondo, C: Capas, V: Valpo, t: number, y
 /** San Antonio: the coastal range, then the sectors (eucalyptus → wetland → Barrancas → port → Cartagena). */
 function dibujarCampo(g: Ctx, o: OpcionesFondo, C: Capas, S: SA, t: number, ys: (k: number) => number) {
   const { vw, vh, camX, ambiente: a } = o;
-  const capa = (c: { cv: Cv; fondo: string }, k: number, y: number) => {
+  const capa = (c: Capa, k: number, y: number) => {
     // Wide canvases indexed by world x: no tiling, the sector shows up where it belongs.
     // The sector under the screen centre is the one under the camera.
     const x = -Math.round(camX * k + (SA_MID - vw / 2) * (1 - k) + SA_PAD);
     const top = y - c.cv.height;
-    if (top < vh && y > 0) g.drawImage(c.cv, x, top);
+    if (top < vh && y > 0) {
+      g.drawImage(c.cv, x, top);
+      lucesCapa(g, c, x, top, vw, vh, t, !!o.quieto);
+    }
     if (y < vh) {
       g.fillStyle = c.fondo;
       g.fillRect(0, y, vw, vh - y);
