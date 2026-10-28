@@ -387,7 +387,8 @@ type Nombre =
   | 'zepelin-motor' | 'zepelin-sirena' | 'zepelin-cruje' | 'zepelin-cruje2' | 'zepelin-flak' | 'zepelin-cae'
   | 'sin-municion' | 'recargada' | 'nitro-no' | 'nitro-listo' | 'bengala-vacia' | 'radio' | 'eyeccion' | 'paracaidas'
   | 'sirena-picada' | 'silbo-picada' | 'rugido-picada' | 'estampido'
-  | 'bocina-perdida' | 'tono-terreno' | 'master-caution' | 'aviso-lanza';
+  | 'bocina-perdida' | 'tono-terreno' | 'master-caution' | 'aviso-lanza'
+  | 'zumbido' | 'chisporroteo' | 'estallido-fuego' | 'traca' | 'pito-fuego';
 
 const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   // Cohete: silbido agudo resonante + siseo + zumbido de tobera + rugido grave.
@@ -503,6 +504,11 @@ const HORNO: Record<Nombre, (sr: number) => Float32Array | Float32Array[]> = {
   escarcha: hornoEscarcha,
   'bocina-perdida': hornoBocinaPerdida,
   'aviso-lanza': hornoAvisoLanza,
+  zumbido: hornoZumbido,
+  chisporroteo: hornoChisporroteo,
+  'estallido-fuego': hornoEstallidoFuego,
+  traca: hornoTraca,
+  'pito-fuego': hornoPitoFuego,
   'tono-terreno': hornoTerreno,
   'master-caution': hornoMaster,
   'sirena-picada': hornoSirena,
@@ -1284,6 +1290,73 @@ function hornoSirena(sr: number) {
     const aire = bp.run(ruido()) * 0.35;
     return Math.tanh(s * 0.6) + aire;
   });
+}
+
+/* ── Fuegos artificiales (misiles enemigos) ── */
+
+/** Zumbido de abeja (bucle de 1 s): dos sierras desafinadas con aleteo de 31 Hz. */
+function hornoZumbido(sr: number) {
+  const bp = new Bq(sr, 'bp', 900, 1.5);
+  const lp = new Bq(sr, 'lp', 2400, 0.7);
+  let f1 = 0, f2 = 0;
+  return bucle(sr, 1, (_i, t) => {
+    f1 += (190 + 12 * Math.sin(TAU * 5 * t)) / sr;
+    f2 += (194 + 9 * Math.sin(TAU * 4 * t + 1)) / sr;
+    const saw = ((f1 % 1) * 2 - 1) + ((f2 % 1) * 2 - 1) * 0.7;
+    const am = 0.65 + 0.35 * Math.sin(TAU * 31 * t);
+    return (lp.run(saw) * 0.55 + bp.run(saw) * 0.8) * am + ruido() * 0.03;
+  });
+}
+
+/** Mecha y chispas (bucle de 1,5 s): siseo brillante con chasquidos finos y algunos gruesos. */
+function hornoChisporroteo(sr: number) {
+  const n = Math.floor(sr * 1.66);
+  const a = new Float32Array(n);
+  const bp = new Bq(sr, 'bp', 4200, 0.9);
+  for (let i = 0; i < n; i++) a[i] = bp.run(ruido()) * 0.35 * (0.8 + 0.2 * Math.sin((TAU * 6 * i) / sr));
+  chasquidos(sr, a, 0, 1.66, () => 90, { hp: 2200, amp: 1.4, largo: [0.0005, 0.003] });
+  chasquidos(sr, a, 0, 1.66, () => 14, { hp: 800, amp: 0.8, largo: [0.003, 0.01] });
+  return bucle(sr, 1.5, (i) => a[i]);
+}
+
+/** Estallido de fuego artificial (1,6 s): «¡pum!» seco, soplo y una lluvia de chispas que crepita. */
+function hornoEstallidoFuego(sr: number) {
+  const n = Math.floor(sr * 1.6);
+  const a = new Float32Array(n);
+  golpe(sr, a, 0, 260, 70, 0.09, 0.9, 3500);
+  const bp = new Bq(sr, 'bp', 1800, 0.8);
+  for (let i = 0; i < n; i++) a[i] += bp.run(ruido()) * Math.exp(-i / sr / 0.12) * 0.5;
+  chasquidos(sr, a, 0.22, 1.5, (t) => 130 * Math.exp(-(t - 0.22) / 0.5), { hp: 2500, amp: 1.1, largo: [0.0005, 0.003] });
+  for (let k = 0; k < 10; k++) ping(sr, a, rand(0.1, 1.2), rand(2500, 5200), rand(0.01, 0.04), rand(0.02, 0.06));
+  return normaliza(a, 0.9);
+}
+
+/** Traca de petardos (1,1 s): un reventón y una ristra de estampidos cortos. */
+function hornoTraca(sr: number) {
+  const n = Math.floor(sr * 1.1);
+  const a = new Float32Array(n);
+  golpe(sr, a, 0, 180, 50, 0.12, 1, 2500);
+  for (let t0 = 0.08; t0 < 0.9; t0 += rand(0.025, 0.07)) golpe(sr, a, t0, rand(300, 520), rand(90, 140), rand(0.012, 0.028), rand(0.2, 0.5), 4200);
+  chasquidos(sr, a, 0.05, 1, () => 60, { hp: 3000, amp: 0.7, largo: [0.0004, 0.002] });
+  return normaliza(a, 0.92);
+}
+
+/** Pito de fuego artificial (0,9 s): silbido que sube (la fugaz que pica, la palmera que sube). */
+function hornoPitoFuego(sr: number) {
+  const n = Math.floor(sr * 0.9);
+  const a = new Float32Array(n);
+  const bp = new Bq(sr, 'bp', 2000, 6);
+  let fase = 0;
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const u = t / 0.9;
+    const f = 900 + 1900 * Math.pow(u, 1.3);
+    fase += f / sr;
+    if ((i & 63) === 0) bp.f(f);
+    const env = Math.min(1, t / 0.05) * (t > 0.8 ? Math.exp(-(t - 0.8) / 0.03) : 1);
+    a[i] = (Math.sin(TAU * fase) * 0.6 + bp.run(ruido()) * 0.8) * env * (0.85 + 0.15 * Math.sin(TAU * 23 * t));
+  }
+  return normaliza(a, 0.8);
 }
 
 /** Silbido de picada: el aire en las tomas del ala (el «Corsario» silbaba así) o la hélice pasada de vueltas. */
@@ -2488,9 +2561,17 @@ export function precalentar() {
 
 const C_JUEGO = 480; // «velocidad del sonido» del juego, px/s: con misiles a 100–250 px/s el doppler se oye claro
 const MAX_VOCES = 3;
-const TONO: Record<string, number> = { buscador: 1, dardo: 1.3, zigzag: 1.08, pesado: 0.68, racimo: 0.85, enjambre: 1.45, perdigon: 1.55, cohete: 0.9 };
+/** Tono de persecución por tipo de misil (sobre su bucle; el doppler se multiplica encima). */
+const TONO: Record<string, number> = {
+  buscador: 1, dardo: 1.3, zigzag: 1.08, pesado: 0.68, racimo: 0.85, enjambre: 1.45, perdigon: 1.55, cohete: 0.9,
+  // fuegos artificiales
+  candela: 0.95, bola: 1.5, palmera: 0.8, fronda: 0.7, crisantemo: 1.15, estrella: 1.75, girandola: 1.25, chispa: 1.9,
+  cometa: 1.62, serpiente: 0.92, petardo: 1.05, fugaz: 1.72, mariposa: 1.2, abeja: 1, enredadera: 0.88, zarcillo: 1.38, arcoiris: 1.12,
+};
+/** Bucle de persecución por tipo (los demás silban): las abejas zumban, las mechas chisporrotean. */
+const BUCLE: Record<string, Nombre> = { abeja: 'zumbido', girandola: 'chisporroteo', petardo: 'chisporroteo', candela: 'chisporroteo', chispa: 'chisporroteo' };
 
-type VozMisil = { id: number; v: Voz; src: AudioBufferSourceNode; g: GainNode; p: Pan; libre: number };
+type VozMisil = { id: number; v: Voz; src: AudioBufferSourceNode; g: GainNode; p: Pan; libre: number; n: Nombre };
 const vocesMisil: VozMisil[] = [];
 let duck = 0; // 0…1: cuánto baja el ambiente porque hay un misil encima
 
@@ -2535,17 +2616,25 @@ export function persecucion(amenazas: Amenaza[], dt: number): void {
   for (const x of top) {
     let vm = vocesMisil.find((v) => v.id === x.a.id && v.libre < 0);
     if (!vm) {
-      vm = vocesMisil.filter((v) => v.libre >= 0 && t - v.libre > 0.12).sort((p, q) => p.libre - q.libre)[0];
+      const nb = BUCLE[x.a.tipo] ?? 'silbido';
+      const libres = vocesMisil.filter((v) => v.libre >= 0 && t - v.libre > 0.12).sort((p, q) => p.libre - q.libre);
+      vm = libres.find((v) => v.n === nb);
+      if (!vm && libres.length && vocesMisil.length >= MAX_VOCES) {
+        // una voz libre de otro bucle (silbido ↔ zumbido): se jubila para hacer sitio
+        const vieja = libres[0];
+        apagar(vieja.v, vieja.g, t);
+        vocesMisil.splice(vocesMisil.indexOf(vieja), 1);
+      }
       if (vm) {
         vm.id = x.a.id;
         vm.libre = -1;
       } else if (vocesMisil.length < MAX_VOCES) {
-        const src = fuente(m, buf(m, 'silbido'), true);
+        const src = fuente(m, buf(m, nb), true);
         const g = ganancia(m, 0);
         const p = panner(m.ctx);
         const v = voz(src, [g, p], m.bus, false);
         src.start(t, Math.random());
-        vm = { id: x.a.id, v, src, g, p, libre: -1 };
+        vm = { id: x.a.id, v, src, g, p, libre: -1, n: nb };
         vocesMisil.push(vm);
       } else continue;
       // Voz recién asignada: el tono salta al nuevo misil sin deslizarse.
@@ -4222,3 +4311,30 @@ export function __usarContexto(ctx: BaseAudioContext | null, dest?: AudioNode) {
 }
 /** Solo para pruebas: nodos vivos creados por este módulo. */
 export const __nodosVivos = () => vivos;
+
+/* ────────────────────────── fuegos artificiales ────────────────────────── */
+
+/** Tono del estallido por tipo: los chicos más agudos, los grandes más graves. */
+const TONO_FUEGO: Record<string, number> = {
+  crisantemo: 0.85, palmera: 0.8, arcoiris: 0.9, cometa: 1.15, fugaz: 1.1, mariposa: 1.05, candela: 1, serpiente: 0.95,
+  enredadera: 0.9, girandola: 1.1, petardo: 0.9, abeja: 1.5, bola: 1.4, estrella: 1.45, chispa: 1.7, fronda: 1.3, zarcillo: 1.3,
+};
+const TRACA = new Set(['petardo', 'girandola', 'dardo', 'enjambre', 'abeja']);
+/**
+ * Estallido de un fuego artificial (un misil enemigo que revienta en colores):
+ * «¡pum!» y lluvia de chispas, o una traca de petardos. Se limita a uno cada
+ * 70 ms (más no se distingue) y cede ante el tope de nodos; los chicos suenan
+ * más suave.
+ */
+export function fuegoArtificial(tipo: string, distancia: number, pan: number, chico = false): void {
+  const d = Math.max(0, num(distancia));
+  const vol = clamp((chico ? 0.12 : 0.3) / (1 + d / 260), 0, 0.4) * enAire();
+  if (vol < 0.02) return;
+  evento(chico ? 'fuego-chico' : 'fuego', chico ? 0.12 : 0.07, (m, t) =>
+    unaVez(m, TRACA.has(tipo) ? 'traca' : 'estallido-fuego', vol, (TONO_FUEGO[tipo] ?? 1) * rand(0.94, 1.06), t + Math.min(0.2, d / 1800), lado(pan), LIMITE + 2, m.explo),
+  );
+}
+/** Pito que sube: la estrella fugaz da la vuelta y pica, la palmera trepa (uno cada 0,25 s). */
+export function pitoFuego(pan: number, tono = 1): void {
+  evento('pito-fuego', 0.25, (m, t) => unaVez(m, 'pito-fuego', 0.16 * enAire(), tono * rand(0.95, 1.05), t, lado(pan), LIMITE + 2, m.explo));
+}

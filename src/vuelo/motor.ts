@@ -19,6 +19,8 @@ import type { Parte, Premio, VehiculoTipo } from './dibujo';
 import * as FV from './fisica-vuelo';
 import * as FA from './fisica-armas';
 import * as MS from './misiles';
+import * as FU from './fuegos';
+import { dibujarMisilEnemigo } from './misiles-dibujo';
 import * as E from './estelas';
 import { dibujarFondo, nombreZona, precalentarFondo, zonaAltitud } from './fondo';
 import type { Avion, Cuerpo, Mando, Misil, ModeloAvion, Movil, Piloto, Vehiculo, Bomba, BombaTipo } from './fisica-tipos';
@@ -479,6 +481,9 @@ type Shot = ({ m: Misil; enemy: false; tgt: null; trail: number } | { m: MS.Misi
   busca?: number;
   /** The player's unguided rocket: phase of its wobble. */
   bam?: number;
+  /** Enemy missile: its firework burst already went off; its telegraph (fuse, dive, climb) already sounded. */
+  estallo?: boolean;
+  avisado?: boolean;
 };
 /** A falling bomb of the player's, with its load; bomblets are the cluster's children. */
 type BombaJ = Bomba & { tipo: BombaTipo; sub?: boolean; rebotes?: number };
@@ -494,15 +499,16 @@ const trailStyles = new Map<string | E.EstiloEstela, E.EstiloEstela>();
 const trailStyle = (sh: Shot) => {
   const bumeran = sh.enemy && sh.vueltas !== undefined;
   const propia = !sh.enemy ? sh.k?.estela ?? E.ESTELA_JUGADOR : null;
-  const key = bumeran ? 'bumeran' : sh.enemy ? sh.m.tipo : propia!;
+  // Each enemy type (and tint: the turquoise butterfly) has its own trail style object.
+  const key = bumeran ? 'bumeran' : sh.enemy ? MS.estelaDe(sh.m) : propia!;
   let st = trailStyles.get(key);
   if (!st) {
     // Margarita's boomerangs leave a white-and-yellow trail of their own.
     const base = bumeran
       ? { ...MS.MISILES.buscador.estela, nucleo: '#ffffff', brillo: '#ffe048', humo: '#fff6c8' }
-      : sh.enemy ? MS.MISILES[sh.m.tipo].estela : propia!;
-    // The long-range ones (Phoenix, cruise) keep their longer trail.
-    st = { ...base, largo: Math.min(base.largo + 8, sh.enemy ? 32 : Math.max(38, base.largo)) };
+      : sh.enemy ? MS.estelaDe(sh.m) : propia!;
+    // The long-range ones (Phoenix, cruise) keep their longer trail; glitter tails (comet, shooting star) too.
+    st = { ...base, largo: Math.min(base.largo + 8, sh.enemy ? (base.brillos ? 42 : 32) : Math.max(38, base.largo)) };
     trailStyles.set(key, st);
   }
   return st;
@@ -913,6 +919,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     junk: [] as Junk[],
     /** Explosions, fire, smoke and falling pieces (efectos.ts). */
     fx: VFX.crearEfectos(),
+    /** Enemy missiles' firework bursts and the sparkle trails of the small ones (fuegos.ts). */
+    fuegos: FU.crearFuegos(),
     craters: [] as [number, number, number][],
     /** Bridges the mice built over craters, [from x, to x]. */
     bridges: [] as [number, number][],
@@ -1162,6 +1170,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     s.pops = [];
     s.junk = [];
     s.fx = VFX.crearEfectos();
+    FU.limpiarFuegos(s.fuegos);
     GR.limpiar(s.sangre);
     s.luces = L.crearLuces();
     s.craters = [];
@@ -1569,6 +1578,18 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
    * A blast of the given energy. Blasts from the player hurt vehicles, blasts
    * from the mice hurt the plane, and every blast pushes everything nearby.
    */
+  /** An enemy missile's death as a firework: its burst shape and palette, a glow, a pop and crackle. */
+  function estallidoFuego(sh: Shot) {
+    if (!sh.enemy) return;
+    sh.estallo = true;
+    const m = sh.m;
+    const F = MS.MISILES[m.tipo];
+    const chico = !!F.fuego.efimero;
+    FU.estallar(s.fuegos, m.x, m.y, m.vx, m.vy, F.fuego.estallido, F.fuego.paleta, chico ? 0.9 : 1.5 * Math.max(0.9, Math.cbrt(F.energia)));
+    if (!chico) L.luz(s.luces, m.x, m.y, 12, F.fuego.paleta[0], 0.12);
+    if (!s.attract) AB.fuegoArtificial(m.tipo, Math.hypot(m.x - s.plane.x, m.y - s.plane.y), panOf(m.x), chico);
+  }
+
   function blast(x: number, y: number, energy: number, from: 'jugador' | 'raton' | 'nadie' | 'caida', damage: number) {
     // 'caida': a spent missile falling under gravity hurts whatever it lands on, mice and plane alike.
     const hiereRatones = from === 'jugador' || from === 'caida';
@@ -2388,8 +2409,14 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const p = s.plane;
     if (!list || s.mode !== 'play' || s.dead) return;
     let g: number | undefined;
+    let salvaYa: MS.TipoMisil | undefined;
     for (const d of list) {
       if (d.clase === 'misil') {
+        // Swarms and butterfly pairs already come out as a salvo: a launcher's twin shot isn't doubled.
+        if (MS.SALVAS.has(d.tipo)) {
+          if (salvaYa === d.tipo) continue;
+          salvaYa = d.tipo;
+        }
         const salva = MS.lanzar(d.tipo, d.x, d.y, p, s.wave, Math.random, d.desvio);
         // Everything one launcher lets go in the same frame flies as one salvo.
         g ??= salva[0]?.grupo;
@@ -3293,7 +3320,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     const tipo = pick ?? (c.kind === 'tanque' || c.kind === 'fragata' ? null : 'buscador');
     if (tipo) {
       // The SAM fires a pair (one salvo of the swarm); the rest, one at a time.
-      const salvos = (c.kind === 'sam' || c.kind === 'fragata') && tipo !== 'enjambre' ? [-0.3, 0.3] : [0];
+      const salvos = (c.kind === 'sam' || c.kind === 'fragata') && !MS.SALVAS.has(tipo) ? [-0.3, 0.3] : [0];
       const salva = salvos.flatMap((dv) => MS.lanzar(tipo, ox, oy + (c.kind === 'sam' ? 4 : 0), p, lvl, Math.random, dv));
       for (const m of unaSalva(salva)) s.shots.push({ m, enemy: true, tgt: p, trail: 0 });
       FA.retroceso(c, Math.PI / 2, c.kind === 'jeep' ? 4 : 7);
@@ -4072,10 +4099,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const sh of s.shots) {
       if (sh.m.t < 0) continue;
       const m = sh.m;
-      sh.estela ??= E.crearEstela(trailStyle(sh));
-      if (m.combustible > 0) L.luz(s.luces, m.x - Math.cos(m.rumbo) * 6, m.y - Math.sin(m.rumbo) * 6, sh.enemy ? 7 : 9, sh.enemy ? MS.MISILES[sh.m.tipo].estela.brillo : sh.estela.estilo.brillo, 0.05);
-      E.empujarPunto(sh.estela, m.x, m.y, m.rumbo, m.combustible > 0, dt);
-      E.actualizarEstela(sh.estela, dt, wind);
+      // The small, numerous enemy ones (balls, stars, fronds, sparks, bees) leave a pooled sparkle trail instead.
+      if (sh.enemy && MS.MISILES[sh.m.tipo].fuego.rastro) {
+        FU.rastro(s.fuegos, m.x, m.y, m.vx, m.vy, MS.MISILES[sh.m.tipo].fuego.paleta, sh.m.tinte, m.combustible > 0 ? 45 : 25, dt);
+      } else {
+        sh.estela ??= E.crearEstela(trailStyle(sh));
+        if (m.combustible > 0) L.luz(s.luces, m.x - Math.cos(m.rumbo) * (sh.enemy ? 9 : 6), m.y - Math.sin(m.rumbo) * (sh.enemy ? 9 : 6), sh.enemy ? 4 : 9, sh.enemy ? MS.estelaDe(sh.m).brillo : sh.estela.estilo.brillo, 0.05);
+        E.empujarPunto(sh.estela, m.x, m.y, m.rumbo, m.combustible > 0, dt);
+        E.actualizarEstela(sh.estela, dt, wind);
+      }
       if (sh.enemy && sh.cae) {
         // A spent enemy missile falling: ballistic, nose along its fall, explodes on whatever it meets.
         const em = sh.m;
@@ -4108,6 +4140,31 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }
         }
         const r = MS.paso(em, flying || sh.tgt !== p ? sh.tgt : null, dt, s.wave, ground);
+        // Fireworks that let go of balls/sparks while they keep flying (the Roman candle, the pinwheel).
+        if (r.estado === 'vuela' && r.hijos) {
+          for (const h of r.hijos) born.push({ m: h, enemy: true, tgt: sh.tgt, trail: 0, sigilo: true });
+          if (em.tipo === 'candela') {
+            FU.chispitas(s.fuegos, em.x + Math.cos(em.rumbo) * 6, em.y + Math.sin(em.rumbo) * 6, F.fuego.paleta, 6, 70);
+            if (!s.attract) fx('bengalas', sfx.pop, { vol: 0.22, rate: 1.6 + Math.random() * 0.3 }, em.x);
+          }
+        }
+        // Telegraphs: the cracker's lit fuse, the shooting star turning over to dive, the palm climbing.
+        if (em.tipo === 'petardo' && em.mecha > 0) {
+          FU.chispitas(s.fuegos, em.x - Math.cos(em.rumbo) * 6, em.y - Math.sin(em.rumbo) * 6, F.fuego.paleta, 1, 90);
+          if (!sh.avisado) {
+            sh.avisado = true;
+            if (flying && sh.tgt === p) pop(em.x, em.y + 12, '¡Mecha!', '#ffd60a');
+            if (!s.attract) AB.fuegoArtificial('chispa', Math.hypot(em.x - p.x, em.y - p.y), panOf(em.x), true);
+          }
+        } else if (em.tipo === 'fugaz' && em.cuenta === 1 && !sh.avisado) {
+          sh.avisado = true;
+          FU.estallar(s.fuegos, em.x, em.y, 0, 0, 'chispazo', F.fuego.paleta, 1.4);
+          L.luz(s.luces, em.x, em.y, 22, '#fff7c2', 0.25);
+          if (!s.attract) AB.pitoFuego(panOf(em.x), 1.25);
+        } else if (em.tipo === 'palmera' && !sh.avisado && em.t > 0.2) {
+          sh.avisado = true;
+          if (!s.attract) AB.pitoFuego(panOf(em.x), 0.8);
+        }
         // Flares already in the air keep pulling the seekers that are still after the plane,
         // even ones launched after the flares went out.
         if (em.guiado && sh.tgt === p && s.flareBodies.length) {
@@ -4163,8 +4220,21 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           for (const h of r.hijos ?? []) born.push({ m: h, enemy: true, tgt: sh.tgt, trail: 0 });
           continue;
         }
+        if (r.estado === 'revienta') {
+          // The cracker goes off where it is: a firework flash that hurts in a wide radius.
+          em.t = -1;
+          blast(em.x, em.y, 1.2, 'nadie', 0);
+          s.shake = Math.max(s.shake, 2);
+          if (flying && Math.hypot(p.x - em.x, p.y - em.y) < MS.RADIO_TRUENO + s.spec.hit) {
+            s.lastHit = 'misil';
+            hurtPlane(F.danio, em.x, em.y);
+          }
+          continue;
+        }
         if (r.estado === 'suelo') {
           em.t = -1;
+          // A spark, ember or star that reaches the ground just fizzles out.
+          if (F.fuego.efimero) continue;
           if (fallaEnAgua(em.x, em.y, em.vx, em.vy, 9, '#8a8a9a')) continue;
           // A spent one coming down hurts the mice it lands on too.
           if (em.combustible <= 0) blast(em.x, Math.max(em.y, ground(em.x)), Math.max(3, F.energia), 'caida', Math.max(2, F.danio * 2));
@@ -4206,6 +4276,11 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
           }
         }
         if (r.estado === 'agotado') {
+          // Sparks, embers, stars and bees burn out in the air with a little pop.
+          if (F.fuego.efimero) {
+            em.t = -1;
+            continue;
+          }
           // Out of fuel and lost: it doesn't vanish, it drops like a stone and goes off where it lands.
           if (em.combustible <= 0 && em.y > ground(em.x) + 6) {
             sh.cae = true;
@@ -4326,7 +4401,15 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       }
     }
     // Enemy missiles never collide with each other: they fly through, all after the plane.
-    s.shots.push(...born);
+    // A cap keeps a sky full of fireworks playable on phones.
+    if (born.length) {
+      let vivos = 0;
+      for (const sh of s.shots) if (sh.enemy && sh.m.t >= 0) vivos++;
+      for (const b of born) if (vivos++ < 110) s.shots.push(b);
+    }
+    // Every enemy missile that went off this frame bursts in its own colours and shape.
+    for (const sh of s.shots) if (sh.enemy && sh.m.t < 0 && !sh.estallo) estallidoFuego(sh);
+    FU.actualizarFuegos(s.fuegos, dt, wind);
     // Trails of missiles that are gone stay behind and fade.
     for (const sh of s.shots) {
       if (sh.m.t < 0 && sh.estela) {
@@ -4951,8 +5034,8 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
     for (const sh of s.shots) if (sh.estela) E.dibujarEstela(g, sh.estela, toScreen, s.t);
     for (const sh of s.shots) {
       if (sh.enemy) {
-        const F = MS.MISILES[sh.m.tipo];
-        A.drawMissile(g, sx(sh.m.x), sy(sh.m.y), -sh.m.rumbo, true, sh.m.combustible > 0, s.t, { ...F.color, largo: F.largo }, sh.m.aviso > 0 && Math.floor(s.t * (8 + sh.m.aviso * 16)) % 2 === 0);
+        const mx = sx(sh.m.x), my = sy(sh.m.y);
+        if (mx > -24 && mx < vw + 24 && my > -24 && my < vh + 24) dibujarMisilEnemigo(g, sh.m, mx, my, s.t);
       } else {
         const look = (sh.k ?? s.spec.kit.misil).look;
         if (look === 'orbe') AD.drawOrbe(g, sx(sh.m.x), sy(sh.m.y), s.t);
@@ -4971,6 +5054,7 @@ export function createVuelo(canvas: HTMLCanvasElement, box: HTMLElement, hooks: 
       tupFx[1] = sy(y);
       return tupFx;
     }, s.t);
+    FU.dibujarFuegos(g, s.fuegos, sx, sy, s.t, vw, vh);
     GR.dibujar(g, s.sangre, sx, sy);
     L.dibujarLuces(g, s.luces, toScreen, s.t);
     const blink = s.inv > 0 && Math.floor(s.t * 14) % 2 === 0;

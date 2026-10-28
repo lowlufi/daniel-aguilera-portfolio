@@ -11,9 +11,12 @@ import { tone } from '../game/dulce';
  *      formen una sola nube con un único contorno de tono.
  *   2. Cinta de fuego: desde la tobera hacia atrás, gruesa y blanca junto al
  *      misil, que se afina pasando por `nucleo` y `brillo`.
- *   3. Chispas: estrellitas que saltan hacia atrás y caen con gravedad.
+ *   3. Chispas: estrellitas que saltan hacia atrás y caen con gravedad. Con
+ *      `paleta` cada chispa toma un color (estelas de fuegos artificiales) y
+ *      con `brillos` son purpurina: flotan, caen poco y titilan más rato.
  *   4. Fogonazo del motor que parpadea (con destello en cruz).
- * Con el motor apagado (o tras `soltar`) solo queda el humo.
+ * Con el motor apagado (o tras `soltar`) solo queda el humo. Con `arcoiris`
+ * el humo va cambiando de color por la `paleta` (bandas de dos bolitas).
  *
  * Legibilidad: el humo va teñido del `brillo` de cada tipo (el jugador, dorado
  * tibio; cada enemigo, su color) y lleva un contorno de tono bien hondo para
@@ -47,6 +50,12 @@ export type EstiloEstela = {
    * Segunda Guerra la llevan larga y desflecada, el crucero una llamita corta.
    */
   fuego?: number;
+  /** Colores de las chispas (cada chispa toma uno) y, con `arcoiris`, del humo. */
+  paleta?: string[];
+  /** El humo cambia de color por la `paleta` a lo largo de la estela. */
+  arcoiris?: boolean;
+  /** Chispas de purpurina: flotan, caen poco y titilan más rato. */
+  brillos?: boolean;
 };
 
 /** Misil del jugador: fuego blanco-dorado, humo dorado tibio. */
@@ -78,6 +87,9 @@ const MAX_PUNTOS = 60;
 const VIDA_EXTRA = 1.3; // la estela dura un poco más que su `largo` nominal
 const R_MIN = 1.5; // radio base mínimo del humo: finas, pero que no se pierdan
 const MAX_CHISPAS = 16;
+/** Con purpurina caben más (viven más). */
+const MAX_BRILLOS = 28;
+const GRAVEDAD_BRILLO = 22; // px/s² de la purpurina
 /** Cuánto se exagera la ondulación del humo respecto de la amplitud de cada estilo. */
 const ONDULA_MUL = 2.6;
 const VIDA_FUEGO = 0.18; // s que un punto sigue siendo parte de la cinta de fuego
@@ -88,11 +100,11 @@ const MAX_R = 8; // más grandes tapan al avión y a las amenazas
 const MARGEN = 20; // px fuera de pantalla antes de descartar una bolita
 
 // Campos de un punto de humo.
-const PX = 0, PY = 1, PVX = 2, PVY = 3, PEDAD = 4, PRUMBO = 5, PSEMILLA = 6, PID = 7;
-const PS = 8;
+const PX = 0, PY = 1, PVX = 2, PVY = 3, PEDAD = 4, PRUMBO = 5, PSEMILLA = 6, PID = 7, PCOL = 8;
+const PS = 9;
 // Campos de una chispa.
-const CX = 0, CY = 1, CVX = 2, CVY = 3, CEDAD = 4, CVIDA = 5;
-const CS = 6;
+const CX = 0, CY = 1, CVX = 2, CVY = 3, CEDAD = 4, CVIDA = 5, CCOL = 6;
+const CS = 7;
 
 // Tipos de sprite.
 const HUMO_LINEA = 0, HUMO_CUERPO = 1, FUEGO_LINEA = 2, FUEGO_CUERPO = 3, CHISPA = 4, FOGONAZO = 5, HUMO_LUZ = 6;
@@ -107,6 +119,8 @@ type Paleta = {
   nucleo: string;
   /** Sprites, índice ((tipo·4 + variante)·16 + radio). */
   spr: (HTMLCanvasElement | undefined)[];
+  /** Una sub-paleta por color de `paleta` (chispas de colores, humo arcoíris). */
+  subs: Paleta[];
 };
 
 export type Estela = {
@@ -129,6 +143,7 @@ export type Estela = {
   /** @internal */ semilla: number;
   /** @internal */ fase: number; // desfase fijo del parpadeo
   /** @internal */ cuenta: number; // nº de muestras emitidas
+  /** @internal */ capC: number; // tope de chispas de esta estela
 };
 
 /* ── Sprites ────────────────────────────────────────────────────────────── */
@@ -222,26 +237,33 @@ function pon(g: CanvasRenderingContext2D, pal: Paleta, tipo: number, v: number, 
 }
 
 const paletas = new WeakMap<EstiloEstela, Paleta>();
+function armarPaleta(humo: string, brillo: string, nucleo: string): Paleta {
+  // Humo tibio (recién salido): bien teñido del brillo. Luego el humo con un
+  // tinte del tipo (para reconocerlo) y al final pálido, pero nunca blanco.
+  const etapas = [
+    mezcla(humo, brillo, 0.7),
+    mezcla(humo, brillo, 0.32),
+    mezcla(mezcla(humo, '#ffffff', 0.3), brillo, 0.16),
+  ];
+  return {
+    // Contorno hondo: es lo que separa la estela de un cielo claro o de nubes.
+    linea: etapas.map((c, i) => tone(c, i === 2 ? -0.46 : -0.58)),
+    relleno: etapas,
+    luz: etapas.map((c) => tone(c, 0.6)),
+    fuegoLinea: tone(brillo, -0.55),
+    brillo,
+    nucleo,
+    spr: [],
+    subs: [],
+  };
+}
 function paleta(e: EstiloEstela): Paleta {
   let p = paletas.get(e);
   if (!p) {
-    // Humo tibio (recién salido): bien teñido del brillo. Luego el humo con un
-    // tinte del tipo (para reconocerlo) y al final pálido, pero nunca blanco.
-    const etapas = [
-      mezcla(e.humo, e.brillo, 0.7),
-      mezcla(e.humo, e.brillo, 0.32),
-      mezcla(mezcla(e.humo, '#ffffff', 0.3), e.brillo, 0.16),
-    ];
-    p = {
-      // Contorno hondo: es lo que separa la estela de un cielo claro o de nubes.
-      linea: etapas.map((c, i) => tone(c, i === 2 ? -0.46 : -0.58)),
-      relleno: etapas,
-      luz: etapas.map((c) => tone(c, 0.6)),
-      fuegoLinea: tone(e.brillo, -0.55),
-      brillo: e.brillo,
-      nucleo: e.nucleo,
-      spr: [],
-    };
+    p = armarPaleta(e.humo, e.brillo, e.nucleo);
+    // Cada color de la paleta: chispas de ese color y, en el arcoíris, humo
+    // bien teñido (más color que el humo normal: se tiene que ver la franja).
+    if (e.paleta) for (const c of e.paleta) p.subs.push(armarPaleta(e.arcoiris ? mezcla(e.humo, c, 0.45) : e.humo, c, mezcla(c, '#ffffff', 0.6)));
     paletas.set(e, p);
   }
   return p;
@@ -277,7 +299,7 @@ export function crearEstela(estilo: EstiloEstela): Estela {
     n: 0,
     cabeza: 0,
     reloj: INTERVALO,
-    c: new Float32Array(MAX_CHISPAS * CS),
+    c: new Float32Array((estilo.brillos ? MAX_BRILLOS : MAX_CHISPAS) * CS),
     cn: 0,
     cAcum: 0,
     mx: 0,
@@ -288,6 +310,7 @@ export function crearEstela(estilo: EstiloEstela): Estela {
     semilla: semillaGlobal,
     fase: semillaGlobal & 7,
     cuenta: 0,
+    capC: estilo.brillos ? MAX_BRILLOS : MAX_CHISPAS,
   };
 }
 
@@ -319,7 +342,10 @@ export function empujarPunto(e: Estela, x: number, y: number, rumbo: number, mot
     p[o + PEDAD] = 0;
     p[o + PRUMBO] = rumbo;
     p[o + PSEMILLA] = azar(e) * 6.283;
-    p[o + PID] = e.cuenta++ & 1023;
+    p[o + PID] = e.cuenta & 1023;
+    // arcoíris: franjas de dos bolitas que recorren la paleta
+    p[o + PCOL] = e.pal.subs.length ? (e.cuenta >> 1) % e.pal.subs.length : 0;
+    e.cuenta++;
     e.cabeza = (e.cabeza + 1) % e.cap;
     if (e.n < e.cap) e.n++;
   }
@@ -329,15 +355,18 @@ export function empujarPunto(e: Estela, x: number, y: number, rumbo: number, mot
   e.cAcum += ritmo * dt;
   while (e.cAcum >= 1) {
     e.cAcum -= 1;
-    if (e.cn >= MAX_CHISPAS) continue;
+    if (e.cn >= e.capC) continue;
     const o = e.cn++ * CS, c = e.c;
-    const v = 30 + azar(e) * 50, l = (azar(e) - 0.5) * 70;
+    const brillo = e.estilo.brillos;
+    const v = (brillo ? 15 : 30) + azar(e) * 50, l = (azar(e) - 0.5) * (brillo ? 90 : 70);
     c[o + CX] = tx;
     c[o + CY] = ty;
     c[o + CVX] = -cs * v - sn * l;
     c[o + CVY] = -sn * v + cs * l + 15;
     c[o + CEDAD] = 0;
-    c[o + CVIDA] = 0.25 + azar(e) * 0.35;
+    c[o + CVIDA] = brillo ? 0.55 + azar(e) * 0.6 : 0.25 + azar(e) * 0.35;
+    // color: uno de la paleta (o el brillo del tipo, -1)
+    c[o + CCOL] = e.pal.subs.length && azar(e) < 0.8 ? Math.floor(azar(e) * e.pal.subs.length) : -1;
   }
 }
 
@@ -364,8 +393,9 @@ export function actualizarEstela(e: Estela, dt: number, viento: number): void {
       for (let k = 0; k < CS; k++) c[o + k] = c[u + k];
       continue;
     }
-    c[o + CVY] -= GRAVEDAD * dt;
-    c[o + CVX] *= 1 - 1.5 * dt;
+    c[o + CVY] -= (e.estilo.brillos ? GRAVEDAD_BRILLO : GRAVEDAD) * dt;
+    c[o + CVX] *= 1 - (e.estilo.brillos ? 2.4 : 1.5) * dt;
+    if (e.estilo.brillos) c[o + CVY] *= 1 - 1.2 * dt;
     c[o + CX] += c[o + CVX] * dt;
     c[o + CY] += c[o + CVY] * dt;
     i++;
@@ -391,7 +421,7 @@ export function viva(e: Estela): boolean {
 // Búfer de trabajo compartido: bolitas de humo ya resueltas en pantalla.
 const MAX_B = MAX_PUNTOS * 4;
 const bX = new Int16Array(MAX_B), bY = new Int16Array(MAX_B), bR = new Int8Array(MAX_B);
-const bE = new Int8Array(MAX_B), bA = new Int8Array(MAX_B), bL = new Int8Array(MAX_B);
+const bE = new Int8Array(MAX_B), bA = new Int8Array(MAX_B), bL = new Int8Array(MAX_B), bC = new Int8Array(MAX_B);
 // Polilínea de la cinta de fuego (mundo y luego pantalla).
 const MAX_F = 12;
 const fX = new Float32Array(MAX_F), fY = new Float32Array(MAX_F);
@@ -410,8 +440,9 @@ export function dibujarEstela(
   const W = g.canvas.width + MARGEN, H = g.canvas.height + MARGEN;
   g.imageSmoothingEnabled = false;
 
+  const arco = e.estilo.arcoiris && pal.subs.length > 0;
   // 1) Resolver las bolitas de humo, de la más vieja a la más nueva.
-  let nb = 0, px = 0, py = 0, pr = -1, pe = 0;
+  let nb = 0, px = 0, py = 0, pr = -1, pe = 0, pc = 0;
   for (let k = e.n - 1; k >= 0; k--) {
     const o = ((e.cabeza - 1 - k + e.cap) % e.cap) * PS;
     const edad = p[o + PEDAD];
@@ -440,6 +471,7 @@ export function dibujarEstela(
     }
     const ri = Math.round(r);
     const et = u < 0.12 ? 0 : u < 0.45 ? 1 : 2;
+    const col = arco ? p[o + PCOL] : 0;
     if (pr >= 0 && a === 4 && k > 0) {
       const dx = sx - px, dy = sy - py;
       const d = Math.abs(dx) + Math.abs(dy);
@@ -455,6 +487,7 @@ export function dibujarEstela(
         bE[nb] = f < 0.5 ? pe : et;
         bA[nb] = 4;
         bL[nb] = 0;
+        bC[nb] = f < 0.5 ? pc : col;
         nb++;
       }
     }
@@ -465,12 +498,14 @@ export function dibujarEstela(
       bE[nb] = et;
       bA[nb] = a;
       bL[nb] = p[o + PID] % 2 ? 0 : 1;
+      bC[nb] = col;
       nb++;
     }
     px = sx;
     py = sy;
     pr = ri;
     pe = et;
+    pc = col;
   }
 
   // 1a) Humo que se desvanece: bolitas sueltas con su alfa (detrás).
@@ -478,16 +513,17 @@ export function dibujarEstela(
     const a = bA[i];
     if (a === 4) continue;
     g.globalAlpha = alfa0 * a * 0.25;
-    pon(g, pal, HUMO_LINEA, bE[i], bR[i], bX[i], bY[i]);
-    pon(g, pal, HUMO_CUERPO, bE[i], bR[i], bX[i], bY[i]);
+    const q = arco ? pal.subs[bC[i]] : pal;
+    pon(g, q, HUMO_LINEA, bE[i], bR[i], bX[i], bY[i]);
+    pon(g, q, HUMO_CUERPO, bE[i], bR[i], bX[i], bY[i]);
   }
   g.globalAlpha = alfa0;
   // 1b) Humo opaco: todos los contornos, luego todos los cuerpos y por último
   // los brillos (uno de cada dos puntos: lomitos de nube, no una oruga).
-  for (let i = 0; i < nb; i++) if (bA[i] === 4) pon(g, pal, HUMO_LINEA, bE[i], bR[i], bX[i], bY[i]);
-  for (let i = 0; i < nb; i++) if (bA[i] === 4) pon(g, pal, HUMO_CUERPO, bE[i], bR[i], bX[i], bY[i]);
+  for (let i = 0; i < nb; i++) if (bA[i] === 4) pon(g, arco ? pal.subs[bC[i]] : pal, HUMO_LINEA, bE[i], bR[i], bX[i], bY[i]);
+  for (let i = 0; i < nb; i++) if (bA[i] === 4) pon(g, arco ? pal.subs[bC[i]] : pal, HUMO_CUERPO, bE[i], bR[i], bX[i], bY[i]);
   for (let i = 0; i < nb; i++)
-    if (bA[i] === 4 && bL[i] && bR[i] >= 3) pon(g, pal, HUMO_LUZ, bE[i], bR[i] - 2, bX[i] - 1, bY[i] - 1);
+    if (bA[i] === 4 && bL[i] && bR[i] >= 3) pon(g, arco ? pal.subs[bC[i]] : pal, HUMO_LUZ, bE[i], bR[i] - 2, bX[i] - 1, bY[i] - 1);
 
   const motor = e.encendido && !e.suelto;
   const parpadeo = (Math.floor(t * 30) + e.fase) % 3;
@@ -543,15 +579,27 @@ export function dibujarEstela(
 
   // 3) Chispas (siguen aunque el motor se apague, hasta que caen).
   const c = e.c;
+  const brillos = e.estilo.brillos;
+  const tic = Math.floor(t * 20);
   for (let i = 0; i < e.cn; i++) {
     const o = i * CS;
     const u = c[o + CEDAD] / c[o + CVIDA];
     const q = aPantalla(c[o + CX], c[o + CY]);
     const x = Math.round(q[0]), y = Math.round(q[1]);
-    if (u < 0.35) pon(g, pal, CHISPA, 0, 0, x, y);
-    else if (u < 0.7) pon(g, pal, CHISPA, 1, 0, x, y);
-    else if ((Math.floor(t * 20) + i) % 2) {
-      g.fillStyle = pal.brillo;
+    const k = c[o + CCOL];
+    const cp = k >= 0 && k < pal.subs.length ? pal.subs[k] : pal;
+    if (brillos) {
+      // purpurina: titila entre estrellita, punto blanco y nada
+      const f = (tic + i * 3) % 4;
+      if (u < 0.5 && f < 2) pon(g, cp, CHISPA, f === 0 ? 0 : 1, 0, x, y);
+      else if (f !== 3) {
+        g.fillStyle = f === 2 ? '#ffffff' : cp.brillo;
+        g.fillRect(x, y, 1, 1);
+      }
+    } else if (u < 0.35) pon(g, cp, CHISPA, 0, 0, x, y);
+    else if (u < 0.7) pon(g, cp, CHISPA, 1, 0, x, y);
+    else if ((tic + i) % 2) {
+      g.fillStyle = cp.brillo;
       g.fillRect(x, y, 1, 1);
     }
   }
